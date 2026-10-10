@@ -532,9 +532,9 @@ class KtorAdministrativeSettingsRepositoryTest {
     fun invalidInputStopsBeforeNetwork() = runBlocking {
         val harness = Harness()
 
-        val result = harness.repository.updateLogCapacity(context(), 1024L * 1024L - 1L)
+        val result = harness.repository.updateLogRetention(context(), 0)
 
-        assertEquals("INVALID_LOG_CAPACITY", assertIs<AdministrativeSettingsFailure>(result).error.code)
+        assertEquals("INVALID_LOG_RETENTION_DAYS", assertIs<AdministrativeSettingsFailure>(result).error.code)
         assertEquals(emptyList(), harness.requests)
     }
 
@@ -676,7 +676,7 @@ class KtorAdministrativeSettingsRepositoryTest {
     fun logExportReadsEveryPageAndPreservesFilters() = runBlocking {
         fun page(number: Int, ids: IntRange): String {
             val events = ids.joinToString(",") { id ->
-                """{"id":"event-$id","level":"error","source":"auth","actorType":"user","actorId":null,"action":"login","targetType":null,"targetId":null,"message":"Failed login","metadata":{},"createdAt":"2026-09-09T00:00:00Z"}"""
+                """{"id":"event-$id","level":"error","source":"auth","actorType":"user","actorId":null,"action":"login","message":"Failed login","metadata":{},"createdAt":"2026-09-09T00:00:00Z"}"""
             }
             return EVENTS.replace("\"events\":[]", "\"events\":[$events]")
                 .replace("\"page\":1", "\"page\":$number")
@@ -695,6 +695,7 @@ class KtorAdministrativeSettingsRepositoryTest {
             assertEquals("error", request.query["level"])
             assertEquals("auth", request.query["source"])
             assertEquals("reader", request.query["search"])
+            assertEquals(null, request.query["targetType"])
         }
     }
 
@@ -816,8 +817,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val LIBRARY_SCAN_SETTINGS = """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":1440}}"""
         const val LIBRARY_SCAN_SETTINGS_UPDATED = """{"ok":true,"data":{"watchEnabled":false,"intervalMinutes":0}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
-        const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""
-        const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"minBytes":1048576,"maxBytes":104857600}}"""
+        const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"retentionDays":3,"minimumLevel":"error"},"facets":{"sources":[],"levels":[]}}}"""
+        const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"retentionDays":3,"minimumLevel":"error"},"minDays":1,"maxDays":365}}"""
         const val KINDLE_TASK_PAYLOAD = """{"ok":true,"data":{"task":{"id":"task-1","userId":"user-1","bookId":"book-1","resourceId":"resource-1","assetId":"asset-1","bookTitle":"Book","resourceTitle":"EPUB","fileName":"book.epub","format":"EPUB","mimeType":"application/epub+zip","sizeBytes":42,"senderEmail":"sender@example.com","recipientEmail":"reader@kindle.com","subject":"Book","smtpHost":"smtp.example.com","smtpPort":587,"smtpSecurity":"starttls","smtpUsername":"reader","messageId":null,"status":"queued","attemptCount":0,"nextAttemptAt":null,"errorMessage":null,"startedAt":null,"sentAt":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z","canCancel":true,"canRetry":false,"canDelete":false}}}"""
     }
 }

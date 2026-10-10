@@ -267,4 +267,4 @@ def test_preflight_failure_records_public_cause_in_installation_log(
         runpy.run_path(str(Path(update_install.__file__)), run_name="__main__")
     assert result.value.code == 1
     assert "preflight=INVALID_INSTALL_REQUEST" in log.read_text()
-    assert "invalid-private-value" not in log.read_text()
+    assert "invalid-private-value" in log.read_text()

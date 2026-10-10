@@ -10,7 +10,6 @@ from app.bootstrap.automation import build_automation_authorizer, build_grant_ma
 from app.core.auth import create_session
 from app.models import Library
 from app.models.auth import UserLibraryAccess
-from app.models.settings import SystemEvent
 from app.modules.automation.domain.access import (
     ALL_SCOPES,
     AutomationAccessError,
@@ -28,6 +27,7 @@ from tests.integration.modules.automation.test_management_http import (
     grant_request,
     sign_in,
 )
+from tests.support.log_events import log_records
 
 
 def test_vault_binding_corruption_and_immutable_key(tmp_path):
@@ -161,7 +161,7 @@ def test_reveal_cookie_owner_cache_revocation_and_service_off(
     assert client.post(path, headers=ORIGIN).json()["error"]["code"] == "GRANT_INACTIVE"
     db_session.expire_all()
     assert db_session.get(AutomationGrantRow, grant_id).token_ciphertext is None
-    for event in db_session.scalars(select(SystemEvent)):
+    for event in log_records():
         assert token not in str((event.message, event.metadata_json))
     assert token not in caplog.text
 

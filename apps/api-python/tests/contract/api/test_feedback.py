@@ -5,14 +5,14 @@ from hashlib import sha256
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.bootstrap.system import prepare_system_event, write_prepared_system_events
 from app.core.auth import hash_password
 from app.models.auth import User
-from app.models.settings import SystemEvent
 from app.modules.feedback.domain import FeedbackReceipt
 from app.modules.feedback.infrastructure import FeedbackDeliveryError
+from tests.support.log_events import log_records
 
 
 def _login(client: TestClient, db: Session, *, manager: bool) -> None:
@@ -43,8 +43,8 @@ def _draft(event_id: str | None = None) -> dict[str, object]:
 
 
 def test_feedback_preview_requires_login_and_log_requires_manager(client: TestClient, db_session: Session) -> None:
-    event = SystemEvent(level="error", source="reader", action="open", message="Could not open", metadata_json={"taskId": "task-a"})
-    db_session.add(event)
+    event = prepare_system_event(level="error", source="reader", action="open", message="Could not open", metadata={"taskId": "task-a"})
+    write_prepared_system_events(db_session, (event,))
     db_session.commit()
     draft = _draft(event.id)
     assert client.post("/api/feedback/preview", json=draft).status_code == 401
@@ -56,21 +56,23 @@ def test_feedback_preview_requires_login_and_log_requires_manager(client: TestCl
     assert "log" not in response.json()["data"]["diagnostics"]
 
 
-def test_feedback_preview_is_bounded_and_submission_matches_review(client: TestClient, db_session: Session, monkeypatch) -> None:
+def test_feedback_preview_contains_only_complete_selected_log_and_submission_matches_review(client: TestClient, db_session: Session, monkeypatch) -> None:
     _login(client, db_session, manager=True)
-    selected = SystemEvent(level="error", source="reader", action="open", message="Read failed at 192.168.1.3", target_type="book", target_id="book-a", metadata_json={"taskId": "task-a", "secret": "do-not-send", "diagnostics": {"message": "Read failed"}})
-    related = SystemEvent(level="warning", source="reader", action="decode", message="Decode failed", metadata_json={"taskId": "task-a"})
-    unrelated = SystemEvent(level="error", source="reader", action="other", message="Unrelated", metadata_json={"taskId": "task-b"})
-    db_session.add_all([selected, related, unrelated])
+    selected = prepare_system_event(level="error", source="reader", action="open", message="Read failed at 192.168.1.3", metadata={"taskId": "task-a", "secret": "do-not-send", "diagnostics": {"message": "Read failed", "traceback": "raw password=test-value\n" + "完整堆栈" * 20_000}})
+    related = prepare_system_event(level="warning", source="reader", action="decode", message="Decode failed", metadata={"taskId": "task-a"})
+    unrelated = prepare_system_event(level="error", source="reader", action="other", message="Unrelated", metadata={"taskId": "task-b"})
+    write_prepared_system_events(db_session, (selected, related, unrelated))
     db_session.commit()
     draft = _draft(selected.id)
     response = client.post("/api/feedback/preview", json=draft)
     assert response.status_code == 200, response.text
     preview = response.json()["data"]
     events = preview["diagnostics"]["log"]["events"]
-    assert {row["id"] for row in events} == {selected.id, related.id}
+    assert {row["id"] for row in events} == {selected.id}
+    assert events[0]["traceback"] == selected.metadata["diagnostics"]["traceback"]
     assert "do-not-send" not in json.dumps(preview)
-    assert "192.168.1.3" not in json.dumps(preview)
+    assert "192.168.1.3" in json.dumps(preview)
+    assert "relatedBooks" not in preview["diagnostics"]["log"]
     assert preview["diagnostics"]["environment"]["appVersion"]
     assert preview["diagnostics"]["environment"]["installationMethod"] == "手动安装"
     assert preview["diagnostics"]["environment"]["userAgent"] == "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/130.0"
@@ -131,10 +133,10 @@ def test_official_site_failure_is_diagnosed_without_exposing_feedback(client: Te
     monkeypatch.setattr("app.modules.feedback.presentation.send_to_official_site", broken_transport)
     response = client.post("/api/feedback", data={"draft": json.dumps({**draft, "previewHash": preview["previewHash"], "submissionKey": str(uuid4())})})
     assert response.status_code == 503
-    assert response.headers.get("X-Error-Id")
+    assert "X-Error-Id" not in response.headers
     assert "Private feedback body" not in response.text
     db_session.expire_all()
-    logged = db_session.scalars(select(SystemEvent).where(SystemEvent.action == "feedback.forward_failed")).all()
+    logged = [row for row in log_records() if row.action == 'feedback.forward_failed']
     assert logged
     assert "connection refused" in json.dumps(logged[-1].metadata_json)
     assert "Private feedback body" not in json.dumps(logged[-1].metadata_json)

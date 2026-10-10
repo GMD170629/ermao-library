@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import (
     DiagnosticSnapshot,
+    capture_exception,
     deferred_exception_persistence,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
@@ -82,11 +83,11 @@ class DatabaseAutomationRuntime:
                 try:
                     yield db
                 except Exception as error:
+                    capture_exception(error, persist=False)
                     original = prepare_exception_diagnostic(
                         logger,
                         "automation.invocation_failed",
                         error,
-                        context={"stage": stage},
                         source="automation",
                     )
                     raise
@@ -94,16 +95,11 @@ class DatabaseAutomationRuntime:
                     try:
                         db.close()
                     except Exception as error:
+                        capture_exception(error, persist=False)
                         prepare_exception_diagnostic(
                             logger,
                             "automation.session_close_failed",
                             error,
-                            context={
-                                "stage": "session_close",
-                                "parent_diagnostic_id": original.diagnostic_id
-                                if original
-                                else None,
-                            },
                             source="automation",
                         )
                         if original is None:
@@ -154,12 +150,12 @@ class DatabaseAutomationRuntime:
             with self._session(stage="record_grant_usage") as db:
                 self._usage(db).execute(grant_id)
         except Exception as error:  # noqa: BLE001 - usage telemetry is non-fatal but diagnosed
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "automation.usage_record_failed",
                 error,
                 level="warning",
-                context={"stage": "record_grant_usage", "resource_id": grant_id},
                 source="automation",
                 session_factory=self._sessions,
             )

@@ -7,6 +7,8 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
+from app.core.exception_diagnostics import capture_exception
+
 revision = "0040_periodic_scan_admission"
 down_revision = "0039_generated_metadata_fields"
 branch_labels = None
@@ -39,7 +41,8 @@ def upgrade() -> None:
         return
     try:
         interval = json.loads(stored)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
+        capture_exception(error)
         # Invalid legacy values are outside this migration's normalization scope.
         return
     if type(interval) is int and 5 <= interval <= 1440:

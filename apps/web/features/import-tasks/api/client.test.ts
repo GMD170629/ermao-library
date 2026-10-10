@@ -40,6 +40,20 @@ test('parses import task pagination and summary', () => {
   assert.equal(page.totalPages, 2);
 });
 
+test('fetches the original multiline scan exception without changing its contents', async () => {
+  const originalFetch = globalThis.fetch;
+  const errorSummary = 'RuntimeError: scan failed\nPermissionError: /private/books/book.epub\n' + '原始信息'.repeat(1000);
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true, data: { tasks: [{ ...task, errorSummary }] }
+  }));
+  try {
+    const result = await fetchImportTasks(null, 1, 20);
+    assert.equal(result.tasks[0]?.errorSummary, errorSummary);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('parses canonical library selection and task detail envelopes', () => {
   assert.deepEqual(parseImportLibraries({ libraries: [{ id: 'library-1', name: '主书库', enabled: true }] }), [
     { id: 'library-1', name: '主书库', enabled: true }

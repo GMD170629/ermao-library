@@ -3,6 +3,7 @@
 from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import capture_exception
 from app.modules.metadata.application.opf import (
     DC_NAMESPACE,
     MAX_OPF_BYTES,
@@ -68,6 +69,7 @@ def parse_editable_opf(content: bytes | None) -> tuple[etree._Element, etree._El
             ),
         )
     except etree.XMLSyntaxError as error:
+        capture_exception(error, persist=False)
         raise StandardMetadataError("INVALID_OPF") from error
     if etree.QName(package).localname not in {"package", "metadata"}:
         raise StandardMetadataError("INVALID_OPF")

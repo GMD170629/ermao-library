@@ -7,6 +7,7 @@ from string import Formatter
 from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.contracts.file_operation import FileIdentity
 from app.contracts.file_operation import FileOperationError as FileMoveError
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.domain.source_nodes import (
     SourceNodeRelativePath,
     parse_source_node_relative_path,
@@ -65,6 +66,7 @@ def render_move_template(template: str, values: dict[str, str]) -> str:
     try:
         parts = tuple(Formatter().parse(template))
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise FileMoveError("INVALID_TEMPLATE") from error
     for literal, field, spec, conversion in parts:
         result.append(literal)

@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import (
+    capture_exception,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
     record_exception,
@@ -137,9 +138,9 @@ class LibraryScanCoordinator:
                 enabled=scan_settings.watch_enabled,
             )
         except (OSError, RuntimeError) as error:
+            capture_exception(error, persist=False)
             rebuilt = False
-            record_exception(logger, "library_scan.watcher_unavailable", error,
-                             context={"step": "reconcile_watcher"})
+            record_exception(logger, "library_scan.watcher_unavailable", error)
         if scan_settings.interval_minutes != 0 and (
             not self._started or libraries_changed or rebuilt
         ):
@@ -165,13 +166,13 @@ class LibraryScanCoordinator:
                 )
             )
         except (OSError, RuntimeError, SQLAlchemyError) as error:
-            snapshot = prepare_exception_diagnostic(logger, "library_scan.request_failed", error,
-                                                    context={"library_id": library_id, "step": "request_scan", "stage": trigger})
+            capture_exception(error, persist=False)
+            snapshot = prepare_exception_diagnostic(logger, "library_scan.request_failed", error)
             try:
                 self._uow.recover_after_failure()
             except Exception as recovery_error:
-                record_exception(logger, "library_scan.recovery_failed", recovery_error,
-                                 context={"library_id": library_id, "step": "recover_scan", "parent_diagnostic_id": snapshot.diagnostic_id})
+                capture_exception(recovery_error, persist=False)
+                record_exception(logger, "library_scan.recovery_failed", recovery_error)
                 raise
             finally:
                 persist_exception_diagnostic(logger, snapshot)

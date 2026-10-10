@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal, NotRequired, Protocol, TypedDict
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.resource_commands import LibraryActor
 
 
@@ -312,7 +313,8 @@ class ApplyRecognizedCover:
                 now=now,
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             self._publication.revert(published)
             raise
@@ -484,7 +486,8 @@ class ApplyRecognizedMetadata:
                 if field is RecognizedMetadataField.BOOK_TAGS:
                     next_tags = value if isinstance(value, tuple) else None
                 applied.append(field)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -500,7 +503,8 @@ class ApplyRecognizedMetadata:
                     **({"generated_fields": command.candidate.generated_fields} if command.candidate.generated_fields else {}),
                 )
                 self._unit_of_work.commit()
-            except Exception:
+            except Exception as _caught_error:
+                capture_exception(_caught_error)
                 self._unit_of_work.rollback()
                 raise
         else:
@@ -518,13 +522,10 @@ class ApplyRecognizedMetadata:
                     now=command.now,
                 )
             except Exception as error:  # noqa: BLE001 - metadata remains applied when cover publication fails.
+                capture_exception(error, persist=False)
                 diagnostic = self._diagnostics.prepare(
                     error,
                     event="metadata.cover_apply_failed",
-                    context={
-                        "resource_id": command.resource_id or command.book_id,
-                        "step": "apply_provider_cover",
-                    },
                 )
                 try:
                     self._unit_of_work.rollback()
@@ -614,6 +615,7 @@ class ApplyRecognizedMetadata:
         try:
             return values[field]
         except KeyError as exc:
+            capture_exception(exc, persist=False)
             raise InvalidRecognizedMetadataError(
                 "metadata field is unavailable"
             ) from exc

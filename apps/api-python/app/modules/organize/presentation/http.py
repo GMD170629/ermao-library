@@ -16,7 +16,7 @@ from app.bootstrap.library import book_view, get_book
 from app.bootstrap.organize import organize_job_queries, organize_runs
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.time import timestamp_ms_to_iso
 from app.db.session import get_db
 from app.modules.organize.application.commands import InvalidOrganizeRequestError
@@ -70,11 +70,11 @@ def _parse_json(value: Any, fallback: Any) -> Any:
     try:
         return json.loads(str(value))
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http._parse_json.failed",
             error,
-            context={"stage": "_parse_json"},
         )
         return fallback
 
@@ -99,11 +99,11 @@ def _positive_int(value: Any, fallback: int, maximum: int) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError) as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http._positive_int.failed",
             error,
-            context={"stage": "_positive_int"},
         )
         return fallback
     return min(maximum, max(1, parsed))
@@ -214,11 +214,11 @@ def get_organize_policy_route(
             )
         )
     except ValueError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http.get_organize_policy_route.failed",
             exc,
-            context={"stage": "get_organize_policy_route"},
         )
         return fail(str(exc), status_code=503)
 
@@ -242,11 +242,11 @@ async def update_organize_policy_route(
             data=OrganizePolicyPayload.model_validate({"policy": policy})
         )
     except InvalidOrganizeRequestError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http.update_organize_policy_route.failed",
             exc,
-            context={"stage": "update_organize_policy_route"},
         )
         return fail(str(exc), status_code=400)
 
@@ -267,11 +267,11 @@ def get_organize_candidates_route(
             )
         )
     except ValueError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http.get_organize_candidates_route.failed",
             exc,
-            context={"stage": "get_organize_candidates_route"},
         )
         return fail(str(exc), status_code=503)
 
@@ -426,11 +426,11 @@ def recognize_organize_job_route(
             )
         )
     except InvalidOrganizeRequestError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http.recognize_organize_job_route.failed",
             exc,
-            context={"stage": "recognize_organize_job_route"},
         )
         body = OrganizeErrorBody(message=str(exc))
         if "不存在" in str(exc):
@@ -458,11 +458,11 @@ def delete_organize_job_route(
             )
         )
     except InvalidOrganizeRequestError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.organize.presentation.http.delete_organize_job_route.failed",
             exc,
-            context={"stage": "delete_organize_job_route"},
         )
         body = OrganizeErrorBody(message=str(exc))
         if "不存在" in str(exc):

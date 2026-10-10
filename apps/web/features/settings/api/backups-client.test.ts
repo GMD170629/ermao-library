@@ -25,15 +25,15 @@ test('uploaded incompatible backup retains its stored identity and reason', asyn
   } finally { globalThis.fetch = original; }
 });
 
-test('restore exposes the real bilingual error and diagnostic identifier', async () => {
+test('restore preserves the bilingual error without diagnostic references', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ ok: false, error: { code: 'BACKUP_REQUIRED_FIELD', message: '缺少必填字段：User.id',
-    params: { messageEn: 'Required field is missing: User.id' } } }, { status: 400, headers: { 'X-Error-Id': 'diag-test' } });
+    params: { messageEn: 'Required field is missing: User.id' } } }, { status: 400 });
   try {
     await assert.rejects(restoreBackup(backup.id, new AbortController().signal), (error: unknown) => {
       assert.ok(error instanceof BackupApiError);
-      assert.match(backupErrorMessage(error, 'zh-CN'), /User.id.*\n诊断编号: diag-test/);
-      assert.match(backupErrorMessage(error, 'en-US'), /Required field is missing: User.id\nDiagnostic ID: diag-test/);
+      assert.equal(backupErrorMessage(error, 'zh-CN'), '缺少必填字段：User.id');
+      assert.equal(backupErrorMessage(error, 'en-US'), 'Required field is missing: User.id');
       return true;
     });
   } finally { globalThis.fetch = original; }

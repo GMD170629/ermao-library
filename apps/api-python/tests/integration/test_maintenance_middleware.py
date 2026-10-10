@@ -25,6 +25,7 @@ from app.db.maintenance import (
 )
 from app.main import create_app
 from app.models.settings import SystemEvent, SystemSetting
+from tests.support.log_events import log_records, one_log
 
 
 @dataclass
@@ -190,7 +191,6 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
     maintenance_app: MaintenanceApp, method: str, locale: str
 ) -> None:
     harness = maintenance_app
-    diagnostic_ids: list[str] = []
     with Session(harness.engine) as db, db.begin():
         db.add(
             SystemSetting(
@@ -213,7 +213,7 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
                 },
             }
             assert response.headers["Vary"] == "Cookie"
-            diagnostic_ids.append(response.headers["X-Error-Id"])
+            assert "X-Error-Id" not in response.headers
             assert harness.reached == []
             assert harness.pool.checkedout() == 0
             for safe_method in ("GET", "HEAD", "OPTIONS"):
@@ -223,19 +223,19 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
             assert harness.reached == ["GET", "HEAD", "OPTIONS"]
 
     asyncio.run(exercise())
-    # The maintenance read closes before the independent failure-event write.
+    # File diagnostics must not open another database session.
     assert [phase for phase, _, _ in harness.lifecycle] == [
-        "create", "query", "close", "create", "query", "close"
+        "create", "query", "close"
     ]
-    for lifecycle in (harness.lifecycle[:3], harness.lifecycle[3:]):
+    for lifecycle in (harness.lifecycle,):
         assert len({session_id for _, session_id, _ in lifecycle}) == 1
         thread_ids = {thread_id for _, _, thread_id in lifecycle}
         assert len(thread_ids) == 1
         assert get_ident() not in thread_ids
     with Session(harness.engine) as db:
-        failure = db.get(SystemEvent, diagnostic_ids[0])
+        failure = one_log([row for row in log_records() if 'DATABASE_MAINTENANCE' in row.message])
         assert failure is not None
-        assert failure.metadata_json["outcome"] == "DATABASE_MAINTENANCE"
+        assert "DATABASE_MAINTENANCE" in failure.metadata_json["diagnostics"]["message"]
 
 
 def test_maintenance_query_error_closes_session_and_does_not_allow_write(

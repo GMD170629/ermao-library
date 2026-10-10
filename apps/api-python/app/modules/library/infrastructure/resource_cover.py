@@ -11,7 +11,7 @@ from uuid import uuid4
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import LibraryReadableResourceMetadata
 from app.modules.library.application.metadata_ownership import protect_fields
 from app.modules.library.application.resource_cover import (
@@ -65,16 +65,16 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
         try:
             temporary_path.write_bytes(content)
         except OSError as error:
-            diagnostic_id = record_exception(
+            capture_exception(error, persist=False)
+            record_exception(
                 logging.getLogger(__name__), "library.resource_cover.stage_failed", error,
-                context={"step": "stage_uploaded_cover", "resource_id": resource_id},
             )
             try:
                 temporary_path.unlink(missing_ok=True)
             except OSError as cleanup_error:
+                capture_exception(cleanup_error, persist=False)
                 record_exception(
                     logging.getLogger(__name__), "library.resource_cover.cleanup_failed", cleanup_error,
-                    context={"step": "remove_rejected_cover", "parent_diagnostic_id": diagnostic_id, "resource_id": resource_id},
                 )
             raise
         try:
@@ -85,16 +85,16 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
             if suffix is None:
                 raise InvalidResourceCover("resource cover is not a supported image")
         except Exception as exc:
-            diagnostic_id = record_exception(
+            capture_exception(exc, persist=False)
+            record_exception(
                 logging.getLogger(__name__), "library.resource_cover.validation_failed", exc,
-                context={"step": "validate_uploaded_cover", "resource_id": resource_id},
             )
             try:
                 temporary_path.unlink(missing_ok=True)
             except OSError as cleanup_error:
+                capture_exception(cleanup_error, persist=False)
                 record_exception(
                     logging.getLogger(__name__), "library.resource_cover.cleanup_failed", cleanup_error,
-                    context={"step": "remove_rejected_cover", "parent_diagnostic_id": diagnostic_id, "resource_id": resource_id},
                 )
             if isinstance(exc, (UnidentifiedImageError, Image.DecompressionBombError, InvalidResourceCover)):
                 raise InvalidResourceCover("resource cover could not be validated") from exc
@@ -121,7 +121,8 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
             os.replace(prepared.final_path, backup_path)
         try:
             os.replace(prepared.temporary_path, prepared.final_path)
-        except OSError:
+        except OSError as _caught_error:
+            capture_exception(_caught_error)
             if backup_path is not None and backup_path.exists():
                 os.replace(backup_path, prepared.final_path)
             prepared.temporary_path.unlink(missing_ok=True)
@@ -151,8 +152,9 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
         candidate = (self._storage_root / stored_path).resolve()
         try:
             candidate.relative_to(self._cover_root.resolve())
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: Relative-path containment probe rejects an out-of-root optional cover.
+            capture_exception(_caught_error)
             return
         candidate.unlink(missing_ok=True)
 

@@ -17,7 +17,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import release_read_transaction
 from app.models import (
     LibraryBook,
@@ -196,6 +196,7 @@ def _replace_text(
             command.find if command.regex else re.escape(command.find), flags
         )
     except re.error as error:
+        capture_exception(error, persist=False)
         raise InvalidBulkBookOperationError(f"INVALID_REGEX:{error}") from error
 
     def replace_match(match: re.Match[str]) -> str:
@@ -871,8 +872,9 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
         candidate = (self._storage_root / stored_path).resolve()
         try:
             candidate.relative_to(self._storage_root)
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: Relative-path containment probe excludes an out-of-root optional cover.
+            capture_exception(_caught_error)
             return None
         return candidate if candidate.is_file() else None
 
@@ -894,6 +896,7 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                     image.load()
                     uploaded_image = image.copy()
             except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
+                capture_exception(error, persist=False)
                 raise InvalidBulkBookOperationError("INVALID_COVER_IMAGE") from error
 
         rows = self._db.execute(
@@ -966,8 +969,8 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                         UnidentifiedImageError,
                         Image.DecompressionBombError,
                     ) as error:
-                        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.bulk_operations.prepare_covers.failed", error,
-                                         context={"step": "prepare_covers"})
+                        capture_exception(error, persist=False)
+                        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.bulk_operations.prepare_covers.failed", error)
                         skipped.append(BulkCoverSkipped(book_id, "BOOK_COVER_UNREADABLE"))
                         continue
                 cover_content = self._prepare_cover_image(
@@ -998,7 +1001,8 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 writes.append(
                     _PreparedBookCoverWrite(snapshot, prepared_cover.stored_path)
                 )
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             for item in reversed(publications):
                 self._cover_publication.revert(item.published)
             raise
@@ -1029,7 +1033,8 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 now=now,
                 undoable=False,
             )
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             for item in reversed(publications):
                 self._cover_publication.revert(item.published)
             raise

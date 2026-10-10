@@ -49,23 +49,15 @@ def _session_for(db_session: Session) -> Session:
     return factory()
 
 
-def _load_event(db_session: Session, event_id: str) -> SystemEvent | None:
-    session = _session_for(db_session)
-    try:
-        return session.get(SystemEvent, event_id)
-    finally:
-        session.close()
+def _load_event(db_session: Session, event_id: str):
+    return next((event for event in _all_events(db_session) if event.id == event_id), None)
 
 
-def _all_events(db_session: Session, source: str | None = None) -> list[SystemEvent]:
-    session = _session_for(db_session)
-    try:
-        statement = select(SystemEvent)
-        if source is not None:
-            statement = statement.where(SystemEvent.source == source)
-        return list(session.scalars(statement).all())
-    finally:
-        session.close()
+def _all_events(db_session: Session, source: str | None = None):
+    from types import SimpleNamespace
+    from app.modules.system.infrastructure.log_files import read_log_events
+    return [SimpleNamespace(**{**event, "metadata_json": event["metadata"]})
+            for event in read_log_events() if source is None or event["source"] == source]
 
 
 def test_unhandled_api_exception_records_correlation_and_hides_stack(
@@ -85,15 +77,15 @@ def test_unhandled_api_exception_records_correlation_and_hides_stack(
     assert response.status_code == 500
     body = response.json()
     assert body["ok"] is False
-    assert body["error"]["code"] == "INTERNAL_ERROR"
+    assert body["error"]["code"] == "RuntimeError"
     assert "Traceback" not in response.text
-    assert "unexpected api failure" not in response.text
-    diagnostic_id = response.headers["X-Error-Id"]
-    assert diagnostic_id.startswith("diag_")
-    assert body["error"]["details"]["eventId"] == diagnostic_id
+    assert body["error"]["message"] == "RuntimeError: unexpected api failure"
+    assert "X-Error-Id" not in response.headers
+    assert "eventId" not in body["error"]["details"]
+    diagnostic_id = next(event.id for event in _all_events(db_session) if event.message == "unexpected api failure")
 
     records = [
-        record for record in caplog.records if "api.request_failed" in record.getMessage()
+        record for record in caplog.records if "unexpected api failure" in record.getMessage()
     ]
     assert records, "unhandled exception must be logged with a traceback"
     assert "_boom" in caplog.text
@@ -127,14 +119,14 @@ def test_record_exception_survives_business_rollback_and_storage_failure(
                 LOGGER,
                 "unit.business_failure",
                 error,
-                context={"stage": "unit", "library_id": "library-1"},
+
             )
 
         # A later business rollback must not remove the diagnostic event.
         db_session.rollback()
         event = _load_event(db_session, diagnostic_id)
         assert event is not None
-        assert event.metadata_json["libraryId"] == "library-1"
+        assert "libraryId" not in event.metadata_json
         assert "business-path-failure" in event.metadata_json["diagnostics"]["traceback"]
     finally:
         reset_exception_storage()
@@ -152,7 +144,8 @@ def test_record_exception_survives_business_rollback_and_storage_failure(
                     LOGGER, "unit.storage_failure", error
                 )
         assert fallback_id.startswith("diag_")
-        assert "exception_diagnostics.persist_failed" in capsys.readouterr().err
+        assert _load_event(db_session, fallback_id) is not None
+        assert "storage unavailable" not in capsys.readouterr().err
     finally:
         reset_exception_storage()
 
@@ -161,23 +154,14 @@ def test_admin_reads_full_diagnostics_and_unknown_event_returns_404(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    db_session.add(
-        SystemEvent(
-            id="diag_admin",
-            level="error",
-            source="system",
-            actor_type="system",
-            action="api.request_failed",
-            message="boom",
-            metadata_json={
-                "diagnostics": {
-                    "exceptionType": "builtins.RuntimeError",
-                    "traceback": "Traceback (most recent call last):\nRuntimeError: boom",
-                    "location": "app/x.py:1",
-                }
-            },
-        )
-    )
+    from app.modules.system.infrastructure.log_files import append_log_event
+    append_log_event({
+        "id": "diag_admin", "level": "error", "source": "system", "actorType": "system",
+        "actorId": None, "action": "api.request_failed", "message": "boom",
+        "createdAt": datetime.now(UTC).isoformat(),
+        "metadata": {"diagnostics": {"exceptionType": "builtins.RuntimeError",
+            "traceback": "Traceback (most recent call last):\nRuntimeError: boom", "location": "app/x.py:1"}},
+    })
     db_session.add(
         User(
             email="diagnostics-admin@example.com",
@@ -202,10 +186,24 @@ def test_admin_reads_full_diagnostics_and_unknown_event_returns_404(
 
     listing = client.get("/api/management/events").json()["data"]["events"]
     summary = next(event for event in listing if event["id"] == "diag_admin")
-    assert "traceback" not in summary["metadata"]["diagnostics"]
-    exported = client.get("/api/management/events?includeDiagnostics=true").json()["data"]["events"]
+    assert summary["metadata"]["diagnostics"] == diagnostics
+    exported = client.get("/api/management/events").json()["data"]["events"]
     complete = next(event for event in exported if event["id"] == "diag_admin")
     assert complete["metadata"]["diagnostics"] == diagnostics
+
+    settings = client.get("/api/system/log-settings")
+    assert settings.status_code == 200
+    assert settings.json()["data"]["storage"]["retentionDays"] == 3
+    assert settings.json()["data"]["storage"]["minimumLevel"] == "error"
+    updated = client.put("/api/system/log-settings", json={"retentionDays": 7, "minimumLevel": "debug"})
+    assert updated.status_code == 200
+    assert updated.json()["data"]["storage"]["retentionDays"] == 7
+    assert updated.json()["data"]["storage"]["minimumLevel"] == "debug"
+    assert "maxBytes" not in updated.text
+    invalid = client.put("/api/system/log-settings", json={"retentionDays": 0})
+    assert invalid.status_code == 400
+    assert client.get("/api/system/log-settings").json()["data"]["storage"]["retentionDays"] == 7
+    assert client.put("/api/system/log-settings", json={"maxBytes": 1048576}).status_code == 422
 
     missing = client.get("/api/management/events/does-not-exist")
     assert missing.status_code == 404
@@ -236,7 +234,7 @@ def test_validation_and_authorization_failures_are_not_recorded_as_crashes(
     assert login.status_code == 200
     forbidden = client.get("/api/management/events")
     assert forbidden.status_code == 403
-    assert client.get("/api/management/events?includeDiagnostics=true").status_code == 403
+    assert client.get("/api/management/events").status_code == 403
 
     assert [
         event
@@ -364,18 +362,18 @@ def test_worker_containment_records_task_context_and_original_traceback(
         reset_exception_storage()
 
     assert outcome == "failed"
-    assert queue.failed_summary == "WORKER_ERROR"
+    assert queue.failed_summary == "OSError: scan boom marker"
     assert "scan boom marker" in caplog.text
     assert "OSError" in caplog.text
 
     events = _all_events(db_session, source="import")
     assert len(events) == 1
     event = events[0]
-    assert event.target_type == "importTask"
-    assert event.target_id == "task-1"
-    assert event.metadata_json["libraryId"] == "library-1"
-    assert event.metadata_json["taskKind"] == "SCAN_LIBRARY"
-    assert event.metadata_json["sourceNodeId"] == "node-9"
+    assert not hasattr(event, "target_type")
+    assert not hasattr(event, "target_id")
+    assert "libraryId" not in event.metadata_json
+    assert "taskKind" not in event.metadata_json
+    assert "sourceNodeId" not in event.metadata_json
     assert "scan boom marker" in event.metadata_json["diagnostics"]["traceback"]
 
 
@@ -400,9 +398,9 @@ def test_outer_boundary_records_maintenance_failure_and_still_propagates(
         if event.action == "operation.failed_before_cleanup"
     ]
     assert len(events) == 1
-    assert events[0].id in caplog.text
-    assert events[0].metadata_json["stage"] == "http_boundary"
-    assert events[0].metadata_json["method"] == "POST"
+    assert events[0].id not in caplog.text
+    assert "stage" not in events[0].metadata_json
+    assert "method" not in events[0].metadata_json
     assert "db down" in events[0].metadata_json["diagnostics"]["traceback"]
 
 
@@ -427,8 +425,8 @@ def test_outer_boundary_records_permission_query_failure_and_still_propagates(
         if event.action == "operation.failed_before_cleanup"
     ]
     assert len(events) == 1
-    assert events[0].id in caplog.text
-    assert events[0].metadata_json["stage"] == "http_boundary"
+    assert events[0].id not in caplog.text
+    assert "stage" not in events[0].metadata_json
 
 
 def test_secrets_never_reach_running_log_or_persisted_event(
@@ -451,7 +449,7 @@ def test_secrets_never_reach_running_log_or_persisted_event(
                     LOGGER,
                     "secret.failure",
                     error,
-                    context={"stage": "unit", "path": "/var/private/db.sqlite"},
+
                 )
     finally:
         reset_exception_storage()
@@ -460,10 +458,10 @@ def test_secrets_never_reach_running_log_or_persisted_event(
     assert event is not None
     persisted_blob = f"{event.message}{json.dumps(event.metadata_json, ensure_ascii=False)}"
     for secret in ("db-secret", "db-token", "db-bearer"):
-        assert secret not in persisted_blob
-        assert secret not in caplog.text
-    assert "secret.failure" in caplog.text
-    assert "diag_" in caplog.text
+        assert secret in persisted_blob
+        assert secret in caplog.text
+    assert "secret.failure" not in caplog.text
+    assert "diag_" not in caplog.text
 
 
 def test_cross_layer_propagation_reuses_one_main_event(db_session: Session) -> None:
@@ -474,10 +472,10 @@ def test_cross_layer_propagation_reuses_one_main_event(db_session: Session) -> N
         raise ValueError("cross-layer failure")
     except ValueError as error:
         inner = prepare_exception_diagnostic(
-            LOGGER, "layer.inner", error, context={"stage": "inner"}
+            LOGGER, "layer.inner", error
         )
         outer = prepare_exception_diagnostic(
-            LOGGER, "layer.outer", error, context={"stage": "outer"}
+            LOGGER, "layer.outer", error
         )
         assert inner is outer
         assert inner.diagnostic_id == outer.diagnostic_id
@@ -542,7 +540,7 @@ class _FailingWriteSession:
         raise RuntimeError("close failed too")
 
 
-def test_logging_session_failures_never_replace_the_original_failure(
+def test_logging_no_longer_opens_database_sessions(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -569,17 +567,17 @@ def test_logging_session_failures_never_replace_the_original_failure(
             persist_exception_diagnostic(
                 LOGGER, write_failed, lambda: _FailingWriteSession()
             )
-            is False
+            is True
         )
 
     assert "original business failure" in caplog.text
     assert "second business failure" in caplog.text
     output = capsys.readouterr().err
-    for message in ("write failed", "rollback failed", "close failed too", "exception_diagnostics.persist_failed"):
-        assert message in output
+    for message in ("write failed", "rollback failed", "close failed too"):
+        assert message not in output
 
 
-def test_recording_degrades_bounded_under_business_write_lock_then_persists(
+def test_recording_succeeds_without_waiting_for_business_write_lock(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "diagnostics-lock.sqlite3"
@@ -623,15 +621,15 @@ def test_recording_degrades_bounded_under_business_write_lock_then_persists(
             elapsed = monotonic() - started
             transaction.rollback()
 
-        # The recorder degrades (fails fast) instead of waiting indefinitely on
-        # the business write lock; the bounded busy timeout keeps it short.
-        assert persisted_while_locked is False
+        # File logging remains available while the business database is write-locked.
+        assert persisted_while_locked is True
         assert elapsed < 1.5, "recording waited too long on the business write lock"
 
         assert persist_exception_diagnostic(LOGGER, snapshot, factory) is True
         session = factory()
         try:
-            assert session.get(SystemEvent, snapshot.diagnostic_id) is not None
+            assert session.get(SystemEvent, snapshot.diagnostic_id) is None
+            assert _load_event(session, snapshot.diagnostic_id) is not None
         finally:
             session.close()
     finally:

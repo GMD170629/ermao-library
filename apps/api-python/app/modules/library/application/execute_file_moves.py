@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.contracts.diagnostics import FailureDiagnostics
 from app.contracts.source_relocation import SourceRelocation
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.file_move_operations import require_move_access
 from app.modules.library.application.file_move_plans import (
     CreatedMoveDirectory,
@@ -121,7 +122,6 @@ class ExecuteFileMoveOperation:
                 for index, previous in enumerate(plan.moves)
             )
             publication_uncertain = stage != "QUEUED" or companions_published
-            step = "validate_target"
             try:
                 if plan.execution_version != 3:
                     raise FileMoveError("MOVE_PLAN_REQUIRES_REFRESH")
@@ -131,26 +131,19 @@ class ExecuteFileMoveOperation:
                     if current.cancelled:
                         if companions_published:
                             raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
-                        step = "checkpoint"
                         self.store.checkpoint(
                             operation_id, ordinal, "CANCELLED", self.clock_ms()
                         )
-                        step = "commit"
                         self.uow.commit()
                         continue
-                    step = "authorize_target"
                     require_move_access(plan.actor, move, self.authorize(plan.actor))
                     self.uow.rollback()
-                    step = "validate_index"
                     self.index.validate(move)
                     self.uow.rollback()
-                    step = "validate_files"
                     self.files.validate(move)
-                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "PREPARING", self.clock_ms()
                     )
-                    step = "commit"
                     self.uow.commit()
                     stage = "PREPARING"
                 if stage == "PREPARING":
@@ -170,13 +163,11 @@ class ExecuteFileMoveOperation:
                                 plan.actor, move, self.authorize(plan.actor)
                             )
                             self.uow.rollback()
-                            step = "create_directory"
                             identity = self.files.create_directory(
                                 move.destination.root, relative, destination
                             )
                             saved = CreatedMoveDirectory(relative, identity)
                             self.store.record_directory(operation_id, ordinal, saved)
-                            step = "commit"
                             self.uow.commit()
                             created.append(saved)
                         destination = DestinationInspection(
@@ -184,41 +175,33 @@ class ExecuteFileMoveOperation:
                         )
                     if created:
                         move = replace(move, destination_inspection=destination)
-                    step = "inspect_publication"
                     published = self.files.is_published(move)
                     publication_uncertain = published or companions_published
                     if not published:
                         require_move_access(
                             plan.actor, move, self.authorize(plan.actor)
                         )
-                        step = "validate_index"
                         self.index.validate(move)
                         cancelled = self.store.execution(operation_id).cancelled
                         self.uow.rollback()
                         if cancelled:
                             if companions_published:
                                 raise FileMoveError("CANCELLED_COMPANIONS_RETAINED")
-                            step = "checkpoint"
                             self.store.checkpoint(
                                 operation_id, ordinal, "CANCELLED", self.clock_ms()
                             )
-                            step = "commit"
                             self.uow.commit()
                             continue
                         publication_uncertain = True
-                        step = "publish_files"
                         self.files.publish(move)
-                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "FILES_PUBLISHED", self.clock_ms()
                     )
-                    step = "commit"
                     self.uow.commit()
                     stage = "FILES_PUBLISHED"
                 if stage == "FILES_PUBLISHED":
                     if not self.files.is_published(move):
                         raise FileMoveError("PUBLISHED_FILE_MISSING")
-                    step = "update_index"
                     node_ids = self.index.apply(
                         move,
                         self.clock(),
@@ -233,51 +216,32 @@ class ExecuteFileMoveOperation:
                         move.source.book_ids,
                         move.destination.identity_policy == "REIMPORT",
                     )
-                    step = "discard_relocated_writebacks"
                     self.discard_writebacks(change)
                     if change.reimport:
-                        step = "delete_source_index"
                         self.delete_source_node(move.source.node_id)
-                    step = "reconcile_imports"
                     self.reconcile_imports(change)
-                    step = "checkpoint"
                     self.store.checkpoint(
                         operation_id, ordinal, "INDEX_UPDATED", self.clock_ms()
                     )
-                    step = "commit"
                     self.uow.commit()
                 self.uow.rollback()
-                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id, ordinal, "COMPLETED", self.clock_ms()
                 )
-                step = "commit"
                 self.uow.commit()
             except Exception as error:  # noqa: BLE001 - diagnose each target before continuing siblings.
+                capture_exception(error, persist=False)
                 diagnostic = self.diagnostics.prepare(
                     error,
                     event="file_move.target_failed",
-                    context={
-                        "operation_id": operation_id,
-                        "target_ordinal": ordinal,
-                        "library_id": move.source.library_id,
-                        "source_node_id": move.source.node_id,
-                        "stage": stage,
-                        "step": step,
-                    },
                 )
                 try:
                     self.uow.rollback()
                 except Exception as rollback_error:
+                    capture_exception(rollback_error, persist=False)
                     secondary = self.diagnostics.prepare(
                         rollback_error,
                         event="file_move.rollback_failed",
-                        context={
-                            "operation_id": operation_id,
-                            "target_ordinal": ordinal,
-                            "step": "rollback",
-                            "parent_diagnostic_id": diagnostic.diagnostic_id,
-                        },
                     )
                     self.diagnostics.persist(secondary)
                     raise
@@ -289,7 +253,6 @@ class ExecuteFileMoveOperation:
                     if publication_uncertain or not known
                     else "FAILED"
                 )
-                step = "checkpoint"
                 self.store.checkpoint(
                     operation_id,
                     ordinal,
@@ -297,8 +260,6 @@ class ExecuteFileMoveOperation:
                     self.clock_ms(),
                     str(error) if known else "FILE_OPERATION_INTERRUPTED",
                 )
-                step = "commit"
                 self.uow.commit()
         self.store.finish(operation_id, self.clock_ms())
-        step = "commit"
         self.uow.commit()

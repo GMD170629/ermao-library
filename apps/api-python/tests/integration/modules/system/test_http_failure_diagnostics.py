@@ -1,3 +1,5 @@
+from tests.support.log_events import find_log, log_records
+
 """Converted HTTP failures remain traceable after transaction cleanup."""
 
 import asyncio
@@ -11,14 +13,13 @@ import pytest
 import uvicorn
 from fastapi import Depends
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.contracts.http import MessageError
 from app.contracts.http_errors import BasicConflictError
 from app.db.session import get_db
 from app.main import create_app
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.modules.system.infrastructure.events import list_system_events_page
 from app.schemas.responses import fail
 
@@ -51,6 +52,8 @@ def test_http_conversion_validation_and_rejection_capture_causes(
         return {"count": count}
 
     with caplog.at_level(logging.WARNING), TestClient(app) as client:
+        from app.modules.system.infrastructure.log_files import save_log_settings
+        save_log_settings(3, "debug")
         converted_response = client.get(
             "/diagnostic-conversion", headers={"X-Request-Id": "request-original-io"}
         )
@@ -60,32 +63,39 @@ def test_http_conversion_validation_and_rejection_capture_causes(
         r.status_code
         for r in (converted_response, conflict_response, validation_response)
     ] == [500, 409, 422]
+    assert converted_response.json()["error"]["code"] == "OSError"
+    assert converted_response.json()["error"]["message"] == (
+        "OSError: [Errno 30] Read-only file system: '/private/library/book.epub'"
+    )
     with factory() as db:
         assert db.get(SystemSetting, "diagnostic-uncommitted") is None
         for response in (converted_response, conflict_response, validation_response):
-            event = db.get(SystemEvent, response.headers["X-Error-Id"])
-            assert event is not None
-            assert event.metadata_json["requestId"] == response.headers["X-Request-Id"]
-        event = db.get(SystemEvent, converted_response.headers["X-Error-Id"])
+            assert "X-Error-Id" not in response.headers
+            assert "X-Request-Id" not in response.headers
+        events = list(log_records())
+        for expected in ("OSError", "BasicConflictError", "RequestValidationError"):
+            assert any(expected in row.metadata_json.get("diagnostics", {}).get("exceptionType", "") for row in events)
+        event = next(row for row in events if row.metadata_json.get("diagnostics", {}).get("message", "").startswith("[Errno 30]"))
+        assert "requestId" not in event.metadata_json
         diagnostic = event.metadata_json["diagnostics"]
         assert diagnostic["exceptionType"] == "OSError"
         assert diagnostic["directException"]["errno"] == errno.EROFS
         assert diagnostic["directException"]["errorName"] == "EROFS"
         assert "Read-only file system" in diagnostic["message"]
-        assert "/private/library" not in str(event.metadata_json)
+        assert "/private/library" in str(event.metadata_json)
         found = list_system_events_page(
-            db, page=1, page_size=20, search="request-original-io"
+            db, page=1, page_size=20, search="Read-only file system"
         )
         assert found.total == 1
         assert found.events[0]["id"] == event.id
         assert (
-            len(db.scalars(select(SystemEvent).where(SystemEvent.id == event.id)).all())
+            len([row for row in log_records() if row.id == event.id])
             == 1
         )
     assert "[Errno 30] Read-only file system" in caplog.text
 
 
-def test_loopback_http_failure_can_be_queried_by_diagnostic_and_request_id(
+def test_loopback_http_failure_can_be_queried_by_message_and_event_id_without_correlation(
     db_session, test_settings, caplog
 ):
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
@@ -124,18 +134,23 @@ def test_loopback_http_failure_can_be_queried_by_diagnostic_and_request_id(
 
     response = asyncio.run(exercise())
     assert response.status_code == 500
-    diagnostic_id = response.headers["X-Error-Id"]
-    assert "/private/library" not in response.text
-    assert "No space" not in response.text
+    assert "X-Error-Id" not in response.headers
+    assert "X-Request-Id" not in response.headers
+    assert response.json()["error"]["code"] == "OSError"
+    assert response.json()["error"]["message"] == (
+        "OSError: [Errno 28] No space left on device: '/private/library/book.epub'"
+    )
     with factory() as db:
-        for search in (diagnostic_id, "real-http-disk-failure"):
-            page = list_system_events_page(db, page=1, page_size=20, search=search)
-            assert page.total == 1
-            assert page.events[0]["id"] == diagnostic_id
-        diagnostic = db.get(SystemEvent, diagnostic_id).metadata_json["diagnostics"]
+        page = list_system_events_page(db, page=1, page_size=20, search="No space left on device")
+        assert page.total == 1
+        diagnostic_id = page.events[0]["id"]
+        assert list_system_events_page(db, page=1, page_size=20, search=diagnostic_id).total == 1
+        assert list_system_events_page(db, page=1, page_size=20, search="real-http-disk-failure").total == 0
+        diagnostic = find_log(diagnostic_id).metadata_json["diagnostics"]
     assert diagnostic["directException"]["errno"] == errno.ENOSPC
     assert "No space left on device" in diagnostic["message"]
-    assert diagnostic_id in caplog.text
+    assert "No space left on device" in caplog.text
+    assert diagnostic_id not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -188,12 +203,16 @@ def test_unknown_value_error_is_internal_failure_not_request_validation(
     monkeypatch.setattr(target, unexpected)
     response = client.request(method, path, json=payload)
     assert response.status_code == 500, response.text
-    assert response.json()["error"]["code"] == "INTERNAL_ERROR"
-    event = db_session.get(SystemEvent, response.headers["X-Error-Id"])
+    assert response.json()["error"]["code"] == "ValueError"
+    assert response.json()["error"]["message"] == (
+        "ValueError: unexpected invariant failure /private/library/private-book.epub"
+    )
+    assert "X-Error-Id" not in response.headers
+    event = next(iter([row for row in log_records() if 'unexpected invariant failure' in row.message]), None)
     assert event is not None
     assert event.metadata_json["diagnostics"]["directException"]["type"] == "ValueError"
     assert (
         "unexpected invariant failure" in event.metadata_json["diagnostics"]["message"]
     )
-    assert event.id in caplog.text
-    assert "private-book" not in response.text + caplog.text
+    assert event.id not in caplog.text
+    assert "private-book" in caplog.text

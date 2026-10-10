@@ -28,9 +28,11 @@ from app.bootstrap.standard_writeback import (
     maintain_standard_writeback,
     process_standard_writeback,
 )
+from app.bootstrap.system import configure_log_directory
 from app.core.config import get_settings
 from app.core.database_errors import is_retryable_sqlite_operation_error
 from app.core.exception_diagnostics import (
+    capture_exception,
     configure_exception_storage,
     emergency_diagnostic,
     exception_diagnostic_boundary,
@@ -51,42 +53,40 @@ logger = logging.getLogger("ermao.import_worker")
 
 def _report_failure(
     stage: str, error: Exception, *, outcome: str = "paused",
-    parent_diagnostic_id: str | None = None,
 ) -> str:
     try:
         return record_exception(
             logger,
             "worker.component_failure",
             error,
-            context={"stage": stage, "outcome": outcome, "parent_diagnostic_id": parent_diagnostic_id},
             source="import",
             action="worker.component_failure",
         )
     except Exception as diagnostic_error:  # noqa: BLE001 - final safe output boundary.
+        capture_exception(diagnostic_error)
         diagnostic_id = f"diag_{uuid4().hex}"
         emergency_diagnostic(
             f"worker.component_failure.{stage}",
             error,
-            diagnostic_id=diagnostic_id,
-            parent_diagnostic_id=parent_diagnostic_id,
+
         )
         emergency_diagnostic(
             "worker.diagnostic_record_failed",
             diagnostic_error,
-            diagnostic_id=f"diag_{uuid4().hex}",
-            parent_diagnostic_id=diagnostic_id,
+
         )
         return diagnostic_id
 
 
 def _cleanup(
-    stage: str, action: Callable[[], object], *, parent_diagnostic_id: str | None = None,
+    stage: str, action: Callable[[], object],
 ) -> bool:
     try:
         action()
         return True
     except Exception as error:  # noqa: BLE001 - release remaining independent resources.
-        _report_failure(stage, error, parent_diagnostic_id=parent_diagnostic_id)
+        capture_exception(error)
+        _report_failure(stage, error)
         return False
 
 
@@ -105,6 +105,7 @@ def main() -> None:
 
     settings = get_settings()
     ready_file = worker_ready_file()
+    configure_log_directory(settings.resolved_storage_root)
     configure_logging()
     configure_exception_storage(BackgroundSessionLocal)
     install_exception_hooks()
@@ -156,6 +157,7 @@ def main() -> None:
             if not stop_event.is_set():
                 metadata_worker.start()
         except Exception as error:  # noqa: BLE001 - optional component boundary.
+            capture_exception(error)
             _report_failure("metadata_start", error)
             if metadata_worker is not None:
                 _cleanup("metadata_stop", metadata_worker.shutdown)
@@ -164,6 +166,7 @@ def main() -> None:
                 organizer_scheduler = OrganizerScheduler(BackgroundSessionLocal)
                 organizer_scheduler.start()
         except Exception as error:  # noqa: BLE001 - optional component boundary.
+            capture_exception(error)
             _report_failure("organizer_start", error)
             if organizer_scheduler is not None:
                 _cleanup("organizer_stop", organizer_scheduler.shutdown)
@@ -182,6 +185,7 @@ def main() -> None:
                     encoding="utf-8",
                 )
             except OSError as error:
+                capture_exception(error)
                 _report_failure("ready_write", error, outcome="continued")
             logger.info("readable_resource.worker.ready")
         next_import_attempt = 0.0
@@ -196,20 +200,19 @@ def main() -> None:
                 with exception_diagnostic_boundary(
                     logger,
                     "worker.attempt_failed",
-                    context={"stage": "upload_cleanup"},
                     session_factory=BackgroundSessionLocal,
                 ):
                     try:
                         with BackgroundSessionLocal() as upload_session:
                             build_automation_uploads(upload_session).cleanup()
                     except Exception as error:  # noqa: BLE001 - maintenance must not stop imports.
+                        capture_exception(error)
                         _report_failure("upload_cleanup", error, outcome="retrying")
                 next_upload_cleanup = monotonic() + 60
             if monotonic() >= next_file_move_attempt:
                 with exception_diagnostic_boundary(
                     logger,
                     "worker.attempt_failed",
-                    context={"stage": "file_move"},
                     session_factory=BackgroundSessionLocal,
                 ):
                     try:
@@ -218,6 +221,7 @@ def main() -> None:
                             file_move_worker = build_file_move_worker(file_move_session)
                         file_move_worker.process_once()
                     except Exception as error:  # noqa: BLE001 - contain one durable file task.
+                        capture_exception(error)
                         _report_failure("file_move", error, outcome="retrying")
                         if file_move_session is not None:
                             _cleanup("file_move_rollback", file_move_session.rollback)
@@ -232,7 +236,6 @@ def main() -> None:
                 with exception_diagnostic_boundary(
                     logger,
                     "worker.attempt_failed",
-                    context={"stage": "import_recovery"},
                     session_factory=BackgroundSessionLocal,
                 ):
                     try:
@@ -243,6 +246,7 @@ def main() -> None:
                         import_session.close()
                         readable_worker = candidate
                     except Exception as error:  # noqa: BLE001 - recovery gates imports only.
+                        capture_exception(error)
                         _report_failure("import_recovery", error)
                         closed = import_session is None or _cleanup(
                             "import_close", import_session.close
@@ -260,7 +264,6 @@ def main() -> None:
                 with exception_diagnostic_boundary(
                     logger,
                     "worker.attempt_failed",
-                    context={"stage": "scan_start"},
                     session_factory=BackgroundSessionLocal,
                 ):
                     try:
@@ -271,6 +274,7 @@ def main() -> None:
                                 uow=pipeline.uow,
                             )
                     except Exception as error:  # noqa: BLE001 - independent scan initialization.
+                        capture_exception(error)
                         _report_failure("scan_start", error)
                         scan_paused = True
                         imports_paused = not _cleanup(
@@ -290,25 +294,24 @@ def main() -> None:
                 with exception_diagnostic_boundary(
                     logger,
                     "worker.attempt_failed",
-                    context={"stage": "scan_tick"},
                     session_factory=BackgroundSessionLocal,
                 ):
                     try:
                         scan_coordinator.tick()
                     except Exception as error:  # noqa: BLE001 - shared UoW must be recovered.
-                        diagnostic_id = _report_failure("scan_tick", error)
+                        capture_exception(error)
+                        _report_failure("scan_tick", error)
                         scan_paused = not is_retryable_sqlite_operation_error(error)
                         next_scan_attempt = monotonic() + 60
                         imports_paused = not _cleanup(
                             "scan_rollback", readable_worker.recover_after_loop_failure,
-                            parent_diagnostic_id=diagnostic_id,
                         )
                         import_heartbeat.pulse(
                             status="paused" if imports_paused else "degraded",
                             error="scan-tick-failed",
                         )
                         if scan_paused or imports_paused:
-                            _cleanup("scan_request_stop", scan_coordinator.request_stop, parent_diagnostic_id=diagnostic_id)
+                            _cleanup("scan_request_stop", scan_coordinator.request_stop)
                     finally:
                         if import_session is not None:
                             _cleanup("scan_session_close", import_session.close)
@@ -317,7 +320,6 @@ def main() -> None:
             with exception_diagnostic_boundary(
                 logger,
                 "worker.attempt_failed",
-                context={"stage": "import_loop"},
                 session_factory=BackgroundSessionLocal,
             ):
                 try:
@@ -329,10 +331,10 @@ def main() -> None:
                         **({"error": "completion-isolated"} if outcome == "isolated" else {}),
                     )
                 except Exception as error:  # noqa: BLE001 - process containment boundary
-                    diagnostic_id = _report_failure("import_loop", error)
+                    capture_exception(error)
+                    _report_failure("import_loop", error)
                     recovered = _cleanup(
                         "import_rollback", readable_worker.recover_after_loop_failure,
-                        parent_diagnostic_id=diagnostic_id,
                     )
                     # Keep the processor; never repeat startup recovery or
                     # unknown filesystem side effects after a failed iteration.

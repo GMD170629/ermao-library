@@ -10,6 +10,7 @@ from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
+from app.core.exception_diagnostics import capture_exception
 from app.core.publication_date import validated_publication_date
 
 MAX_OPF_BYTES = 2 * 1024 * 1024
@@ -68,8 +69,9 @@ def _meta_values(root: etree._Element) -> dict[str, str]:
 def _float(value: str | None) -> float | None:
     try:
         parsed = float(str(value or "").strip())
-    except ValueError:
+    except ValueError as _caught_error:
         # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
+        capture_exception(_caught_error)
         return None
     return parsed if parsed >= 0 else None
 
@@ -157,6 +159,7 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
     try:
         root = etree.fromstring(content, parser)
     except etree.XMLSyntaxError as exc:
+        capture_exception(exc, persist=False)
         raise OpfMetadataError("OPF XML 格式无效") from exc
     if _local_name(root) not in {"package", "metadata"}:
         raise OpfMetadataError("OPF 缺少 package 或 metadata 根元素")

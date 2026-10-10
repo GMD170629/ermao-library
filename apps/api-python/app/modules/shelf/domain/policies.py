@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.shelf.domain.errors import ShelfCollectionPolicyError
 
 
@@ -15,6 +16,7 @@ class ShelfKind(StrEnum):
         try:
             return cls(str(value or cls.STATIC.value).strip().upper())
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise ShelfCollectionPolicyError("INVALID_SHELF_KIND") from error
 
 

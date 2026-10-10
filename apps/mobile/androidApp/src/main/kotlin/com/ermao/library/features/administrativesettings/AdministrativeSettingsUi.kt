@@ -228,7 +228,7 @@ internal fun administrativeSuccessText(operation: AdministrativeOperation, local
         AdministrativeOperation.SaveLibrarySource, AdministrativeOperation.SaveImportPreferences,
         AdministrativeOperation.SaveRecognitionPolicy, AdministrativeOperation.SaveMetadataProviders,
         AdministrativeOperation.SaveMetadataProvider, AdministrativeOperation.SaveOpds,
-        AdministrativeOperation.SaveDetailOrder, AdministrativeOperation.SaveLogCapacity -> AdministrativeCopy.Saved.text(locale)
+        AdministrativeOperation.SaveDetailOrder, AdministrativeOperation.SaveLogRetention -> AdministrativeCopy.Saved.text(locale)
         AdministrativeOperation.RetryKindleTask, AdministrativeOperation.RescanLibrarySource,
         AdministrativeOperation.ScanDirectory, AdministrativeOperation.RetryImportTask,
         AdministrativeOperation.RescanAllSources, AdministrativeOperation.StartRecognition -> AdministrativeCopy.Queued.text(locale)

@@ -35,7 +35,7 @@ from app.core.authorization import (
     read_user_preferences,
 )
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import User
@@ -116,8 +116,6 @@ def _prepared_event(
         level=level,
         actor_type="user",
         actor_id=user.id,
-        target_type="kindleSendTask",
-        target_id=str(task.get("id") or ""),
         metadata={
             "bookId": task.get("bookId"),
             "assetId": task.get("assetId"),
@@ -145,6 +143,7 @@ def read_email_settings(
         db.close()
         return ok(values)
     except EmailSettingsError as exc:
+        capture_exception(exc)
         return fail(str(exc), status_code=400)
 
 
@@ -168,6 +167,7 @@ def update_email_settings(
     try:
         prepared_settings = prepare_email_settings_update(db, values)
     except EmailSettingsError as exc:
+        capture_exception(exc)
         return fail(str(exc), status_code=400)
     db.close()
     prepared_event = prepare_system_event(
@@ -177,7 +177,6 @@ def update_email_settings(
         level="warning",
         actor_type="admin",
         actor_id=actor_id,
-        target_type="settings",
         metadata={"keys": prepared_settings.changed_keys},
     )
     update_email_settings_command(db, prepared_settings, event=prepared_event)
@@ -206,6 +205,7 @@ def smtp_test(
         db.close()
         test_smtp_connection(candidate)
     except (EmailSettingsError, OSError, smtplib.SMTPException) as exc:
+        capture_exception(exc)
         return fail(
             safe_error_message(exc, [str(candidate.get("password") or "")]),
             status_code=400,
@@ -227,6 +227,7 @@ def read_kindle_settings(
     try:
         email_values = get_email_settings(db, include_password=False)
     except EmailSettingsError as exc:
+        capture_exception(exc)
         return fail(str(exc), status_code=400, code="INVALID_EMAIL_SETTINGS")
     preferences = read_user_preferences(db, user.id)
     db.close()
@@ -265,7 +266,8 @@ def update_kindle_settings(
         email = (
             str(EMAIL_ADAPTER.validate_python(raw_email)).lower() if raw_email else ""
         )
-    except ValidationError:
+    except ValidationError as _caught_error:
+        capture_exception(_caught_error)
         return fail(
             "Kindle 邮箱格式不正确", status_code=400, code="INVALID_KINDLE_EMAIL"
         )
@@ -345,6 +347,7 @@ def create_kindle_send_task(
         email_values = get_email_settings(db, include_password=True)
         smtp_config = smtp_connection_settings(email_values)
     except EmailSettingsError as exc:
+        capture_exception(exc)
         return fail(
             str(exc),
             status_code=400,
@@ -435,9 +438,9 @@ def create_kindle_send_task(
     try:
         create_kindle_send_task_command(db, params, event=prepared_event)
     except IntegrityError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__), "kindle.enqueue_failed", error,
-            context={"step": "enqueue_kindle_task", "resource_id": asset_id},
         )
         if (
             getattr(error.orig, "sqlite_errorcode", None) != sqlite3.SQLITE_CONSTRAINT_UNIQUE

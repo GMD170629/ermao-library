@@ -17,12 +17,12 @@ test('uses typed management event and log-setting endpoints', async () => {
     const data = method === 'DELETE'
       ? { deleted: 2 }
       : url.includes('log-settings')
-        ? { storage: { sizeBytes: 10, maxBytes: 1024 } }
+        ? { storage: { sizeBytes: 10, retentionDays: 3, minimumLevel: 'error' } }
         : {
             events: [],
             total: 0,
             totalPages: 1,
-            storage: { sizeBytes: 10, maxBytes: 1024 }
+            storage: { sizeBytes: 10, retentionDays: 3, minimumLevel: 'error' }
           };
     return new Response(JSON.stringify({ ok: true, data }), {
       status: 200,
@@ -33,7 +33,7 @@ test('uses typed management event and log-setting endpoints', async () => {
     const page = await fetchManagementEvents(new URLSearchParams({ page: '1' }));
     assert.equal(page.total, 0);
     assert.equal(await clearManagementEvents(), 2);
-    assert.equal((await updateSystemLogLimit(1024)).maxBytes, 1024);
+    assert.equal((await updateSystemLogLimit(3, 'error')).retentionDays, 3);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -56,8 +56,6 @@ test('loads one event detail with a full diagnostic stack', async () => {
       source: 'import',
       actorType: 'system',
       action: 'api.request_failed',
-      targetType: 'importTask',
-      targetId: 'task-1',
       message: 'boom',
       metadata: {
         stage: 'scan',
@@ -76,6 +74,8 @@ test('loads one event detail with a full diagnostic stack', async () => {
   try {
     const detail = await fetchManagementEventDetail('diag_1');
     assert.equal(detail.id, 'diag_1');
+    assert.equal('targetType' in detail, false);
+    assert.equal('targetId' in detail, false);
     const diagnostics = detail.metadata.diagnostics as { exceptionType: string };
     assert.equal(diagnostics.exceptionType, 'builtins.RuntimeError');
   } finally {

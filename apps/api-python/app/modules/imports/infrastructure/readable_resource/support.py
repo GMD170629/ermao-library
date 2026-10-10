@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import (
     SessionFactory,
+    capture_exception,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
     record_exception,
@@ -34,41 +35,24 @@ class StructuredPipelineLog(PipelineLogPort):
         self,
         event: str,
         *,
-        library_id: str | None = None,
-        resource_id: str | None = None,
-        task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
         error: BaseException | None = None,
         step: str | None = None,
-        source_node_id: str | None = None,
     ) -> None:
         if error is not None:
             record_exception(
                 logger,
                 event,
                 error,
-                context={
-                    "library_id": library_id,
-                    "resource_id": resource_id,
-                    "task_id": task_id,
-                    "stage": stage,
-                    "outcome": outcome,
-                    "step": step or stage,
-                    "source_node_id": source_node_id,
-                },
                 source="import",
-                target_type="importTask",
-                target_id=task_id,
+
                 session_factory=self._session_factory,
             )
             return
         logger.info(
             event,
             extra={
-                "library_id": library_id,
-                "resource_id": resource_id,
-                "task_id": task_id,
                 "stage": stage,
                 "outcome": outcome,
             },
@@ -99,22 +83,25 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
             yield
             self._session.commit()
         except Exception as error:
+            capture_exception(error)
             if before_rollback is not None:
                 try:
                     before_rollback(error)
                 except Exception as diagnostic_error:  # noqa: BLE001 - retain the original transaction failure
+                    capture_exception(diagnostic_error, persist=False)
                     secondary = prepare_exception_diagnostic(
                         logger, "readable_resource.before_rollback_diagnostic_failed",
-                        diagnostic_error, context={"stage": "before_rollback"},
+                        diagnostic_error,
                         source="import", action="readable_resource.diagnostic_failed",
                     )
                     persist_exception_diagnostic(logger, secondary)
             try:
                 self._session.rollback()
             except Exception as rollback_error:
+                capture_exception(rollback_error, persist=False)
                 secondary = prepare_exception_diagnostic(
                     logger, "readable_resource.transaction_rollback_failed",
-                    rollback_error, context={"stage": "rollback"},
+                    rollback_error,
                     source="import", action="readable_resource.rollback_failed",
                 )
                 persist_exception_diagnostic(logger, secondary)
@@ -166,16 +153,12 @@ class BestEffortSidecarWriteback(SidecarWritebackPort):
                 },
             )
         except Exception as error:  # noqa: BLE001 - sidecar failure remains observable after primary import.
+            capture_exception(error, persist=False)
             record_exception(
                 logger,
                 "readable_resource.sidecar.failed",
                 error,
                 source="import",
-                context={
-                    "resource_id": resource_id,
-                    "stage": "sidecar",
-                    "outcome": "error",
-                },
             )
 
 

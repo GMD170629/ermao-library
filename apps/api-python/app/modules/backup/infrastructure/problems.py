@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.core.exception_diagnostics import sanitize_diagnostic_text
+from app.core.exception_diagnostics import capture_exception, diagnostic_text
 from app.modules.backup.application.operations import (
     BackupOperationError,
     BackupProblem,
@@ -128,11 +128,11 @@ def failure_problem(error: Exception) -> BackupProblem:
             "数据库操作失败："
             + type(error.orig).__name__
             + ": "
-            + sanitize_diagnostic_text(error.orig)[:500],
+            + diagnostic_text(error.orig)[:500],
             "Database operation failed: "
             + type(error.orig).__name__
             + ": "
-            + sanitize_diagnostic_text(error.orig)[:500],
+            + diagnostic_text(error.orig)[:500],
         )
     if isinstance(error, OSError):
         if error.errno == errno.ENOSPC:
@@ -149,7 +149,7 @@ def failure_problem(error: Exception) -> BackupProblem:
                 "备份文件或操作所需文件不存在",
                 "The backup or a required file does not exist",
             )
-        summary = sanitize_diagnostic_text(error.strerror or type(error).__name__)
+        summary = diagnostic_text(error.strerror or type(error).__name__)
         return problem(
             "BACKUP_IO_ERROR", f"文件读写失败：{summary}", f"File I/O failed: {summary}"
         )
@@ -166,7 +166,7 @@ def failure_problem(error: Exception) -> BackupProblem:
             "Operation and cleanup or rollback failed: "
             + "; ".join(item.message_en for item in recovery_reasons),
         )
-    summary = sanitize_diagnostic_text(str(error))[:500]
+    summary = diagnostic_text(str(error))[:500]
     return problem(
         "BACKUP_OPERATION_FAILED",
         f"{type(error).__name__}：{summary}",
@@ -178,9 +178,11 @@ def failure_problem(error: Exception) -> BackupProblem:
 def backup_stage(stage: str) -> Iterator[None]:
     try:
         yield
-    except BackupOperationError:
+    except BackupOperationError as _caught_error:
+        capture_exception(_caught_error, persist=False)
         raise
     except Exception as error:
+        capture_exception(error, persist=False)
         raise BackupOperationError(
             failure_problem(error),
             stage=stage,

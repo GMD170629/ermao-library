@@ -31,8 +31,6 @@ class SystemEvent(HttpContractModel):
     actor_type: str = Field(alias="actorType")
     actor_id: str | None = Field(alias="actorId")
     action: str
-    target_type: str | None = Field(alias="targetType")
-    target_id: str | None = Field(alias="targetId")
     message: str
     metadata: dict[str, EventMetadataValue]
     created_at: datetime | None = Field(alias="createdAt")

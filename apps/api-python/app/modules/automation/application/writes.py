@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.catalog import AutomationCatalog, scoped_context
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.grants import GrantUnitOfWork
@@ -156,7 +157,8 @@ class AutomationWrites:
                 self._uow.rollback()
                 return previous
             return shelf_result(self._create.execute(command, receipt=receipt))
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -243,7 +245,8 @@ class AutomationWrites:
             if result is None:
                 raise AutomationAccessError("RESOURCE_NOT_FOUND")
             return shelf_result(result)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -275,7 +278,8 @@ class AutomationWrites:
                 ),
             )
             return {"deleted": result, "shelf_id": shelf_id}
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -322,9 +326,11 @@ class AutomationWrites:
             BulkBookAuthorizationError,
             InvalidBulkBookOperationError,
         ) as error:
+            capture_exception(error)
             self._uow.rollback()
             raise AutomationAccessError("RESOURCE_NOT_FOUND") from error
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -401,6 +407,7 @@ class AutomationWrites:
                         raise AutomationAccessError("CONFLICT")
             return bulk_result(self._tags.execute(command, receipt=receipt))
         except InvalidBulkBookOperationError as error:
+            capture_exception(error)
             self._uow.rollback()
             code = (
                 "PROTECTED_FIELD"
@@ -409,9 +416,11 @@ class AutomationWrites:
             )
             raise AutomationAccessError(code) from error
         except (BulkBookAccessError, BulkBookAuthorizationError) as error:
+            capture_exception(error)
             self._uow.rollback()
             raise AutomationAccessError("RESOURCE_NOT_FOUND") from error
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -483,7 +492,8 @@ class AutomationWrites:
                 self._uow.rollback()
                 return previous
             return self._metadata.execute(actor, changes, receipt=receipt)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -572,6 +582,7 @@ class AutomationWrites:
                 Scope.BOOKS_WRITE in access.permissions.scopes,
             )
             return self._metadata.execute(actor, changes, receipt=receipt)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise

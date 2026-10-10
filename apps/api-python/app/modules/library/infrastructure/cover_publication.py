@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.cover_publication import (
     PreparedCoverPublication,
 )
@@ -61,6 +62,7 @@ class RemoteCoverPublication:
             ValueError,
             Image.DecompressionBombError,
         ) as exc:
+            capture_exception(exc)
             temporary_path.unlink(missing_ok=True)
             raise ValueError("Remote cover could not be validated") from exc
         final_path = target_dir / f"{book_id}{suffix}"

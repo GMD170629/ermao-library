@@ -846,11 +846,11 @@ internal fun JsonElement.toHealthRun(): HealthRun =
     objectValue("INVALID_HEALTH_PAYLOAD").expectKeys("run", "created").requiredObject("run").toHealthRun()
 
 internal fun JsonElement.toEventStorage(): EventStorage {
-    val storage = objectValue("INVALID_EVENT_STORAGE").expectKeys("deleted", "sizeBytes", "maxBytes", "lastPrunedAt")
+    val storage = objectValue("INVALID_EVENT_STORAGE").expectKeys("deleted", "sizeBytes", "retentionDays", "minimumLevel")
     return EventStorage(
         sizeBytes = storage.requiredLong("sizeBytes"),
-        maximumBytes = storage.requiredLong("maxBytes"),
-        lastPrunedAt = if (storage.containsKey("deleted")) null else storage.requiredNullableString("lastPrunedAt"),
+        retentionDays = storage.requiredInt("retentionDays"),
+        minimumLevel = storage.requiredString("minimumLevel"),
     )
 }
 
@@ -862,7 +862,7 @@ internal fun JsonElement.toManagementEventPage(): ManagementEventPage {
     return ManagementEventPage(
         events = root.requiredArray("events").map { element ->
             val event = element.objectValue("INVALID_MANAGEMENT_EVENT").expectKeys(
-                "id", "level", "source", "actorType", "actorId", "action", "targetType", "targetId", "message", "metadata", "createdAt",
+                "id", "level", "source", "actorType", "actorId", "action", "message", "metadata", "createdAt",
             )
             ManagementEvent(
                 id = event.requiredString("id"),
@@ -871,8 +871,6 @@ internal fun JsonElement.toManagementEventPage(): ManagementEventPage {
                 actorType = event.requiredString("actorType"),
                 actorId = event.requiredNullableString("actorId"),
                 action = event.requiredString("action"),
-                targetType = event.requiredNullableString("targetType"),
-                targetId = event.requiredNullableString("targetId"),
                 message = event.requiredString("message"),
                 metadata = event.requiredObject("metadata").mapValues { (_, value) -> value.toEventMetadataValue() },
                 createdAt = event.requiredNullableString("createdAt"),
@@ -900,11 +898,11 @@ internal fun JsonElement.toClearedManagementEvents(): ClearedManagementEvents {
 }
 
 internal fun JsonElement.toLogSettings(): LogSettings {
-    val root = objectValue("INVALID_LOG_SETTINGS").expectKeys("storage", "minBytes", "maxBytes")
+    val root = objectValue("INVALID_LOG_SETTINGS").expectKeys("storage", "minDays", "maxDays")
     return LogSettings(
         storage = root.requiredObject("storage").toEventStorage(),
-        minimumBytes = root.optionalLong("minBytes"),
-        maximumBytes = root.optionalLong("maxBytes"),
+        minimumDays = root.optionalInt("minDays"),
+        maximumDays = root.optionalInt("maxDays"),
     )
 }
 

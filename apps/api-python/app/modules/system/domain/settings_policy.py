@@ -8,6 +8,8 @@ from app.contracts.automation import AUTOMATION_SETTINGS_KEY
 
 SENSITIVE_SYSTEM_SETTING_KEYS = frozenset(
     {
+        "system.logs.maxBytes",
+        "events.lastPrunedAt",
         "email.smtp.password",
     }
 )

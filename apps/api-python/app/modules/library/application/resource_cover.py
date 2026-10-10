@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.resource_commands import (
     BookNotFoundError,
     LibraryActor,
@@ -129,7 +130,8 @@ class UploadResourceCover:
                 now=command.now,
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             self._publication.revert(published)
             raise

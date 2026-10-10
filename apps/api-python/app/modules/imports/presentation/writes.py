@@ -28,7 +28,7 @@ from app.bootstrap.system import (
 from app.contracts.http_errors import ErrorResponses
 from app.core.authorization import authorization_context, can_access_library
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db
 from app.models.auth import User
 from app.modules.imports.application.library_paths import InvalidTargetDirectory
@@ -164,11 +164,11 @@ def import_book_files(
     try:
         upload_directory = target_directory_from_path(target_path, "上传")
     except InvalidTargetDirectory as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.imports.presentation.writes.import_book_files.failed",
             exc,
-            context={"stage": "import_book_files"},
         )
         _raise_import_error(str(exc), cause=exc)
     ignored_files = [
@@ -225,24 +225,21 @@ def import_book_files(
             )
         )
     except UploadPublicationError as error:
-        diagnostic_id = record_exception(
+        capture_exception(error, persist=False)
+        record_exception(
             logging.getLogger(__name__),
             "modules.imports.presentation.writes.import_book_files.failed",
             error,
-            context={"stage": "import_book_files"},
         )
         if error.saved_files:
             try:
                 continue_library_import(db, library_id, trigger="UPLOAD")
             except Exception as scan_error:  # noqa: BLE001 - secondary scan failure is diagnosed separately
+                capture_exception(scan_error, persist=False)
                 record_exception(
                     logger,
                     "upload.partial_batch_scan_failed",
                     scan_error,
-                    context={
-                        "stage": "request_scan",
-                        "parent_diagnostic_id": diagnostic_id,
-                    },
                 )
         if isinstance(error, UploadFileTooLargeError):
             _raise_import_error("上传文件超过允许的大小", cause=error)
@@ -311,11 +308,11 @@ def continue_library(
     try:
         result = continue_library_import(db, library_id)
     except LookupError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.imports.presentation.writes.continue_library.failed",
             error,
-            context={"stage": "continue_library"},
         )
         _raise_import_error("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
     return ContinueImportResponse(
@@ -356,11 +353,11 @@ def continue_library_import_task(
     try:
         result = continue_import_task(db, task_id)
     except LookupError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.imports.presentation.writes.continue_library_import_task.failed",
             error,
-            context={"stage": "continue_library_import_task"},
         )
         _raise_import_error("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
     return ContinueImportResponse(
@@ -403,11 +400,11 @@ def continue_source_node(
             missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
         )
     except LookupError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.imports.presentation.writes.continue_source_node.failed",
             error,
-            context={"stage": "continue_source_node"},
         )
         _raise_import_error("目录不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
     return ContinueImportResponse(

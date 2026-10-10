@@ -7,13 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-DEFAULT_MAX_EVENT_BYTES = 5 * 1024 * 1024
-MIN_MAX_EVENT_BYTES = 1 * 1024 * 1024
-MAX_MAX_EVENT_BYTES = 100 * 1024 * 1024
-MAX_EVENT_MESSAGE_CHARS = 4000
-MAX_EVENT_METADATA_CHARS = 64 * 1024
-LOG_MAX_BYTES_SETTING = "system.logs.maxBytes"
-LAST_PRUNED_AT_SETTING = "events.lastPrunedAt"
+DEFAULT_RETENTION_DAYS = 3
+MIN_RETENTION_DAYS = 1
+MAX_RETENTION_DAYS = 365
+LOG_RETENTION_DAYS_SETTING = "system.logs.retentionDays"
+LOG_LEVELS = ("debug", "info", "warning", "error")
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,142 +22,101 @@ class PreparedSystemEvent:
     actor_type: str
     actor_id: str | None
     action: str
-    target_type: str | None
-    target_id: str | None
     message: str
     metadata: dict[str, Any]
     created_at: datetime
 
 
-def clamp_max_event_bytes(value: object) -> int:
-    if isinstance(value, (str, bytes, bytearray, int, float)):
-        size = int(value)
-    else:
-        size = DEFAULT_MAX_EVENT_BYTES
-    return min(MAX_MAX_EVENT_BYTES, max(MIN_MAX_EVENT_BYTES, size))
-
-
-def parse_max_event_bytes(raw: object | None) -> int:
-    if raw is None:
-        return DEFAULT_MAX_EVENT_BYTES
-    parsed = json.loads(str(raw)) if not isinstance(raw, (int, float)) else raw
-    if not isinstance(parsed, (str, int, float)):
-        raise TypeError(
-            f"Stored log capacity must be numeric, received {type(parsed).__name__}"
-        )
-    return clamp_max_event_bytes(parsed)
-
-
 def normalize_event_level(level: str) -> str:
     safe = "warning" if level == "warn" else level
-    if safe not in {"info", "warning", "error"}:
+    if safe not in LOG_LEVELS:
         return "info"
     return safe
 
 
-def truncate_event_message(message: object) -> str:
-    text = str(message)
-    if len(text) <= MAX_EVENT_MESSAGE_CHARS:
-        return text
-    marker = " …[message truncated]… "
-    budget = MAX_EVENT_MESSAGE_CHARS - len(marker)
-    head = budget // 2
-    tail = budget - head
-    return text[:head] + marker + text[-tail:]
-
-
-def _lift_diagnostic_root(
-    payload: dict[str, Any],
-    truncated: dict[str, Any],
-) -> None:
-    diagnostics = payload.get("diagnostics")
-    if not isinstance(diagnostics, dict):
-        return
-    root: dict[str, Any] = {"truncated": True}
-    for key in (
-        "id",
-        "exceptionType",
-        "location",
-        "stage",
-        "directException",
-        "directCause",
-        "rootCause",
-        "causeStatus",
-        "causeProvided",
-        "chainTruncated",
-        "chainLength",
-        "contexts",
-        "contextProvided",
-        "contextsTruncated",
-        "databaseOperations",
-        "databaseTrace",
-        "members",
-        "memberCount",
-        "relatedIds",
-        "reason",
-        "observedAt",
-    ):
-        value = diagnostics.get(key)
-        if value is not None:
-            root[key] = value
-    message = diagnostics.get("message")
-    if isinstance(message, str):
-        root["message"] = message[:1_000]
-    traceback_text = diagnostics.get("traceback")
-    if isinstance(traceback_text, str):
-        marker = "\n...[traceback truncated]...\n"
-        budget = 2_000 - len(marker)
-        head = budget // 2
-        root["traceback"] = (
-            traceback_text[:head] + marker + traceback_text[-budget + head :]
-        )
-    truncated["diagnostics"] = root
+def prepare_event_message(message: object) -> str:
+    return str(message)
 
 
 def prepare_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
-    payload = metadata or {}
-    serialized = json.dumps(payload, ensure_ascii=False, default=str)
-    if len(serialized) <= MAX_EVENT_METADATA_CHARS:
-        return json.loads(serialized)
-    # Preserve both the beginning (context) and the tail (root cause and
-    # diagnostic footer) instead of silently keeping only the head.
-    marker = "...[metadata truncated]..."
-    budget = MAX_EVENT_METADATA_CHARS
-    head = budget // 2
-    tail = budget - head - len(marker)
-    truncated: dict[str, Any] = {
-        "truncated": True,
-        "originalChars": len(serialized),
-        "preview": serialized[:head],
-        "tail": serialized[-tail:],
-    }
+    payload = json.loads(json.dumps(metadata or {}, ensure_ascii=False, default=str))
+    # Log-only decorations; never traverse exception strings or SQL parameters.
     for key in (
         "requestId",
+        "request_id",
         "taskId",
-        "operationId",
-        "planId",
-        "uploadId",
-        "nodeId",
-        "parentDiagnosticId",
-        "targetIndex",
-        "targetOrdinal",
-        "libraryId",
-        "resourceId",
-        "sourceNodeId",
+        "task_id",
         "taskKind",
-        "stage",
-        "step",
-        "attempt",
-        "databaseTrace",
+        "task_kind",
+        "operationId",
+        "operation_id",
+        "planId",
+        "plan_id",
+        "uploadId",
+        "upload_id",
+        "nodeId",
+        "node_id",
+        "parentDiagnosticId",
+        "parent_diagnostic_id",
+        "libraryId",
+        "library_id",
+        "resourceId",
+        "resource_id",
+        "sourceNodeId",
+        "source_node_id",
+        "bookId",
+        "book_id",
+        "bookIds",
+        "importTaskId",
+        "import_task_id",
+        "correlation",
+        "correlationId",
+        "correlation_id",
+        "targetId",
+        "target_id",
+        "targetType",
+        "target_type",
+        "targetOrdinal",
+        "target_ordinal",
+        "diagnosticId",
+        "diagnostic_id",
+        "relatedIds",
     ):
-        if key in payload:
-            truncated[key] = payload[key]
-    _lift_diagnostic_root(payload, truncated)
-    return truncated
+        payload.pop(key, None)
+    diagnostics = payload.get("diagnostics")
+    if isinstance(diagnostics, dict):
+        diagnostics.pop("id", None)
+        diagnostics.pop("relatedIds", None)
+    # Historical SQL traces also used generated correlation identifiers. Visit
+    # only diagnostic structure, never arbitrary SQL parameter values or text.
+    pending = [payload]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, dict):
+            for key in ("transaction_id", "statement_id", "slowest_statement_id"):
+                item.pop(key, None)
+            for key in (
+                "diagnostics",
+                "chain",
+                "members",
+                "directException",
+                "directCause",
+                "rootCause",
+                "contexts",
+                "databaseOperations",
+                "databaseTrace",
+                "statements",
+                "transaction_statements",
+                "timing",
+            ):
+                if key in item:
+                    pending.append(item[key])
+    return payload
 
 
-def validate_log_max_bytes(max_bytes: int) -> int:
-    size = int(max_bytes)
-    if not MIN_MAX_EVENT_BYTES <= size <= MAX_MAX_EVENT_BYTES:
-        raise ValueError("log-size-out-of-range")
-    return size
+def validate_log_retention_days(days: int) -> int:
+    if isinstance(days, bool) or not isinstance(days, int) or not MIN_RETENTION_DAYS <= days <= MAX_RETENTION_DAYS:
+        raise ValueError("log-retention-days-out-of-range")
+    return days

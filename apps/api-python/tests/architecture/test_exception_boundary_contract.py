@@ -21,6 +21,7 @@ SCRIPT_NAMES = (
     "dependency_environment.py",
 )
 RECORDERS = {
+    "capture_exception",
     "record_exception",
     "prepare_exception_diagnostic",
     "emergency_diagnostic",
@@ -46,21 +47,6 @@ def _direct_nodes(node: ast.AST):
 
 def _call_name(call: ast.Call) -> str:
     return ast.unparse(call.func)
-
-
-def _preserves_error(node: ast.Raise, error_name: str | None) -> bool:
-    if node.exc is None:
-        return True
-    if error_name and isinstance(node.exc, ast.Name) and node.exc.id == error_name:
-        return True
-    return bool(
-        error_name
-        and node.cause is not None
-        and any(
-            isinstance(part, ast.Name) and part.id == error_name
-            for part in ast.walk(node.cause)
-        )
-    )
 
 
 def _source_fail_import(tree: ast.Module) -> set[str]:
@@ -108,13 +94,7 @@ def _recording_helpers(tree: ast.Module, ambient: set[str]) -> set[str]:
                 )
                 for node in nodes
             )
-            propagates = any(
-                isinstance(node, ast.Raise)
-                and node.exc is not None
-                and any(_preserves_error(node, parameter) for parameter in parameters)
-                for node in nodes
-            )
-            if (records or propagates) and function.name not in helpers:
+            if records and function.name not in helpers:
                 helpers.add(function.name)
                 changed = True
     return helpers
@@ -149,7 +129,7 @@ def _silent_paths(statements, recorded_call, error_name, recorded=False):
             if isinstance(statement, ast.Return):
                 silent |= not observed
             elif isinstance(statement, ast.Raise):
-                silent |= not observed and not _preserves_error(statement, error_name)
+                silent |= not observed
             else:
                 remaining.append(observed)
         continuing = remaining
@@ -199,20 +179,19 @@ def _violations(source: str, name: str) -> list[str]:
                     for line in lines[node.lineno - 1 : node.body[0].lineno]
                     if "diagnostics-control-flow:" in line
                 ]
-                if not explanations or any(len(reason) < 12 for reason in explanations):
+                if not name.replace("\\", "/").startswith("scripts/") or not explanations or any(len(reason) < 12 for reason in explanations):
                     failures.append(
                         f"{name}:{node.lineno}: contextlib.suppress stops errors without diagnostics or a justified control-flow annotation"
                     )
     for handler in (
         node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)
     ):
-        # Published migration 0037 is immutable. Its exact legacy optional-JSON
-        # fallback is validation control flow, not a failed database operation.
-        if (
-            name.replace("\\", "/").endswith("app/db/alembic/versions/0037_single_import_execution.py")
-            and ast.unparse(handler) == "except (TypeError, ValueError):\n    work = None"
-        ):
-            continue
+        # The final OS sink cannot log its own failure when stderr and fd 2 both
+        # fail. Only this exact terminal handler is exempt; fault tests exercise it.
+        if name.replace("\\", "/").endswith("app/core/exception_diagnostics.py"):
+            sink = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_write_fd_fallback")
+            if handler in ast.walk(sink) and ast.unparse(handler) == "except OSError:\n    return":
+                continue
         # Only an explanation attached to this handler can exempt it; never a directory.
         first_statement = handler.body[0].lineno
         explanation = [
@@ -220,22 +199,20 @@ def _violations(source: str, name: str) -> list[str]:
             for line in lines[handler.lineno - 1 : first_statement]
             if "diagnostics-control-flow:" in line
         ]
-        if explanation and all(len(reason) >= 12 for reason in explanation):
+        if name.replace("\\", "/").startswith("scripts/") and explanation and all(len(reason) >= 12 for reason in explanation):
             continue
         nodes = [
             node for statement in handler.body for node in _direct_nodes(statement)
         ]
-        propagates = any(
-            isinstance(node, ast.Raise) and _preserves_error(node, handler.name)
-            for node in nodes
-        )
-        hides_cause = any(
-            isinstance(node, ast.Raise)
-            and node.exc is not None
-            and isinstance(node.cause, ast.Constant)
-            and node.cause.value is None
-            for node in nodes
-        )
+        if not name.replace("\\", "/").startswith("scripts/"):
+            for node in nodes:
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"exception", "error", "warning", "warn", "debug"}
+                    and any(part in ast.unparse(node.func.value).lower() for part in ("logger", "logging"))
+                ):
+                    failures.append(f"{name}:{node.lineno}: local exception logging must use the unified entry")
 
         def records_original(call, error_name=handler.name):
             call_name = _call_name(call)
@@ -258,15 +235,6 @@ def _violations(source: str, name: str) -> list[str]:
                         for part in ast.walk(value)
                     )
                 )
-            elif call_name.endswith(".exception") or any(
-                keyword.arg == "exc_info"
-                and not (
-                    isinstance(keyword.value, ast.Constant)
-                    and keyword.value.value is False
-                )
-                for keyword in call.keywords
-            ):
-                return True
             return False
 
         recorded = any(
@@ -276,7 +244,7 @@ def _violations(source: str, name: str) -> list[str]:
             handler.body, records_original, handler.name
         )
         if (
-            (not recorded and (not propagates or hides_cause))
+            not recorded
             or silent_exit
             or any(not state for state in continuing)
         ):
@@ -293,7 +261,7 @@ def test_server_exception_boundaries_keep_diagnostics() -> None:
     failures = [
         failure
         for path in files
-        for failure in _violations(path.read_text(), str(path.relative_to(ROOT)))
+        for failure in _violations(path.read_text(encoding="utf-8"), str(path.relative_to(ROOT)))
     ]
     assert not failures, "\n".join(failures)
 
@@ -302,7 +270,11 @@ def test_server_exception_boundaries_keep_diagnostics() -> None:
     "handler",
     [
         "except OSError: return None",
+        "except OSError: raise",
+        "except OSError as error: raise RuntimeError('FAILED') from error",
+        "except OSError as error: logger.exception('failed')",
         "except Exception as error: logger.error('operation failed')",
+        "except Exception as error: capture_exception(error); logger.error('operation failed')",
         "except Exception as error: raise RuntimeError('FAILED') from None",
         "except Exception as error:\n if retry: raise\n raise RuntimeError('FAILED') from None",
         "except Exception as error: record_exception(logger, 'failed', RuntimeError('FAILED'))",
@@ -323,10 +295,10 @@ def test_guard_rejects_swallowed_or_replaced_errors(handler: str) -> None:
     "handler",
     [
         "except OSError as error: record_exception(logger, 'failed', error)",
-        "except OSError as error: raise RuntimeError('FAILED') from error",
-        "except OSError: raise",
-        "except OSError as error:\n if retry: raise\n record_exception(logger, 'failed', error)\n return None",
-        "except BlockingIOError:\n # diagnostics-control-flow: lock contention is a normal ownership probe.\n return False",
+        "except OSError as error: capture_exception(error); raise RuntimeError('FAILED') from error",
+        "except OSError as error: capture_exception(error); raise",
+        "except OSError as error:\n capture_exception(error)\n if retry: raise\n return None",
+        "except BlockingIOError as error:\n capture_exception(error)\n return False",
     ],
 )
 def test_guard_accepts_diagnostics_and_explicit_control_flow(handler: str) -> None:

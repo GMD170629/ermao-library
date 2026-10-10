@@ -152,5 +152,5 @@ interface AdministrativeSettingsRepository {
     suspend fun loadAllManagementEventsForExport(context: AdministrativeSettingsContext, filter: ManagementEventFilter): AdministrativeSettingsResult<List<ManagementEvent>>
     suspend fun clearManagementEvents(context: AdministrativeSettingsContext): AdministrativeSettingsResult<ClearedManagementEvents>
     suspend fun loadLogSettings(context: AdministrativeSettingsContext): AdministrativeSettingsResult<LogSettings>
-    suspend fun updateLogCapacity(context: AdministrativeSettingsContext, maximumBytes: Long): AdministrativeSettingsResult<EventStorage>
+    suspend fun updateLogRetention(context: AdministrativeSettingsContext, retentionDays: Int): AdministrativeSettingsResult<EventStorage>
 }

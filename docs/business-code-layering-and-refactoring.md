@@ -17,6 +17,7 @@
 
 ## 当前关键所有权
 
+- 系统日志的格式与异常入口归属 `core/exception_diagnostics.py`，每日 JSONL 存储／保留设置归属 `modules/system/infrastructure/log_files.py`；Web 使用 `lib/server-exceptions.ts` 运行时适配，查询／导出／反馈均读取文件，日志不再写入业务数据库。
 - 书库身份为 SourceNode／Book／ReadableResource／ResourceAsset，见[书库结构](library-root-layout.md)。
 - 导入的发现、资源识别和任务处理由 imports 能力与 bootstrap 装配协作，HTTP 与 Worker 复用应用入口。
 - 书库原文件新增／替换复用 imports 保存入口，移动／删除归属 library；MCP 与网页经应用入口调用系统／标准库文件能力，再复用原身份路径更新、删除收尾和 `RequestLibraryScan`，不新增搬运或扫描管线。

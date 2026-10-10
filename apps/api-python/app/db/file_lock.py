@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from typing import BinaryIO
 
+from app.core.exception_diagnostics import capture_exception
+
 if sys.platform == "win32":
     import ctypes
     import msvcrt
@@ -78,8 +80,9 @@ else:
         operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         try:
             fcntl.flock(handle.fileno(), operation | fcntl.LOCK_NB)
-        except BlockingIOError:
+        except BlockingIOError as _caught_error:
             # diagnostics-control-flow: Nonblocking lease contention is the documented False result, not an I/O failure.
+            capture_exception(_caught_error)
             return False
         return True
 

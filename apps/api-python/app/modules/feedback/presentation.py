@@ -15,7 +15,7 @@ from app.api.typed_route import TypedContractRoute
 from app.bootstrap.feedback import build_feedback_diagnostics
 from app.contracts.http import SuccessEnvelope
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
 from app.models.auth import User
 from app.schemas.responses import fail, ok
@@ -55,11 +55,14 @@ def _preview(db: Session, actor: User, settings: Settings, draft: FeedbackDraft)
         if not draft.event_id:
             release_read_transaction(db)
         return prepare_preview(context, build_feedback_diagnostics(db), draft)
-    except FeedbackAccessError:
+    except FeedbackAccessError as _caught_error:
+        capture_exception(_caught_error)
         return fail("需要系统管理权限", 403, code="FEEDBACK_LOG_FORBIDDEN")
-    except FeedbackEventMissing:
+    except FeedbackEventMissing as _caught_error:
+        capture_exception(_caught_error)
         return fail("日志已不可用", 404, code="FEEDBACK_LOG_NOT_FOUND")
-    except ValueError:
+    except ValueError as _caught_error:
+        capture_exception(_caught_error)
         return fail("系统环境信息不完整", 400, code="FEEDBACK_ENVIRONMENT_INVALID")
 
 
@@ -108,7 +111,8 @@ def submit_feedback(
         return error or fail("UNAUTHORIZED", 401)
     try:
         submitted = FeedbackSubmitRequest.model_validate_json(draft)
-    except ValidationError:
+    except ValidationError as _caught_error:
+        capture_exception(_caught_error)
         return fail("反馈内容无效", 422, code="FEEDBACK_INVALID")
     received = files or []
     if len(received) > 5:
@@ -148,11 +152,12 @@ def submit_feedback(
     try:
         receipt = send_to_official_site(payload, tuple(attachments))
     except FeedbackDeliveryError as failure:
-        diagnostic_id = record_exception(
+        capture_exception(failure, persist=False)
+        record_exception(
             LOGGER, "feedback.forward_failed", failure,
-            context={"stage": "forward_to_official_site"}, source="feedback",
+             source="feedback",
         )
         response = fail("反馈暂时无法发送，请稍后重试", 503, code="FEEDBACK_DELIVERY_FAILED")
-        response.headers["X-Error-Id"] = diagnostic_id
+
         return response
     return ok(receipt)

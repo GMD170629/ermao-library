@@ -60,8 +60,6 @@ def _prepared_delete() -> PreparedLibraryDelete:
             actor_type="admin",
             actor_id="user-1",
             action="deleted",
-            target_type="library",
-            target_id="library-1",
             message="deleted",
             metadata={},
             created_at=now,

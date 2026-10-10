@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 
 from app.contracts.mutation_receipt import MutationReceipt
 from app.core.authorization import AuthorizationContext
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.resource_commands import OperationSummary
 
 BulkFindReplaceField = Literal[
@@ -194,7 +195,8 @@ def _execute(
         result = callback()
         unit_of_work.commit()
         return result
-    except Exception:
+    except Exception as _caught_error:
+        capture_exception(_caught_error)
         unit_of_work.rollback()
         raise
 
@@ -226,7 +228,8 @@ class ExecuteBulkMetadata:
             if receipt is not None:
                 receipt.complete(result)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return result
@@ -285,7 +288,8 @@ class ExecuteBulkShelfMembership:
             if receipt is not None:
                 receipt.complete(result)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return result
@@ -338,7 +342,8 @@ class ExecuteBulkCovers:
             prepared = self._port.prepare_covers(command)
             self._port.persist_covers(prepared)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             if prepared is not None:
                 self._port.revert_covers(prepared)

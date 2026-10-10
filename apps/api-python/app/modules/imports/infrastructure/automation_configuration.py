@@ -63,8 +63,6 @@ class AutomationLibraryConfiguration:
             action="automation.library.updated",
             actor_type="user",
             actor_id=user_id,
-            target_type="library",
-            target_id=library_id,
             message="书库配置已更新 / Library configuration updated",
         )
         UpdateLibrary(SqlAlchemyLibraryWriteStore(self.db), self.db).execute(

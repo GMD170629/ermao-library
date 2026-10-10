@@ -7,7 +7,7 @@ import logging
 from urllib.parse import quote
 
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.media.infrastructure.http_streaming import stored_path
 from app.services.default_cover import is_default_cover_path
 
@@ -29,8 +29,8 @@ def versioned_cover_url(
             return ""
         info = path.stat()
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.cover_identity.versioned_cover_url.failed", error,
-                         context={"step": "versioned_cover_url"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.cover_identity.versioned_cover_url.failed", error)
         return ""
     if info.st_size <= 0:
         return ""

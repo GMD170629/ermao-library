@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core import exception_diagnostics as diagnostics
 from app.core.database_errors import is_database_operation_timeout
 from app.core.exception_diagnostics import format_exception_diagnostics
+from app.core.logging_config import DailyFileHandler
 from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
     SQLITE_LOCK_WAIT_SECONDS,
@@ -22,6 +23,7 @@ from app.db.sqlite import (
     create_sqlite_engine,
 )
 from app.models.settings import SystemEvent, SystemSetting
+from tests.support.log_events import log_records, one_log
 
 
 def test_statement_budget_and_lock_wait_share_thirty_second_cap() -> None:
@@ -174,7 +176,7 @@ def test_slow_sql_interrupts_and_transaction_rolls_back_with_connection_reuse(
                 == "time_budget_exceeded"
             )
             trace = format_exception_diagnostics(interrupted.value)["databaseTrace"]
-            assert trace["transaction_id"].startswith("dbtx_")
+            assert "transaction_id" not in trace
             assert any(
                 record["operation"] == "UPDATE" and record["parameters"]
                 for record in trace["transaction_statements"]
@@ -299,13 +301,16 @@ def test_slow_writer_interval_is_logged_with_sql_evidence(
         operation = started.database_operations[0]
         assert 'UPDATE "BudgetProbe"' in operation["statement"]
         assert operation["parameters"] == (0,)
-        assert f"statement_id={json.loads(finished.getMessage().split(' ', 1)[1])['statement_id']}" in started.getMessage()
+        assert "statement_id" not in json.loads(finished.getMessage().split(" ", 1)[1])
+        assert "statement_id=" not in started.getMessage()
         assert json.loads(slow.getMessage().split(" ", 1)[1])["outcome"] == "committed"
     finally:
         engine.dispose()
 
 
 def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Path) -> None:
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     engine = create_sqlite_engine(
         tmp_path / "slow-write-event.sqlite3",
         slow_write_threshold_seconds=0.01,
@@ -317,19 +322,15 @@ def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Pa
             session.execute(sa.insert(SystemSetting).values(key="probe", value="full binding"))
             time.sleep(0.02)
             session.commit()
-        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
-            event_row = check.scalars(
-                sa.select(SystemEvent).where(
-                    SystemEvent.action == "database.write_transaction_slow"
-                )
-            ).one().metadata_json
+        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as _check:
+            event_row = one_log([row for row in log_records() if row.action == 'database.write_transaction_slow']).metadata_json
         trace = event_row["databaseTrace"]
         assert trace["outcome"] == "committed"
         assert trace["duration_ms"] >= 10
         assert trace["statements"][0]["parameters"][:2] == ["probe", "full binding"]
         assert 'INSERT INTO "SystemSetting"' in trace["statements"][0]["statement"]
-        assert trace["statements"][0]["timing"]["statement_id"] == trace["statements"][0]["statement_id"]
-        assert trace["slowest_statement_id"] == trace["statements"][0]["statement_id"]
+        assert "statement_id" not in trace["statements"][0]["timing"]
+        assert "slowest_statement_id" not in trace
     finally:
         engine.dispose()
 
@@ -338,6 +339,8 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     engine = create_sqlite_engine(tmp_path / "default-slow-write-event.sqlite3")
     SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
@@ -348,12 +351,8 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
                 time.sleep(0.15)
                 session.commit()
 
-            with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
-                assert check.scalar(
-                    sa.select(sa.func.count()).select_from(SystemEvent).where(
-                        SystemEvent.action == "database.write_transaction_slow"
-                    )
-                ) == 0
+            with DiagnosticSession(engine, info={"diagnostics_storage": True}) as _check:
+                assert len([row for row in log_records() if row.action == 'database.write_transaction_slow']) == 0
 
             with DiagnosticSession(engine) as session:
                 session.execute(sa.insert(SystemSetting).values(key="slow", value="slow"))
@@ -366,17 +365,17 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
         ]
         assert len(warnings) == 1
         assert json.loads(warnings[0].getMessage().split(" ", 1)[1])["duration_ms"] > 1000
-        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as check:
-            events = check.scalars(
-                sa.select(SystemEvent).where(SystemEvent.action == "database.write_transaction_slow")
-            ).all()
+        with DiagnosticSession(engine, info={"diagnostics_storage": True}) as _check:
+            events = [row for row in log_records() if row.action == 'database.write_transaction_slow']
         assert len(events) == 1
         assert events[0].metadata_json["databaseTrace"]["duration_ms"] > 1000
     finally:
         engine.dispose()
 
 
-def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path: Path) -> None:
+def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path: Path, monkeypatch) -> None:
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [*root.handlers, DailyFileHandler()])
     engine = create_sqlite_engine(tmp_path / "failed-transaction-event.sqlite3")
     SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
@@ -389,8 +388,8 @@ def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path:
                 session.execute(sa.insert(SystemSetting).values(key="duplicate", value="failed binding"))
             except IntegrityError:
                 session.rollback()
-        with Session(engine) as check:
-            event_row = check.scalars(sa.select(SystemEvent)).one()
+        with Session(engine) as _check:
+            event_row = one_log(log_records())
         trace = event_row.metadata_json["diagnostics"]["databaseTrace"]
         assert trace["outcome"] == "failed"
         assert len(trace["transaction_statements"]) == 3

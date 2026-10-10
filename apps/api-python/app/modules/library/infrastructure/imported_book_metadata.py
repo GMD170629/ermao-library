@@ -18,7 +18,7 @@ from app.contracts.local_metadata_snapshot import (
     merge_observations,
 )
 from app.contracts.publication_metadata import PublicationMetadata
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import (
     Library,
@@ -217,8 +217,8 @@ class SqlAlchemyImportedBookMetadata:
                 content = stream.read(10 * 1024 * 1024 + 1)
             return valid_local_cover(content)
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.imported_book_metadata._read_cover.failed", error,
-                             context={"step": "_read_cover"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.imported_book_metadata._read_cover.failed", error)
             return None
 
     def still_current(

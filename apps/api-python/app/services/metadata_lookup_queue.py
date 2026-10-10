@@ -31,6 +31,7 @@ from app.core.database_errors import (
     is_database_operation_timeout,
 )
 from app.core.exception_diagnostics import (
+    capture_exception,
     exception_diagnostic_boundary,
     record_exception,
 )
@@ -115,8 +116,8 @@ def _provider_order(task: dict[str, Any]) -> list[str]:
     try:
         parsed = json.loads(str(task.get("providerOrder") or "[]"))
     except json.JSONDecodeError as error:
-        record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._provider_order.failed", error,
-                         context={"step": "_provider_order", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._provider_order.failed", error)
         parsed = []
     registered = metadata_provider_registry().ids()
     return [str(item) for item in parsed if str(item) in registered]
@@ -191,8 +192,8 @@ def _parse_tags(value: Any) -> list[str]:
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError as error:
-            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._parse_tags.failed", error,
-                             context={"step": "_parse_tags"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._parse_tags.failed", error)
             return []
         return _parse_tags(parsed)
     return []
@@ -236,8 +237,8 @@ def _cleanup_orphan_remote_cover_parts(
             part_path.unlink(missing_ok=True)
             removed += 1
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._cleanup_orphan_remote_cover_parts.failed", error,
-                             context={"step": "_cleanup_orphan_remote_cover_parts"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._cleanup_orphan_remote_cover_parts.failed", error)
     return removed
 
 
@@ -288,12 +289,13 @@ def _publish_remote_cover(prepared: _PreparedRemoteCover) -> None:
     try:
         os.replace(prepared.temporary_path, prepared.final_path)
     except OSError as error:
-        primary_id = record_exception(LOGGER, "metadata.cover_replace_failed", error, context={"step": "replace_cover"})
+        capture_exception(error, persist=False)
+        record_exception(LOGGER, "metadata.cover_replace_failed", error)
         try:
             prepared.temporary_path.unlink(missing_ok=True)
         except OSError as cleanup_error:
-            record_exception(LOGGER, "metadata.cover_cleanup_failed", cleanup_error,
-                             context={"step": "cleanup_cover", "parent_diagnostic_id": primary_id})
+            capture_exception(cleanup_error, persist=False)
+            record_exception(LOGGER, "metadata.cover_cleanup_failed", cleanup_error)
         raise
 
 
@@ -388,8 +390,8 @@ def _prepare_candidate_application(
             book_patch["seriesIndex"] = float(candidate["seriesIndex"])
             applied.append("seriesIndex")
         except (TypeError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._prepare_candidate_application.failed", error,
-                             context={"step": "_prepare_candidate_application", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1, "stage": str(provider)})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue._prepare_candidate_application.failed", error)
     if (
         "cover_path"
         not in protected_metadata_fields(str(book.get("protectedFields") or "[]"))
@@ -401,7 +403,8 @@ def _prepare_candidate_application(
                 str(book["id"]), str(candidate["coverUrl"]).strip(), settings
             )
         except Exception as exc:  # noqa: BLE001 - optional cover failure is isolated.
-            record_exception(LOGGER, "metadata.remote_cover_failed", exc, context={"task_id": str(task["id"]), "step": "download_remote_cover", "attempt": int(task.get("attempts") or 0) + 1})
+            capture_exception(exc, persist=False)
+            record_exception(LOGGER, "metadata.remote_cover_failed", exc)
         else:
             if remote_cover:
                 book_patch.update(
@@ -608,13 +611,7 @@ def _finish_without_match(
     if status in {"FAILED", "NO_PROVIDER"}:
         record_exception(
             LOGGER, "metadata.lookup_rule_failed", MetadataLookupRuleFailure(message),
-            context={
-                "task_id": str(task["id"]), "resource_id": task.get("resourceId"),
-                "book_id": task.get("bookId"), "import_task_id": task.get("importTaskId"),
-                "step": "finish_lookup",
-                "outcome": status, "attempt": int(task.get("attempts") or 0) + 1,
-            },
-            target_type="book", target_id=task.get("bookId"),
+
         )
     candidate_json = json.dumps(candidates, ensure_ascii=False)
     finished_at = _now()
@@ -658,8 +655,7 @@ def _schedule_retry(
                 f"Attempt {attempts} exhausted {len(RETRY_DELAYS_SECONDS)} scheduled retries; last observed result: {message}"
                 + (f"; upstream import state={import_status}" if import_status is not None else "")
             ),
-            context={"task_id": str(task["id"]), "resource_id": task.get("resourceId"), "book_id": task.get("bookId"), "import_task_id": task.get("importTaskId"), "step": "schedule_lookup_retry", "attempt": attempts},
-            target_type="book", target_id=task.get("bookId"),
+
         )
     unresolved = (
         _prepare_unresolved_organize_update(
@@ -724,7 +720,7 @@ def process_metadata_lookup_task(
     task: dict[str, Any],
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> str:
-    with exception_diagnostic_boundary(LOGGER, "metadata.task_failed", context={"task_id": str(task["id"]), "attempt": int(task.get("attempts") or 0) + 1}):
+    with exception_diagnostic_boundary(LOGGER, "metadata.task_failed"):
         try:
             import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
             if import_status is not None and import_status != "SUCCEEDED":
@@ -780,8 +776,8 @@ def process_metadata_lookup_task(
                     author=str(book.get("author") or "") or None,
                 )
             except Exception as error:  # noqa: BLE001 - task failure retries without stale identity.
-                record_exception(LOGGER, "metadata.identity_failed", error,
-                                 context={"step": "identity", "task_id": str(task["id"])})
+                capture_exception(error, persist=False)
+                record_exception(LOGGER, "metadata.identity_failed", error)
                 return _schedule_retry(db, task, identity_failure_message, [])
             if identity is not None:
                 context = {**context, "book": {**context["book"],
@@ -804,8 +800,8 @@ def process_metadata_lookup_task(
                 try:
                     result = _search_provider(db, context, provider, search_title, effective_request_gate)
                 except Exception as exc:  # noqa: BLE001 - contains one provider attempt.
-                    record_exception(LOGGER, "metadata.source_search_failed", exc,
-                                     context={"step": "source_search", "task_id": str(task["id"]), "resource_id": provider})
+                    capture_exception(exc, persist=False)
+                    record_exception(LOGGER, "metadata.source_search_failed", exc)
                     _finish_provider_execution(db, execution_id, status="FAILED", error=str(exc))
                     errors.append(f"{provider}: {exc}")
                     continue
@@ -825,8 +821,8 @@ def process_metadata_lookup_task(
                     identity=identity, candidates=candidates,
                 )
             except Exception as error:  # noqa: BLE001 - failed matching retries with original diagnosis.
-                record_exception(LOGGER, "metadata.match_failed", error,
-                                 context={"step": "match", "task_id": str(task["id"])})
+                capture_exception(error, persist=False)
+                record_exception(LOGGER, "metadata.match_failed", error)
                 match_failure_message = (
                     "AI source matching failed" if configured_locale(db) == "en-US"
                     else "AI 条目对应判断失败"
@@ -896,14 +892,16 @@ def process_metadata_lookup_task(
                         try:
                             _publish_remote_cover(prepared_application.remote_cover)
                         except OSError as publish_error:
-                            primary_id = record_exception(LOGGER, "metadata.cover_publish_failed", publish_error, context={"task_id": str(task["id"]), "step": "publish_cover"})
+                            capture_exception(publish_error, persist=False)
+                            record_exception(LOGGER, "metadata.cover_publish_failed", publish_error)
                             try:
                                 _compensate_remote_cover_publish_failure(
                                     db,
                                     prepared_application,
                                 )
                             except Exception as compensation_error:
-                                record_exception(LOGGER, "metadata.cover_compensation_failed", compensation_error, context={"task_id": str(task["id"]), "step": "compensate_cover", "parent_diagnostic_id": primary_id})
+                                capture_exception(compensation_error, persist=False)
+                                record_exception(LOGGER, "metadata.cover_compensation_failed", compensation_error)
                                 raise RuntimeError(
                                     "REMOTE_COVER_PUBLISH_COMPENSATION_FAILED"
                                 ) from compensation_error
@@ -943,8 +941,8 @@ def process_metadata_lookup_task(
                         writeback_queue.enqueue_prepared_writeback_intents(db, intents)
                     return "COMPLETED"
                 except Exception as exc:  # noqa: BLE001 - contains candidate application.
-                    record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc,
-                                     context={"step": "process_metadata_lookup_task", "task_id": str(task.get("id") or ""), "attempt": int(task.get("attempts") or 0) + 1})
+                    capture_exception(exc, persist=False)
+                    record_exception(logging.getLogger(__name__), "services.metadata_lookup_queue.process_metadata_lookup_task.failed", exc)
                     _discard_remote_cover(
                         prepared_application.remote_cover
                         if prepared_application is not None
@@ -1077,6 +1075,7 @@ class MetadataLookupWorker:
             with self._db_factory() as db:
                 operation(db)
         except Exception as exc:  # noqa: BLE001 - this component remains gated.
+            capture_exception(exc, persist=False)
             state.attempts += 1
             retry = is_database_busy_error(exc) or is_database_operation_timeout(exc)
             state.next_attempt = (
@@ -1091,7 +1090,6 @@ class MetadataLookupWorker:
                 LOGGER,
                 "metadata.recovery_failed",
                 exc,
-                context={"stage": name, "outcome": "retrying" if retry else "paused"},
                 source="metadata",
                 action="metadata.recovery_failed",
             )
@@ -1115,11 +1113,11 @@ class MetadataLookupWorker:
                     db, self._settings, after_id=self._maintenance_cursor
                 )
         except Exception as exc:  # noqa: BLE001 - maintenance cannot revoke readiness.
+            capture_exception(exc, persist=False)
             record_exception(
                 LOGGER,
                 "metadata.maintenance_deferred",
                 exc,
-                context={"stage": "maintenance", "outcome": "deferred"},
                 source="metadata",
                 action="metadata.maintenance_deferred",
             )
@@ -1135,7 +1133,7 @@ class MetadataLookupWorker:
     def _process_iteration(
         self, *, lookup_ready: bool = True, writeback_ready: bool = True
     ) -> bool | None:
-        with exception_diagnostic_boundary(LOGGER, "metadata.iteration_failed", context={}):
+        with exception_diagnostic_boundary(LOGGER, "metadata.iteration_failed"):
             prefer_writeback = self._prefer_writeback
             prefer_preparation = self._prefer_preparation
             self._prefer_writeback = not self._prefer_writeback
@@ -1161,7 +1159,8 @@ class MetadataLookupWorker:
                             )
                         )
                 except OperationalError as error:
-                    record_exception(LOGGER, "metadata.database_attempt_failed", error, context={"step": "iteration", "attempt": attempt + 1})
+                    capture_exception(error, persist=False)
+                    record_exception(LOGGER, "metadata.database_attempt_failed", error)
                     if not is_database_busy_error(error) or attempt == len(
                         DATABASE_BUSY_RETRY_DELAYS_SECONDS
                     ):
@@ -1171,7 +1170,6 @@ class MetadataLookupWorker:
     def _record_iteration_error(self, error: BaseException) -> None:
         record_exception(
             LOGGER, "metadata.iteration_failed", error,
-            context={"step": "iteration", "outcome": "retrying" if is_database_busy_error(error) else "paused"},
             source="metadata",
         )
 
@@ -1207,6 +1205,7 @@ class MetadataLookupWorker:
                         worked = bool(iteration_result) or worked
                         state.error = None
                     except Exception as exc:  # noqa: BLE001 - only the failed path pauses.
+                        capture_exception(exc)
                         self._record_iteration_error(exc)
                         retry = is_database_busy_error(exc)
                         state.error = f"{name}:{'retrying' if retry else 'paused'}:{type(exc).__name__}"

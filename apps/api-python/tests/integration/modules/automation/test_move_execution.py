@@ -27,6 +27,7 @@ from app.modules.metadata.infrastructure.writeback_queue import (
     discard_relocated_writebacks,
 )
 from tests.integration.modules.automation.test_file_reads import file_access
+from tests.support.log_events import log_records
 
 
 def prepare(db, tmp_path, *, dynamic=False, batch=False):
@@ -599,18 +600,13 @@ def test_restart_claims_queued_siblings_without_replaying_failed_move(
     )
     if interrupted:
         assert worker.process_once()  # Quarantine interrupted target before new claims.
-        from app.models import SystemEvent
 
-        event = db_session.scalar(
-            select(SystemEvent).where(
-                SystemEvent.action == "file_move.previous_result_unavailable"
-            )
-        )
+        event = next(iter([row for row in log_records() if row.action == 'file_move.previous_result_unavailable']), None)
         assert event is not None
-        assert event.metadata_json["operationId"] == "operation"
-        assert event.metadata_json["targetOrdinal"] == 0
-        assert event.metadata_json["stage"] == "PREPARING"
-        assert event.metadata_json["step"] == "inspect_recovery_state"
+        assert "operationId" not in event.metadata_json
+        assert "targetOrdinal" not in event.metadata_json
+        assert "stage" not in event.metadata_json
+        assert "step" not in event.metadata_json
         assert event.metadata_json["diagnostics"]["causeStatus"] == "NOT_PROVIDED"
         assert "previous move result was not provided" in caplog.text
         assert (

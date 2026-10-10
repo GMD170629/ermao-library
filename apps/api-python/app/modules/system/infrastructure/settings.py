@@ -12,6 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import capture_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
@@ -53,8 +54,9 @@ def parse_setting_value(raw: Any, fallback: Any = None) -> Any:
     text = str(raw)
     try:
         return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as _caught_error:
         # diagnostics-control-flow: Stored settings support literal strings and JSON; non-JSON text is a successful legacy representation.
+        capture_exception(_caught_error)
         return text if text else fallback
 
 

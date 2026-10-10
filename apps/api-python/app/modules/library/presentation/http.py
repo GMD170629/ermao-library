@@ -58,7 +58,11 @@ from app.core.authorization import (
     can_manage_system,
 )
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import (
+    capture_exception,
+    exception_message,
+    record_exception,
+)
 from app.db.session import get_db, release_read_transaction
 from app.models import LibraryReadableResource
 from app.models.auth import User
@@ -576,6 +580,7 @@ def execute_bulk_book_metadata(
         BulkBookAuthorizationError,
         InvalidBulkBookOperationError,
     ) as error:
+        capture_exception(error)
         return _bulk_operation_response(_bulk_error(error))
     return BulkBookOperationResponse(
         data=BulkBookOperationPayload.model_validate(asdict(result))
@@ -605,12 +610,13 @@ def execute_bulk_book_source_delete(
                 book_ids=tuple(payload.ids),
             )
         )
-    except SourceFileDeletionError:
+    except SourceFileDeletionError as error:
+        capture_exception(error)
         return _bulk_source_delete_response(
             fail(
-                "源文件删除失败，书库节点未删除",
+                exception_message(error),
                 status_code=409,
-                code="SOURCE_FILE_DELETE_FAILED",
+                code=type(error).__name__,
             )
         )
     if not result.ok:
@@ -667,6 +673,7 @@ def preview_bulk_book_find_replace(
         BulkBookAuthorizationError,
         InvalidBulkBookOperationError,
     ) as error:
+        capture_exception(error)
         return _bulk_preview_response(_bulk_error(error))
     return BulkBookFindReplacePreviewResponse(
         data=BulkBookFindReplacePreviewPayload.model_validate(asdict(result))
@@ -698,6 +705,7 @@ def execute_bulk_book_find_replace(
         BulkBookAuthorizationError,
         InvalidBulkBookOperationError,
     ) as error:
+        capture_exception(error)
         return _bulk_operation_response(_bulk_error(error))
     return BulkBookOperationResponse(
         data=BulkBookOperationPayload.model_validate(asdict(result))
@@ -727,6 +735,7 @@ def execute_bulk_book_shelf_membership(
             )
         )
     except (BulkBookAccessError, InvalidBulkBookOperationError) as error:
+        capture_exception(error)
         return _bulk_operation_response(_bulk_error(error))
     return BulkBookOperationResponse(
         data=BulkBookOperationPayload.model_validate(asdict(result))
@@ -755,6 +764,7 @@ def execute_bulk_book_reading_status(
             )
         )
     except (BulkBookAccessError, InvalidBulkBookOperationError) as error:
+        capture_exception(error)
         return _bulk_operation_response(_bulk_error(error))
     return BulkBookOperationResponse(
         data=BulkBookOperationPayload.model_validate(asdict(result))
@@ -781,7 +791,8 @@ async def execute_bulk_book_covers(
         return _bulk_cover_response(auth_error)
     try:
         raw_ids = json.loads(ids)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as _caught_error:
+        capture_exception(_caught_error)
         return _bulk_cover_response(
             fail(
                 "图书选择无效",
@@ -822,6 +833,7 @@ async def execute_bulk_book_covers(
         BulkBookAuthorizationError,
         InvalidBulkBookOperationError,
     ) as error:
+        capture_exception(error)
         return _bulk_cover_response(_bulk_error(error))
     return BulkBookCoverResponse(
         data=BulkBookCoverPayload.model_validate(asdict(result))
@@ -847,15 +859,18 @@ def undo_operation(
             user.id,
             can_manage_system=can_manage_system(user),
         )
-    except LibraryOperationNotFoundError:
+    except LibraryOperationNotFoundError as _caught_error:
+        capture_exception(_caught_error)
         return _operation_undo_response(
             fail("操作记录不存在", status_code=404, code="OPERATION_NOT_FOUND")
         )
-    except LibraryOperationAuthorizationError:
+    except LibraryOperationAuthorizationError as _caught_error:
+        capture_exception(_caught_error)
         return _operation_undo_response(
             fail("无权撤销该操作", status_code=403, code="OPERATION_UNDO_FORBIDDEN")
         )
     except InvalidLibraryOperationError as error:
+        capture_exception(error)
         return _operation_undo_response(
             fail(str(error), status_code=409, code="OPERATION_NOT_UNDOABLE")
         )
@@ -886,6 +901,7 @@ def list_library_facets(
             page_size=pageSize,
         )
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _facet_page_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_QUERY")
         )
@@ -935,6 +951,7 @@ def list_library_groupings(
             page_size=pageSize,
         )
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _grouping_page_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_GROUPING_QUERY")
         )
@@ -1013,6 +1030,7 @@ def get_library_filter_options(
             limit=limit,
         )
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _filter_options_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FILTER_QUERY")
         )
@@ -1039,6 +1057,7 @@ def merge_facets(
             user.id,
         )
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _facet_merge_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1063,6 +1082,7 @@ def rename_facet(
     try:
         result = rename_library_facet(db).execute(facet_id, payload.name, user.id)
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _facet_rename_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1086,6 +1106,7 @@ def delete_facet(
     try:
         result = delete_library_facet(db).execute(facet_id, user.id)
     except InvalidLibraryFacetRequest as error:
+        capture_exception(error)
         return _facet_delete_response(
             fail(str(error), status_code=422, code="INVALID_LIBRARY_FACET_MUTATION")
         )
@@ -1120,7 +1141,8 @@ def list_library_books(
         try:
             filter_payload = json.loads(filters)
             filter_expression = parse_filter_expression(filter_payload)
-        except (InvalidFilterExpression, json.JSONDecodeError):
+        except (InvalidFilterExpression, json.JSONDecodeError) as _caught_error:
+            capture_exception(_caught_error)
             return _books_response(
                 fail(
                     "筛选参数无效",
@@ -1236,7 +1258,8 @@ def browse_library_book_contents(
             page=page,
             page_size=pageSize,
         )
-    except BookContentsNotFoundError:
+    except BookContentsNotFoundError as _caught_error:
+        capture_exception(_caught_error)
         return _book_contents_response(
             fail("图书目录不存在", status_code=404, code="BOOK_CONTENTS_NOT_FOUND")
         )
@@ -1309,7 +1332,8 @@ def update_book_source_node_metadata(
                 description=payload.description,
             ),
         )
-    except InvalidSourceNodeTitle:
+    except InvalidSourceNodeTitle as _caught_error:
+        capture_exception(_caught_error)
         return _source_node_updated_response(
             fail(
                 "来源目录标题不能为空",
@@ -1368,11 +1392,13 @@ async def update_book_source_node_presentation(
             cover_content=cover_content,
             remove_cover=removeCover,
         )
-    except InvalidSourceNodeTitle:
+    except InvalidSourceNodeTitle as _caught_error:
+        capture_exception(_caught_error)
         return _source_node_updated_response(
             fail("来源目录标题不能为空", status_code=400, code="INVALID_SOURCE_NODE_TITLE")
         )
-    except InvalidSourceNodeCover:
+    except InvalidSourceNodeCover as _caught_error:
+        capture_exception(_caught_error)
         return _source_node_updated_response(
             fail(
                 "目录封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",
@@ -1427,15 +1453,11 @@ def search_book_source_node_metadata(
             is_active=lambda: not from_thread.run(request.is_disconnected),
         )
     except MetadataProviderSearchError as error:
+        capture_exception(error, persist=False)
         record_exception(
             LOGGER,
             "metadata_search.provider_failed",
             error,
-            context={
-                "stage": "metadata_provider_search",
-                "source_node_id": source_node_id,
-                "resource_id": book_id,
-            },
         )
         return _source_node_search_response(
             fail(
@@ -1540,7 +1562,8 @@ def apply_book_recognized_metadata(
                 now=datetime.now(UTC),
             )
         )
-    except RecognizedMetadataAuthorizationError:
+    except RecognizedMetadataAuthorizationError as _caught_error:
+        capture_exception(_caught_error)
         return _recognized_metadata_response(
             fail(
                 "需要系统管理权限",
@@ -1548,7 +1571,8 @@ def apply_book_recognized_metadata(
                 code="SYSTEM_MANAGER_REQUIRED",
             )
         )
-    except RecognizedMetadataTargetNotFoundError:
+    except RecognizedMetadataTargetNotFoundError as _caught_error:
+        capture_exception(_caught_error)
         return _recognized_metadata_response(
             fail(
                 "元数据目标不存在",
@@ -1556,7 +1580,8 @@ def apply_book_recognized_metadata(
                 code="METADATA_TARGET_NOT_FOUND",
             )
         )
-    except InvalidRecognizedMetadataError:
+    except InvalidRecognizedMetadataError as _caught_error:
+        capture_exception(_caught_error)
         return _recognized_metadata_response(
             fail(
                 "所选元数据字段无效",
@@ -1764,11 +1789,13 @@ def update_library_resource(
             changes=changes,
             now=datetime.now(UTC),
         )
-    except (BookNotFoundError, ResourceNotFoundError):
+    except (BookNotFoundError, ResourceNotFoundError) as _caught_error:
+        capture_exception(_caught_error)
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
     except (LibraryAuthorizationError, InvalidResourceChangeError) as exc:
+        capture_exception(exc)
         return _resource_response(fail(str(exc) or "资源参数无效", status_code=400))
     updated = resource_view(db, resource_id, user.id, settings=settings)
     if updated is None:
@@ -1801,11 +1828,13 @@ def regenerate_library_resource_cover(
             book_id=book_id,
             resource_id=resource_id,
         )
-    except (BookNotFoundError, ResourceNotFoundError):
+    except (BookNotFoundError, ResourceNotFoundError) as _caught_error:
+        capture_exception(_caught_error)
         return _cover_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
     except LocalCoverUnavailableError as exc:
+        capture_exception(exc)
         return _cover_response(
             fail(
                 "未能从当前本地元数据中解析出可用封面",
@@ -1842,11 +1871,13 @@ def regenerate_library_source_node_cover(
             book_id=book_id,
             source_node_id=source_node_id,
         )
-    except (BookNotFoundError, SourceNodeNotFoundError):
+    except (BookNotFoundError, SourceNodeNotFoundError) as _caught_error:
+        capture_exception(_caught_error)
         return _cover_response(
             fail("来源目录不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
     except LocalCoverUnavailableError as exc:
+        capture_exception(exc)
         return _cover_response(
             fail(
                 "未能从当前目录的本地元数据中解析出可用封面",
@@ -1886,7 +1917,8 @@ async def upload_library_resource_cover(
                 now=datetime.now(UTC),
             )
         )
-    except LibraryAuthorizationError:
+    except LibraryAuthorizationError as _caught_error:
+        capture_exception(_caught_error)
         return _resource_response(
             fail(
                 "需要系统管理权限",
@@ -1894,11 +1926,13 @@ async def upload_library_resource_cover(
                 code="SYSTEM_MANAGER_REQUIRED",
             )
         )
-    except (BookNotFoundError, ResourceNotFoundError):
+    except (BookNotFoundError, ResourceNotFoundError) as _caught_error:
+        capture_exception(_caught_error)
         return _resource_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
-    except InvalidResourceCover:
+    except InvalidResourceCover as _caught_error:
+        capture_exception(_caught_error)
         return _resource_response(
             fail(
                 "资源封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",
@@ -1986,7 +2020,8 @@ def list_library_reading_units(
             page=page,
             page_size=pageSize,
         )
-    except ResourceDetailNotFoundError:
+    except ResourceDetailNotFoundError as _caught_error:
+        capture_exception(_caught_error)
         return _reading_units_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
@@ -1996,6 +2031,7 @@ def list_library_reading_units(
         PublicationResourceTooLargeError,
         PublicationUnsupportedError,
     ) as error:
+        capture_exception(error)
         return _reading_units_response(_publication_navigation_error(error))
     return _reading_units_response(
         ok(
@@ -2065,7 +2101,8 @@ def delete_library_asset(
         )
     try:
         result = delete_resource_asset(db).execute(asset_id=asset_id)
-    except ResourceAssetNotFoundError:
+    except ResourceAssetNotFoundError as _caught_error:
+        capture_exception(_caught_error)
         return _asset_deleted_response(
             fail("资源资产不存在", status_code=404, code="ASSET_NOT_FOUND")
         )

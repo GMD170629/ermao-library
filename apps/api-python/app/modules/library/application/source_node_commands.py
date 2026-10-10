@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.metadata_effects import MetadataSideEffectPolicy
 
 MAX_SOURCE_NODE_COVER_BYTES = 10 * 1024 * 1024
@@ -135,7 +136,8 @@ class UpdateSourceNodeMetadata:
                 return False
             self._unit_of_work.commit()
             return True
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -222,7 +224,8 @@ class UpdateSourceNodePresentation:
                     self._covers.revert(published)
                 return False
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             if published is not None:
                 self._covers.revert(published)

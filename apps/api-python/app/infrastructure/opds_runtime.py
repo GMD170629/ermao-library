@@ -32,7 +32,7 @@ from app.core.authorization import (
     read_user_preferences,
 )
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.failure_diagnostics import RuntimeFailureDiagnostics
 from app.core.i18n import configured_locale
 from app.models.auth import User
@@ -616,14 +616,13 @@ class OpdsMediaResources:
 
     @staticmethod
     def _not_found(observation: str, resource_id: str | None) -> Response:
-        diagnostic_id = record_exception(
+        record_exception(
             LOGGER,
             "opds.media_unavailable",
             OpdsPublicationNotFound(observation),
             level="warning",
-            context={"stage": "opds_media", "resource_id": resource_id},
         )
-        return Response(status_code=404, headers={"X-Error-Id": diagnostic_id})
+        return Response(status_code=404, headers={})
 
     def book_cover(self, actor_id: str, book_id: str, request: Request) -> Response:
         return self._cover(actor_id, request, book_id=book_id)
@@ -773,11 +772,11 @@ def _json_object(value: object) -> dict[str, object]:
     try:
         parsed: object = json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError) as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "infrastructure.opds_runtime._json_object.failed",
             error,
-            context={"step": "_json_object"},
         )
         return {}
     return parsed if isinstance(parsed, dict) else {}

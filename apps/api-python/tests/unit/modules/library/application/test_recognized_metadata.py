@@ -240,9 +240,9 @@ def test_resource_apply_updates_book_and_resource_before_isolated_cover_failure(
         RecognizedMetadataField.RESOURCE_ABRIDGED,
     )
     assert result.cover_status == "failed"
-    assert "metadata.cover_apply_failed" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "ValueError: cover failed" in caplog.text
-    assert "diagnostic_id=diag_" in caplog.text
+    assert "diagnostic_id=" not in caplog.text
     assert port.calls == [
         (
             "book-1",

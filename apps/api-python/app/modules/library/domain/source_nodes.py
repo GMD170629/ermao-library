@@ -10,6 +10,8 @@ import hashlib
 from dataclasses import dataclass
 from enum import Enum
 
+from app.core.exception_diagnostics import capture_exception
+
 
 class SourceNodePhysicalKind(str, Enum):
     REGULAR_FILE = "REGULAR_FILE"
@@ -110,6 +112,7 @@ def parse_source_node_relative_path(
         return SourceNodeRelativePath(relative_path)
     except InvalidSourceNodeRelativePathError as error:
         # diagnostics-control-flow: path validation returns its exact violation code to the calling operation.
+        capture_exception(error)
         return SourceNodeViolation(
             code=error.code,
             relative_path=error.relative_path,

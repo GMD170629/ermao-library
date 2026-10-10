@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from io import BytesIO
 from typing import TYPE_CHECKING
+from zipfile import ZipFile
 
 import pytest
 
 from app import main as app_main
 from app.core.auth import hash_password
 from app.models.auth import User
+from app.modules.system.infrastructure import log_files
 from tests.conftest import recreate_application_schema
 
 if TYPE_CHECKING:
@@ -66,6 +70,7 @@ SYSTEM_MANAGEMENT_REQUESTS = (
         {"watchEnabled": True, "intervalMinutes": 1440},
     ),
     ("GET", "/api/management/events", None),
+    ("GET", "/api/management/events/export", None),
     ("GET", "/api/management/events/missing-event", None),
     ("DELETE", "/api/management/events", None),
     ("GET", "/api/backups", None),
@@ -137,6 +142,36 @@ def test_admin_and_delegated_system_manager_can_read_system_settings(
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert "settings" in response.json()["data"]
+
+
+@pytest.mark.parametrize("role,can_manage_system", [("admin", False), ("member", True)])
+def test_log_export_preserves_original_files(client, db_session, role, can_manage_system):
+    user = _create_user(db_session, email="log-export@example.com", role=role,
+                        can_manage_system=can_manage_system)
+    _login(client, user.email)
+    today = datetime.now().astimezone().date()
+    originals = {}
+    for runtime in ("api", "web"):
+        directory = log_files.log_directory() / runtime
+        directory.mkdir(parents=True, exist_ok=True)
+        for age in (0, 1, 2, 3):
+            name = f"{today - timedelta(days=age)}.jsonl"
+            # Deliberately includes noncanonical JSON, CRLF and an incomplete line.
+            # Export must copy bytes, never parse/reformat/drop original evidence.
+            raw = ('{ "message": "秘密-test-token", "stack": "' + 'frame\\n' * 10000 + '" }\r\npartial').encode()
+            (directory / name).write_bytes(raw)
+            if age < 3:
+                originals[f"{runtime}/{name}"] = raw
+    (log_files.log_directory() / "settings.json").write_text(
+        '{"retentionDays":3,"minimumLevel":"error"}', encoding="utf-8")
+    response = client.get("/api/management/events/export?search=no-match&level=debug")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"] == 'attachment; filename="shuku-system-logs.zip"'
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert set(archive.namelist()) == set(originals)
+        for name, raw in originals.items():
+            assert archive.read(name) == raw
 
 
 @pytest.mark.parametrize("minutes", [0, 1440])

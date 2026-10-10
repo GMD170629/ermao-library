@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
@@ -16,7 +16,7 @@ from app.bootstrap.imports import (
 )
 from app.bootstrap.system import clear_system_events as clear_system_events_command
 from app.bootstrap.system import (
-    configured_max_event_bytes,
+    export_log_files,
     get_system_event,
     library_import_dashboard_snapshot,
     list_settings,
@@ -72,12 +72,13 @@ from app.services.import_preferences import (
 router = APIRouter(tags=["system"], route_class=TypedContractRoute)
 
 
-def _event_storage_snapshot(db: Session) -> dict[str, int]:
+def _event_storage_snapshot(db: Session) -> dict[str, object]:
     storage = system_event_storage_view(db)
     return {
         "deleted": 0,
         "sizeBytes": int(storage["sizeBytes"]),
-        "maxBytes": int(storage["maxBytes"]),
+        "retentionDays": int(storage["retentionDays"]),
+        "minimumLevel": storage["minimumLevel"],
     }
 
 
@@ -214,7 +215,6 @@ def update_system_settings(
         actor_type="admin",
         actor_id=user.id,
         action="settings.updated",
-        target_type="settings",
         message=f"更新系统设置 {len(saved_with_clears)} 项",
         metadata={"keys": list(saved_with_clears)},
     )
@@ -259,11 +259,9 @@ def list_system_events(
     pageSize: int = 50,
     level: str | None = None,
     source: str | None = None,
-    targetType: str | None = None,
     search: str | None = None,
     dateFrom: str | None = None,
     dateTo: str | None = None,
-    includeDiagnostics: bool = False,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
@@ -282,7 +280,6 @@ def list_system_events(
         page_size=page_size,
         level=level,
         source=source,
-        target_type=targetType,
         search=search,
         date_from_ms=date_from_ms,
         date_to_ms=date_to_ms,
@@ -297,13 +294,31 @@ def list_system_events(
                 storage={
                     "deleted": 0,
                     "sizeBytes": snapshot.size_bytes,
-                    "maxBytes": configured_max_event_bytes(db),
+                    **system_event_storage_view(db),
                 },
                 sources=snapshot.sources,
                 levels=snapshot.levels,
-                include_diagnostics=includeDiagnostics,
             )
         )
+    )
+
+
+@router.get("/management/events/export", response_class=StreamingResponse)
+def export_system_log_files(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[Response, ErrorResponses(SystemManagerRequiredError)]:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    return StreamingResponse(
+        export_log_files(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="shuku-system-logs.zip"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 

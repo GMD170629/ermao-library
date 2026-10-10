@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from shuku_dependencies import canonical_digest
 
 from ..application.dependency_release import (
@@ -84,6 +84,7 @@ class PreparationWorker:
                 "w",
             )
         except OSError as error:
+            capture_exception(error, persist=False)
             raise UpdateError("STORAGE_UNAVAILABLE") from error
 
     def _read(self) -> PreparationState:
@@ -97,6 +98,7 @@ class PreparationWorker:
                 raise UpdateError("INVALID_STATE")
             return PreparationState.model_validate_json(path.read_bytes())
         except (OSError, ValueError) as error:
+            capture_exception(error, persist=False)
             raise UpdateError("INVALID_STATE") from error
 
     def _write(self, state: PreparationState) -> PreparationState:
@@ -119,6 +121,7 @@ class PreparationWorker:
             temporary.replace(self.root / "preparation.json")
             return state
         except OSError as error:
+            capture_exception(error, persist=False)
             raise UpdateError("STATE_WRITE_FAILED") from error
 
     def status(self) -> PreparationState:
@@ -129,8 +132,9 @@ class PreparationWorker:
         with self.guard, self._lock() as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            except BlockingIOError as _caught_error:
                 # diagnostics-control-flow: the preparation lock is held by the active worker.
+                capture_exception(_caught_error)
                 return self._read()
             state = self._read()
             if state.phase in ACTIVE:
@@ -139,7 +143,6 @@ class PreparationWorker:
                     PreparationOwnerMissing(
                         f"Persisted preparation phase is {state.phase}, but the exclusive worker lock is available; interruption cause was not provided"
                     ),
-                    context={"stage": state.phase, "step": "recover_preparation", "code": "PREPARATION_INTERRUPTED"},
                 )
                 state = self._write(
                     state.model_copy(
@@ -164,8 +167,9 @@ class PreparationWorker:
             try:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
+                except BlockingIOError as _caught_error:
                     # diagnostics-control-flow: lock contention is the explicit UPDATE_BUSY outcome.
+                    capture_exception(_caught_error, persist=False)
                     raise UpdateError("UPDATE_BUSY") from None
                 if (self.root / "install-request.json").exists():
                     raise UpdateError("UPDATE_BUSY")
@@ -192,7 +196,8 @@ class PreparationWorker:
                 )
                 self.thread.start()
                 return state
-            except Exception:
+            except Exception as _caught_error:
+                capture_exception(_caught_error)
                 lock.close()
                 raise
 
@@ -210,8 +215,9 @@ class PreparationWorker:
         with self.guard, self._lock() as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            except BlockingIOError as _caught_error:
                 # diagnostics-control-flow: lock contention is the explicit UPDATE_BUSY outcome.
+                capture_exception(_caught_error, persist=False)
                 raise UpdateError("UPDATE_BUSY") from None
             incomplete = self.root / "installation-incomplete"
             if incomplete.exists() or incomplete.is_symlink():
@@ -232,9 +238,11 @@ class PreparationWorker:
 
                 try:
                     validate_prepared(self.storage, state, environment, plan_sha256)
-                except UpdateError:
+                except UpdateError as _caught_error:
+                    capture_exception(_caught_error, persist=False)
                     raise
                 except (OSError, ValueError, KeyError, TypeError) as error:
+                    capture_exception(error, persist=False)
                     raise UpdateError("INVALID_PREPARED_PLAN") from error
             # Durable reservation under prepare.lock. The fixed entry claims this
             # same lock; preparation checks the reservation before deleting files.
@@ -283,24 +291,21 @@ class PreparationWorker:
             self._write(state.model_copy(update={"phase": "ready"}))
         except Exception as error:  # noqa: BLE001 - owned background task boundary
             # Record before reading/writing failure state: storage may be the cause.
-            diagnostic_id = record_exception(
+            capture_exception(error, persist=False)
+            record_exception(
                 LOGGER,
                 "application_update.preparation_failed",
                 error,
-                context={"stage": "prepare_package"},
                 source="updates",
             )
             try:
                 state = self._read()
             except UpdateError as state_error:
+                capture_exception(state_error, persist=False)
                 record_exception(
                     LOGGER,
                     "application_update.failure_state_read_failed",
                     state_error,
-                    context={
-                        "stage": "read_failure_state",
-                        "parent_diagnostic_id": diagnostic_id,
-                    },
                     source="updates",
                 )
             # This is the owned task boundary. Do not persist private URLs/paths.
@@ -325,25 +330,22 @@ class PreparationWorker:
                     )
                 )
             except UpdateError as persistence_error:
+                capture_exception(persistence_error, persist=False)
                 record_exception(
                     LOGGER,
                     "application_update.failure_state_write_failed",
                     persistence_error,
-                    context={
-                        "stage": "write_failure_state",
-                        "parent_diagnostic_id": diagnostic_id,
-                    },
                     source="updates",
                 )
         finally:
             try:
                 lock.close()
             except OSError as error:
+                capture_exception(error, persist=False)
                 record_exception(
                     LOGGER,
                     "application_update.lock_close_failed",
                     error,
-                    context={"stage": "release_lock"},
                     source="updates",
                 )
 
@@ -397,6 +399,7 @@ class PreparationWorker:
                 read_bounded(manifest_path, 32 * 1024 * 1024), context={"runtime": True}
             )
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise UpdateError("INVALID_MANIFEST") from error
         local, baseline = read_local(self.storage)
         plan = difference(local, manifest.dependencies)

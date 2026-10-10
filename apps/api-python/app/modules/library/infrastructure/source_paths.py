@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 
 def resolve_existing_library_file(root_value: str, relative_value: str) -> Path | None:
@@ -12,13 +12,14 @@ def resolve_existing_library_file(root_value: str, relative_value: str) -> Path 
         candidate = root.joinpath(*Path(relative_value).parts)
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(root)
-    except FileNotFoundError:
+    except FileNotFoundError as _caught_error:
         # diagnostics-control-flow: optional asset-path/PDF-count lookup accepts
         # absent sources and returns no physical path; no operation was attempted.
+        capture_exception(_caught_error, level="debug")
         return None
     except (OSError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.source_paths.resolve_existing_library_file.failed", error,
-                         context={"step": "resolve_existing_library_file"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.source_paths.resolve_existing_library_file.failed", error)
         return None
     if resolved != candidate or not resolved.is_file():
         return None

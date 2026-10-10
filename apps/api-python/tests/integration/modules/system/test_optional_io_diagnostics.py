@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records, one_log
+
 """Best-effort I/O keeps its behavior and publishes each actual failure cause."""
 
 import errno
@@ -5,7 +7,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.exception_diagnostics import (
@@ -62,42 +64,49 @@ def test_optional_attributes_keep_actual_errno_and_continue(
         exception_diagnostic_boundary(
             logging.getLogger(__name__),
             "attribute.test",
-            context={"operation_id": "operation-attrs", "target_ordinal": 2},
+
         ),
         path.open("r+b") as handle,
     ):
         original = attributes.read_copy_attributes(handle.fileno())
         attributes.apply_copy_attributes(handle.fileno(), original)
     assert path.read_bytes() == b"original"
-    with events() as db:
-        rows = db.scalars(select(SystemEvent)).all()
-    target = [row for row in rows if row.metadata_json["step"] == step]
+    with events() as _db:
+        rows = log_records()
+    target = [row for row in rows if f"{step} denied" in row.message]
     assert len(target) == 1
     metadata = target[0].metadata_json
     assert metadata["diagnostics"]["rootCause"]["errno"] == errno.EACCES
-    assert metadata["operationId"] == "operation-attrs"
-    assert metadata["targetOrdinal"] == 2
-    assert target[0].id in caplog.text
-    assert "private title" not in caplog.text
+    assert "operationId" not in metadata
+    assert "targetOrdinal" not in metadata
+    assert target[0].message in caplog.text
+    assert "private title" in caplog.text
 
 
-def test_optional_missing_sidecar_is_not_a_failure(tmp_path, events, caplog):
+def test_optional_missing_sidecar_still_returns_none_and_records_the_probe(tmp_path, events, caplog):
+    caplog.set_level(logging.DEBUG)
     assert read_optional_file(tmp_path / "missing.opf", 100) is None
-    with events() as db:
-        assert db.scalars(select(SystemEvent)).all() == []
-    assert "read_optional_file.failed" not in caplog.text
+    with events() as _db:
+        assert log_records() == []
+    assert "FileNotFoundError" in caplog.text
 
 
 def test_optional_sidecar_io_failure_is_not_missing(
     tmp_path, events, monkeypatch, caplog
 ):
-    def fail(*args, **kwargs):
-        raise OSError(errno.EIO, "device read failed")
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
+    original_open = Path.open
+
+    def fail(path, *args, **kwargs):
+        if path == tmp_path / "metadata.opf":
+            raise OSError(errno.EIO, "device read failed")
+        return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", fail)
     assert read_optional_file(tmp_path / "metadata.opf", 100) is None
-    with events() as db:
-        row = db.scalars(select(SystemEvent)).one()
+    with events() as _db:
+        row = one_log(log_records())
     assert row.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO
     assert "device read failed" in caplog.text
 
@@ -122,18 +131,18 @@ def test_atomic_replace_retry_records_each_actual_attempt(
     target = tmp_path / "published"
     atomic_files.write_atomic_bytes(target, b"complete")
     assert target.read_bytes() == b"complete"
-    with events() as db:
-        rows = db.scalars(select(SystemEvent)).all()
+    with events() as _db:
+        rows = log_records()
     assert len(rows) == 2
-    assert {row.metadata_json["attempt"] for row in rows} == {1, 2}
+    assert len({row.id for row in rows}) == 2
     assert all(
         row.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EACCES
         for row in rows
     )
-    assert all(row.id in caplog.text for row in rows)
+    assert all(row.message in caplog.text for row in rows)
 
 
-def test_atomic_cleanup_failure_links_to_primary_failure(
+def test_atomic_cleanup_failure_preserves_both_errors(
     tmp_path, events, monkeypatch, caplog
 ):
     def fail_replace(*_args):
@@ -146,12 +155,13 @@ def test_atomic_cleanup_failure_links_to_primary_failure(
     monkeypatch.setattr(Path, "unlink", fail_cleanup)
     with pytest.raises(OSError, match="temporary cleanup"):
         atomic_files.write_atomic_bytes(tmp_path / "published", b"complete")
-    with events() as db:
-        rows = db.scalars(select(SystemEvent)).all()
+    with events() as _db:
+        rows = log_records()
     assert len(rows) == 2
     original = next(row for row in rows if row.action == "atomic_file.publish_failed")
     cleanup = next(row for row in rows if row.action == "atomic_file.cleanup_failed")
-    assert cleanup.metadata_json["parentDiagnosticId"] == original.id
+    assert "parentDiagnosticId" not in cleanup.metadata_json
+    assert cleanup.id != original.id
     assert original.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EROFS
     assert cleanup.metadata_json["diagnostics"]["directException"]["errno"] == errno.EIO
-    assert original.id in caplog.text and cleanup.id in caplog.text
+    assert original.message in caplog.text and cleanup.message in caplog.text

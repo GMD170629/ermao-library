@@ -400,6 +400,23 @@ test('resource detail validates the canonical server presentation without a prog
 });
 
 const identityCases = JSON.parse(readFileSync(new URL('../../../../../docs/testing/fixtures/book-detail-identity.json', import.meta.url), 'utf8'));
+test('source deletion preserves the original server exception chain', async () => {
+  const originalFetch = globalThis.fetch;
+  const message = 'SourceFileDeletionError: book-1\nPermissionError: [Errno 13] Permission denied: /private/books/book.epub';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: false, error: { code: 'SourceFileDeletionError', message }
+  }), { status: 409 });
+  try {
+    await assert.rejects(deleteBookSources('book-1'), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, message);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 for (const sample of identityCases) {
   test(`preserves object fields for ${sample.name}`, () => {
     const book = mapBookView({ id: 'book', sourceNodeId: 'root', ...sample.book, resources: [{ ...resource('resource', 'book'), ...sample.resource }] });

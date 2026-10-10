@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.exception_diagnostics import (
+    capture_exception,
     deferred_exception_persistence,
     persist_exception_diagnostic,
     record_exception,
@@ -149,12 +150,6 @@ class QueueHeartbeatPump:
         with self._write_lock:
             self._write_attempt += 1
             with deferred_exception_persistence(
-                context={
-                    "task_id": self._instance_id,
-                    "task_kind": self._queue_name,
-                    "attempt": self._write_attempt,
-                    "step": "heartbeat_write",
-                }
             ) as pending:
                 if status is not None:
                     self._status = status
@@ -174,18 +169,12 @@ class QueueHeartbeatPump:
                 # Heartbeat persistence is best-effort; contain adapter failures so
                 # they cannot terminate the worker loop.
                 except Exception as exc:  # noqa: BLE001
+                    capture_exception(exc, persist=False)
                     record_exception(
                         LOGGER,
                         "queue.heartbeat_write_deferred",
                         exc,
                         level="warning",
-                        context={
-                            "stage": "heartbeat",
-                            "outcome": "deferred",
-                            "path": self._queue_name,
-                            "attempt": self._write_attempt,
-                            "task_id": self._instance_id,
-                        },
                         source="system",
                         action="queue.heartbeat_deferred",
                         session_factory=self._session_factory,
@@ -204,11 +193,6 @@ class QueueHeartbeatPump:
         )
         with self._write_lock:
             with deferred_exception_persistence(
-                context={
-                    "task_id": self._instance_id,
-                    "task_kind": self._queue_name,
-                    "step": "heartbeat_stop",
-                }
             ) as pending:
                 try:
                     with self._session_factory() as db, SystemWriteTransaction(db):
@@ -216,16 +200,12 @@ class QueueHeartbeatPump:
                 # Stopping must remain best-effort after the worker has been told to
                 # exit; an unavailable database cannot block process shutdown.
                 except Exception as exc:  # noqa: BLE001
+                    capture_exception(exc, persist=False)
                     record_exception(
                         LOGGER,
                         "queue.stopped_state_write_deferred",
                         exc,
                         level="warning",
-                        context={
-                            "stage": "heartbeat",
-                            "outcome": "deferred",
-                            "path": self._queue_name,
-                        },
                         source="system",
                         action="queue.stopped_state_deferred",
                         session_factory=self._session_factory,
@@ -243,22 +223,17 @@ class QueueHeartbeatPump:
                         RuntimeError(
                             "Queue consumer thread is no longer alive; no further exception was provided"
                         ),
-                        context={
-                            "stage": "consumer_liveness",
-                            "task_id": self._instance_id,
-                            "task_kind": self._queue_name,
-                        },
                         session_factory=self._session_factory,
                     )
                     self.pulse(status="failed", error="consumer-thread-exited")
                     return
                 self.pulse()
             except Exception as exc:  # noqa: BLE001 - heartbeat thread must live
+                capture_exception(exc, persist=False)
                 record_exception(
                     LOGGER,
                     "queue.heartbeat_loop_failure",
                     exc,
-                    context={"stage": "heartbeat", "outcome": "error"},
                     source="system",
                     action="queue.heartbeat_loop_failure",
                     session_factory=self._session_factory,

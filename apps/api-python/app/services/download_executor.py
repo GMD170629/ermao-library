@@ -24,9 +24,10 @@ from app.bootstrap.download import (
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.core.exception_diagnostics import (
+    capture_exception,
+    diagnostic_text,
     exception_diagnostic_boundary,
     record_exception,
-    sanitize_diagnostic_text,
 )
 from app.modules.download.infrastructure.tasks import (
     find_active_download_task as find_active_download_task_row,
@@ -95,8 +96,8 @@ def remote_ref(value: Any) -> dict[str, Any]:
             parsed = json.loads(value)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError as error:
-            record_exception(logging.getLogger(__name__), "services.download_executor.remote_ref.failed", error,
-                             context={"step": "remote_ref"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.download_executor.remote_ref.failed", error)
             return {}
     return {}
 
@@ -111,8 +112,9 @@ def system_setting(db: Session, key: str) -> str | None:
         return None
     try:
         parsed = json.loads(str(value))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _caught_error:
         # diagnostics-control-flow: Headers accept both JSON and legacy literal forms; continue legacy parsing.
+        capture_exception(_caught_error)
         parsed = value
     return string_value(parsed) or None
 
@@ -454,13 +456,13 @@ def run_task(settings: Settings, task: dict[str, Any], qbit: QbittorrentConfig) 
 
 
 def error_summary(error: Exception) -> str:
-    return sanitize_diagnostic_text(error)[:500]
+    return diagnostic_text(error)[:500]
 
 
 def execute_download_task(
     db: Session, settings: Settings, task_id: str
 ) -> DownloadExecutionResult:
-    with exception_diagnostic_boundary(logging.getLogger(__name__), "download.task_failed", context={"task_id": task_id, "step": "download"}):
+    with exception_diagnostic_boundary(logging.getLogger(__name__), "download.task_failed"):
         try:
             task = get_download_task(db, task_id)
             db.close()
@@ -481,8 +483,6 @@ def execute_download_task(
                     source="download",
                     action="completed",
                     message="下载完成，等待后台导入",
-                    target_type="downloadTask",
-                    target_id=task_id,
                     metadata={
                         "status": "downloaded",
                         "filePath": str(file_path),
@@ -505,16 +505,14 @@ def execute_download_task(
                 )
                 return DownloadExecutionResult(updated or task)
             except Exception as exc:  # noqa: BLE001 - task boundary persists failure state.
-                record_exception(logging.getLogger(__name__), "services.download_executor.execute_download_task.failed", exc,
-                                 context={"step": "execute_download_task", "task_id": task_id})
+                capture_exception(exc, persist=False)
+                record_exception(logging.getLogger(__name__), "services.download_executor.execute_download_task.failed", exc)
                 summary = error_summary(exc)
                 prepared_event = prepare_system_event(
                     source="download",
                     action="failed",
                     level="error",
                     message="下载失败",
-                    target_type="downloadTask",
-                    target_id=task_id,
                     metadata={
                         "status": "failed",
                         "errorMessage": summary,

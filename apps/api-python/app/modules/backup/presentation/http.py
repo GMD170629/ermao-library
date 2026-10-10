@@ -16,7 +16,7 @@ from app.bootstrap.backup import build_backup_use_cases
 from app.bootstrap.media import media_streaming
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
 from app.modules.backup.application.operations import (
     BackupArchive,
@@ -43,11 +43,10 @@ def _manager(db: Session, request: Request, settings: Settings):
 
 
 def _backup_error(error: BackupOperationError) -> Response:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger(__name__),
         "backup.operation.failed",
         error.__cause__ or error,
-        context={"stage": error.stage, "code": error.problem.code},
     )
     stages = {
         "upload": ("上传备份", "Upload backup"),
@@ -69,12 +68,11 @@ def _backup_error(error: BackupOperationError) -> Response:
                     **error.problem.params,
                     "messageEn": f"{en}: {error.problem.message_en}",
                     "stage": error.stage,
-                    "diagnosticId": diagnostic_id,
                 },
             },
         },
         status_code=error.status_code,
-        headers={"X-Error-Id": diagnostic_id},
+        headers={},
     )
 
 
@@ -124,6 +122,7 @@ def list_backups(
     try:
         backups = build_backup_use_cases(db, settings).list.execute()
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     return ok({"backups": [_backup_payload(backup) for backup in backups]})
 
@@ -144,6 +143,7 @@ def upload_backup(
             file.filename or "", file.file
         )
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     return ok({"backup": _backup_payload(backup)}, status_code=201)
 
@@ -162,13 +162,14 @@ def get_backup(
     try:
         backup = build_backup_use_cases(db, settings).get.execute(backup_id)
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     except (BackupNotFoundError, BackupRequestError) as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.backup.presentation.http.get_backup.failed",
             error,
-            context={"stage": "get_backup"},
         )
         return fail("备份不存在", status_code=404)
     return ok({"backup": _backup_payload(backup)})
@@ -187,6 +188,7 @@ def create_backup(
     try:
         backup = build_backup_use_cases(db, settings).create.execute()
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     return ok({"backup": _backup_payload(backup)}, status_code=201)
 
@@ -208,13 +210,14 @@ def restore_backup(
     try:
         result = build_backup_use_cases(db, settings).restore.execute(backup_id)
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     except BackupNotFoundError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.backup.presentation.http.restore_backup.failed",
             error,
-            context={"stage": "restore_backup"},
         )
         return fail("备份不存在", status_code=404)
     return ok(
@@ -245,13 +248,14 @@ def delete_backup(
     try:
         deleted = build_backup_use_cases(db, settings).delete.execute(backup_id)
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     except BackupRequestError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.backup.presentation.http.delete_backup.failed",
             error,
-            context={"stage": "delete_backup"},
         )
         deleted = False
     return ok({"deleted": deleted, "id": backup_id})
@@ -272,13 +276,14 @@ def download_backup(
     try:
         descriptor = build_backup_use_cases(db, settings).download.execute(backup_id)
     except BackupOperationError as error:
+        capture_exception(error)
         return _backup_error(error)
     except (BackupNotFoundError, BackupRequestError) as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.backup.presentation.http.download_backup.failed",
             error,
-            context={"stage": "download_backup"},
         )
         return fail("备份不存在", status_code=404)
     return media_streaming.send_file(

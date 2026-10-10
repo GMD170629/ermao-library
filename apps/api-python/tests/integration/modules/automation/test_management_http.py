@@ -3,12 +3,13 @@ from sqlalchemy import select
 
 from app.core.auth import create_session
 from app.models.auth import User, UserLibraryAccess
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.infrastructure.models import AutomationGrantRow
 from app.modules.system.infrastructure.automation_settings import (
     SqlAlchemyAutomationSettings,
 )
+from tests.support.log_events import log_records
 
 ORIGIN = {"Origin": "http://testserver"}
 
@@ -153,6 +154,8 @@ def test_http_and_https_activation_without_extra_permission(client, db_session, 
 def test_audit_has_localized_message_and_never_credential(
     client, db_session, language, message
 ):
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     enable_service(db_session)
     sign_in(client, db_session, "member")
     db_session.add(SystemSetting(key="language", value=f'"{language}"'))
@@ -160,12 +163,10 @@ def test_audit_has_localized_message_and_never_credential(
     created = client.post(
         "/api/automation/grants", headers=ORIGIN, json=grant_request()
     ).json()["data"]
-    event = db_session.scalar(
-        select(SystemEvent).where(SystemEvent.action == "automation.grant.created")
-    )
+    event = next(iter([row for row in log_records() if row.action == 'automation.grant.created']), None)
     assert event.message == message
     assert event.actor_id == "member"
-    assert event.target_id == created["grant"]["id"]
+    assert not hasattr(event, "target_id")
     assert created["token"] not in event.message
     assert created["token"] not in str(event.metadata_json)
 

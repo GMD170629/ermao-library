@@ -18,6 +18,7 @@ from app.contracts.local_metadata_snapshot import (
     LocalMetadataObservation,
     merge_observations,
 )
+from app.core.exception_diagnostics import capture_exception, exception_message
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -231,7 +232,6 @@ class ProcessReadableResourceImportTask:
                     error=ImportTaskRuleError(
                         "Task is missing its required resource_id or source_node_id"
                     ),
-                    task_id=task_id,
                     stage="import",
                     step="validate_task_shape",
                     outcome="failed",
@@ -304,7 +304,6 @@ class ProcessReadableResourceImportTask:
                 error=ImportTaskRuleError(
                     "Task resource or source node could not be loaded"
                 ),
-                task_id=task_id,
                 stage="import",
                 step="load_task_targets",
                 outcome="failed",
@@ -318,7 +317,6 @@ class ProcessReadableResourceImportTask:
                 error=ImportTaskRuleError(
                     "No registered adapter matches the resource adapter identity"
                 ),
-                task_id=task_id,
                 stage="import",
                 step="select_resource_adapter",
                 outcome="failed",
@@ -345,7 +343,6 @@ class ProcessReadableResourceImportTask:
                 error=ImportTaskRuleError(
                     "Resource task adapter kind, physical node kind, resource ownership or library does not match the queued target"
                 ),
-                task_id=task_id,
                 stage="import",
                 step="validate_task_target",
                 outcome="failed",
@@ -441,14 +438,12 @@ class ProcessReadableResourceImportTask:
                 for prepared in publications:
                     self._covers.publish(prepared)
             except OSError as error:
+                capture_exception(error)
                 self._log.emit(
                     "readable_resource.cover_publish_failed",
                     error=error,
                     stage="cover_publish",
                     outcome="COVER_PUBLISH_FAILED",
-                    task_id=task_id,
-                    resource_id=resource_id,
-                    source_node_id=source_node_id,
                 )
                 for prepared in publications:
                     self._covers.discard(prepared)
@@ -456,7 +451,7 @@ class ProcessReadableResourceImportTask:
                     if not run.is_current():
                         return ProcessTaskResult(task_id=task_id, outcome="cancelled")
                     run.fail(
-                        error_summary="COVER_PUBLISH_FAILED",
+                        error_summary=exception_message(error),
                         finished_at=self._clock.now(),
                     )
                 return ProcessTaskResult(task_id=task_id, outcome="failed")
@@ -528,9 +523,6 @@ class ProcessReadableResourceImportTask:
                                 f"Adapter returned ok={parsed.ok}, asset_present={parsed.asset is not None}, "
                                 f"error_code={parsed.error_code or 'NOT_PROVIDED'}, reason={parsed.error_summary or 'NOT_PROVIDED'}"
                             ),
-                            task_id=task_id,
-                            resource_id=resource_id,
-                            source_node_id=source_node_id,
                             stage="import",
                             step="read_parse_result",
                             outcome="failed",
@@ -542,7 +534,8 @@ class ProcessReadableResourceImportTask:
                             finished_at=self._clock.now(),
                             result_persisted=True,
                         )
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             if self._covers is not None:
                 for prepared in publications:
                     self._covers.discard(prepared)
@@ -553,9 +546,6 @@ class ProcessReadableResourceImportTask:
                     self._covers.discard(prepared)
             self._log.emit(
                 "readable_resource.task.cancelled",
-                library_id=library_id,
-                resource_id=resource_id,
-                task_id=task_id,
                 stage="import",
                 outcome="cancelled",
             )
@@ -573,9 +563,6 @@ class ProcessReadableResourceImportTask:
             self._sidecar.schedule_after_commit(resource_id)
         self._log.emit(
             "readable_resource.task.finished",
-            library_id=library_id,
-            resource_id=resource_id,
-            task_id=task_id,
             stage="import",
             outcome=outcome,
         )
@@ -713,7 +700,6 @@ class ProcessReadableResourceImportTask:
         adapter = context.adapter
         assert adapter is not None
         resource_id = context.resource.id
-        library_id = context.resource.library_id
         absolute = self._filesystem.resolve_under_root(
             context.root_path, context.node.relative_path
         )
@@ -801,12 +787,10 @@ class ProcessReadableResourceImportTask:
                                         )
                                     )
                                 except ValueError as cover_error:
+                                    capture_exception(cover_error)
                                     self._log.emit(
                                         "readable_resource.audio_cover.rejected",
                                         error=cover_error,
-                                        library_id=library_id,
-                                        resource_id=resource_id,
-                                        task_id=task_id,
                                         stage="cover_prepare",
                                         outcome="invalid",
                                     )
@@ -826,29 +810,22 @@ class ProcessReadableResourceImportTask:
                             f"Adapter returned ok={parsed.ok}, asset_present={parsed.asset is not None}, "
                             f"error_code={parsed.error_code or 'NOT_PROVIDED'}, reason={parsed.error_summary or 'NOT_PROVIDED'}"
                         ),
-                        task_id=task_id,
-                        resource_id=resource_id,
-                        source_node_id=member.node.id,
                         stage="import",
                         step="read_asset_parse_result",
                         outcome="failed",
                     )
                     error = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
             except OSError as io_error:
+                capture_exception(io_error)
                 self._log.emit(
                     "readable_resource.asset_unreadable",
                     error=io_error,
                     stage="asset_parse",
-                    task_id=task_id,
                     outcome="IMAGE_FILE_UNREADABLE"
                     if adapter.asset_role is AssetRole.PAGE
                     else "AUDIO_FILE_UNREADABLE",
                 )
-                error = (
-                    "IMAGE_FILE_UNREADABLE"
-                    if adapter.asset_role is AssetRole.PAGE
-                    else "AUDIO_FILE_UNREADABLE"
-                )
+                error = exception_message(io_error)
             after = self._filesystem.observe_readable_file(path)
             if before != after:
                 changed = True
@@ -869,7 +846,7 @@ class ProcessReadableResourceImportTask:
                 if not self._save_directory_batch(task_id, context, tuple(batch), run):
                     return ProcessTaskResult(task_id, "cancelled")
                 batch.clear()
-        errors = self._books_resources.has_failed_directory_assets(resource_id)
+        error_summary = self._books_resources.directory_failure_summary(resource_id)
 
         # Directory candidates are inspected once; file observations remain file-owned.
         with self._uow.transaction():
@@ -927,12 +904,10 @@ class ProcessReadableResourceImportTask:
                     )
                     break
                 except ValueError as cover_error:
+                    capture_exception(cover_error)
                     self._log.emit(
                         "readable_resource.directory_cover.rejected",
                         error=cover_error,
-                        library_id=library_id,
-                        resource_id=resource_id,
-                        task_id=task_id,
                         stage="cover_prepare",
                         outcome="invalid",
                     )
@@ -976,12 +951,10 @@ class ProcessReadableResourceImportTask:
                                 selected = True
                                 break
                             except ValueError as cover_error:
+                                capture_exception(cover_error)
                                 self._log.emit(
                                     "readable_resource.first_page_cover.rejected",
                                     error=cover_error,
-                                    library_id=library_id,
-                                    resource_id=resource_id,
-                                    task_id=task_id,
                                     stage="cover_prepare",
                                     outcome="invalid",
                                 )
@@ -1016,11 +989,9 @@ class ProcessReadableResourceImportTask:
                     self._books_resources.refresh_audio_resource_aggregates(resource_id)
                 else:
                     self._books_resources.set_resource_page_count(resource_id, count)
-                if errors:
+                if error_summary is not None:
                     run.fail(
-                        error_summary="IMAGE_ASSETS_FAILED"
-                        if adapter.asset_role is AssetRole.PAGE
-                        else "AUDIO_ASSETS_FAILED",
+                        error_summary=error_summary,
                         finished_at=self._clock.now(),
                         result_persisted=True,
                     )
@@ -1031,7 +1002,7 @@ class ProcessReadableResourceImportTask:
             if prepared is not None and not committed and self._covers is not None:
                 self._covers.discard(prepared)
         return ProcessTaskResult(
-            task_id, "failed" if errors else "changed" if changed else "ok"
+            task_id, "failed" if error_summary is not None else "changed" if changed else "ok"
         )
 
     def _save_directory_batch(
@@ -1124,7 +1095,6 @@ class ProcessReadableResourceImportTask:
         """Prepare resource artwork outside the persistence transaction."""
         resource = context.resource
         resource_id = resource.id
-        library_id = resource.library_id
         source_node_id = context.node.id
         local_metadata_priority = context.local_metadata_priority
         prepared_covers: dict[LocalMetadataSource, PreparedLocalCover] = {}
@@ -1145,16 +1115,15 @@ class ProcessReadableResourceImportTask:
                             prepared_by_digest[digest] = prepared
                         prepared_covers[candidate.source] = prepared
                     except ValueError as error:
+                        capture_exception(error)
                         self._log.emit(
                             "readable_resource.local_cover.rejected",
                             error=error,
-                            library_id=library_id,
-                            resource_id=resource_id,
-                            task_id=task_id,
                             stage="local_metadata",
                             outcome="invalid",
                         )
-            except Exception:
+            except Exception as _caught_error:
+                capture_exception(_caught_error)
                 for prepared in prepared_by_digest.values():
                     self._covers.discard(prepared)
                 raise
@@ -1191,12 +1160,10 @@ class ProcessReadableResourceImportTask:
                             content=content,
                         )
                     except ValueError as error:
+                        capture_exception(error)
                         self._log.emit(
                             "readable_resource.first_page_cover.rejected",
                             error=error,
-                            library_id=library_id,
-                            resource_id=resource_id,
-                            task_id=task_id,
                             stage="cover_prepare",
                             outcome="invalid",
                         )

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import capture_exception
 from app.models import (
     Library,
     LibraryBook,
@@ -149,6 +150,7 @@ class SqlAlchemySourceNodeMetadata(SourceNodeMetadataPort):
         try:
             target.relative_to(root)
         except ValueError as exc:
+            capture_exception(exc, persist=False)
             raise ValueError("source node path escapes its library root") from exc
         return target
 

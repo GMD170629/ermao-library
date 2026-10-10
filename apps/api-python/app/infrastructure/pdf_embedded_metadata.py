@@ -12,7 +12,7 @@ from pypdf.errors import PdfReadError
 from pypdf.generic import IndirectObject, StreamObject
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.publication_date import validated_publication_date
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 
@@ -86,6 +86,7 @@ def decode_pdf_xmp_stream(value: object) -> bytes | None:
     try:
         content = decoder.decompress(raw, XMP_BYTES_LIMIT + 1)
     except zlib.error as error:
+        capture_exception(error, persist=False)
         raise PdfXmpDecodeError("INVALID_XMP") from error
     if (
         len(content) > XMP_BYTES_LIMIT
@@ -198,11 +199,11 @@ def read_pdf_embedded_metadata(pdf: StrictMetadataPdfReader) -> PublicationMetad
         PdfReadError,
         etree.XMLSyntaxError,
     ) as error:
+        capture_exception(error, persist=False)
         record_exception(
             _LOGGER,
             "infrastructure.pdf_embedded_metadata.xmp_unavailable",
             error,
-            context={"step": "read_xmp"},
         )
         return info
     return PublicationMetadata(

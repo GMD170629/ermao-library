@@ -5,7 +5,7 @@ from io import BytesIO
 
 from PIL import Image, UnidentifiedImageError
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 
 def valid_local_cover(content: bytes | None) -> bytes | None:
@@ -17,7 +17,7 @@ def valid_local_cover(content: bytes | None) -> bytes | None:
                 return None
             image.verify()
     except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as error:
-        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_validation.valid_local_cover.failed", error,
-                         context={"step": "valid_local_cover"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_validation.valid_local_cover.failed", error)
         return None
     return content

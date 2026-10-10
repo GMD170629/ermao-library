@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy import create_engine, event, insert
 from sqlalchemy.orm import sessionmaker
 
 from app.core.exception_diagnostics import (
@@ -22,6 +22,7 @@ from app.modules.imports.infrastructure.readable_resource.support import (
 from app.modules.imports.infrastructure.readable_resource.worker import (
     ReadableResourceWorkerProcessor,
 )
+from tests.support.log_events import log_records
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ class _OrderHandler(logging.Handler):
         self._order = order
 
     def emit(self, record: logging.LogRecord) -> None:
-        if "containment_failure" in record.getMessage():
+        if "RuntimeError: scan failure under business write lock" in record.getMessage():
             self._order.append("log")
 
 
@@ -115,7 +116,7 @@ def _engines(tmp_path: Path) -> tuple[Engine, Engine]:
     return business_engine, recorder_engine
 
 
-def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path) -> None:
+def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path, monkeypatch) -> None:
     business_engine, recorder_engine = _engines(tmp_path)
     business_factory = sessionmaker(
         bind=business_engine,
@@ -133,12 +134,13 @@ def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path) -> None:
     order: list[str] = []
     event.listen(business, "after_rollback", lambda _session: order.append("rollback"))
 
-    def _capture_event_insert(conn, cursor, statement, parameters, context, executemany):
-        if statement.strip().upper().startswith('INSERT INTO "SYSTEMEVENT"'):
-            order.append("insert_event")
-
-    event.listen(recorder_engine, "before_cursor_execute", _capture_event_insert)
-    pipeline_logger = logging.getLogger("ermao.readable_resource_pipeline")
+    from app.modules.system.infrastructure import log_files
+    append = log_files.append_log_event
+    def capture_append(row):
+        order.append("append_file")
+        return append(row)
+    monkeypatch.setattr(log_files, "append_log_event", capture_append)
+    pipeline_logger = logging.getLogger("ermao.exceptions")
     handler = _OrderHandler(order)
     pipeline_logger.addHandler(handler)
     previous_level = pipeline_logger.level
@@ -172,18 +174,16 @@ def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path) -> None:
         business.close()
 
     assert outcome == "failed"
-    assert queue.failed == "WORKER_ERROR"
+    assert queue.failed == "RuntimeError: scan failure under business write lock"
     # Prepare (running log) first, then the real rollback releases the business
     # write lock, and only then the independent diagnostic insert happens.
-    assert order == ["log", "rollback", "insert_event"], order
+    assert order == ["log", "rollback", "append_file"], order
 
     recorder = recorder_factory()
     try:
-        persisted = list(
-            recorder.scalars(select(SystemEvent).where(SystemEvent.source == "import"))
-        )
+        persisted = [row for row in log_records() if row.source == 'import']
         assert len(persisted) == 1
-        assert persisted[0].target_id == "task-1"
+        assert not hasattr(persisted[0], "target_id")
         assert "scan failure under business write lock" in persisted[
             0
         ].metadata_json["diagnostics"]["traceback"]

@@ -17,7 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.bootstrap import bootstrap_database
 from app.db.diagnostic_session import DiagnosticSession
 from app.db.maintenance import (
@@ -184,24 +184,25 @@ def upload_backup(settings: Settings, filename: str, stream: BinaryIO) -> Path:
                 # Atomic no-replace publication, on the same filesystem on Windows/Linux.
                 os.link(temporary_path, candidate)
                 break
-            except FileExistsError:
+            except FileExistsError as _caught_error:
                 # diagnostics-control-flow: another upload owns this name; try the next index.
+                capture_exception(_caught_error)
                 index += 1
     except Exception as original:
+        capture_exception(original, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "backup.upload.failed",
             original,
-            context={"stage": "upload"},
         )
         try:
             temporary_path.unlink(missing_ok=True)
         except OSError as cleanup:
+            capture_exception(cleanup, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "backup.upload.cleanup_failed",
                 cleanup,
-                context={"stage": "upload_cleanup"},
             )
             raise ExceptionGroup(
                 "Backup upload and cleanup failed", [original, cleanup]
@@ -383,11 +384,11 @@ def backup_record(path: Path, required_revision: str) -> dict[str, Any]:
         size = stat.st_size
         created_at = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
     except OSError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "backup.stat.failed",
             error,
-            context={"stage": "inspect"},
         )
         inspected = replace(
             inspected,
@@ -402,9 +403,9 @@ def backup_record(path: Path, required_revision: str) -> dict[str, Any]:
     if isinstance(metadata.get("createdAt"), str):
         try:
             created_at = datetime.fromisoformat(str(metadata["createdAt"])).isoformat()
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: inspection already reports the invalid metadata.
-            pass
+            capture_exception(_caught_error)
     counts = metadata.get("counts")
     if not isinstance(counts, dict) or any(
         not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in counts.values()
@@ -446,6 +447,7 @@ def parse_backup(path: Path) -> tuple[dict[str, object], dict[str, object]]:
         with zipfile.ZipFile(path) as archive:
             database_export = json.loads(archive.read("database-export.json"))
     except (KeyError, ValueError, UnicodeError, zipfile.BadZipFile) as exc:
+        capture_exception(exc, persist=False)
         raise BackupOperationError(
             problem(
                 "BACKUP_DATA_INVALID",
@@ -575,11 +577,11 @@ def restore_backup(
         ):
             ApplyValidatedBackupRestore(writer, db).execute(plan)
     except Exception as original:
+        capture_exception(original, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "backup.restore.apply_failed",
             original,
-            context={"stage": "restore"},
         )
         try:
             ApplyValidatedBackupRestore(writer, db).execute(
@@ -589,11 +591,11 @@ def restore_backup(
                 )
             )
         except Exception as recovery:  # noqa: BLE001 - preserve the recovery failure alongside the original.
+            capture_exception(recovery, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "backup.restore.recovery_failed",
                 recovery,
-                context={"stage": "rollback"},
             )
             raise ExceptionGroup(
                 "Backup restore and recovery failed", [original, recovery]

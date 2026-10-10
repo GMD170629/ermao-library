@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 
 from app.contracts.automation_upload import UploadError, UploadOutcome
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.deletions import deletion_result
 from app.modules.automation.application.file_moves import move_actor
 from app.modules.automation.application.grants import (
@@ -238,9 +239,9 @@ class ManageAutomationOperations:
                 StandardMetadataError,
                 UploadError,
             ) as error:
+                capture_exception(error, persist=False)
                 diagnostic = self.diagnostics.prepare(
                     error, event="automation.operation_unavailable",
-                    context={"operation_id": reference.operation_id, "step": "read_operation"},
                 )
                 self.uow.rollback()
                 self.diagnostics.persist(diagnostic)
@@ -271,6 +272,7 @@ class ManageAutomationOperations:
             result = self.get(user_id, operation_id)
             self.uow.commit()
             return result
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise

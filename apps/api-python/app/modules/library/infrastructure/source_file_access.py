@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.source_browser import SourceAccessError
 from app.modules.library.domain.source_nodes import (
     SourceNodeRelativePath,
@@ -32,9 +33,11 @@ def open_library_directory(root: Path, relative_path: str = "") -> Iterator[int]
                     name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
                 )
                 descriptors.append(directory)
-        except FileNotFoundError:
+        except FileNotFoundError as _caught_error:
+            capture_exception(_caught_error, persist=False)
             raise
         except OSError as error:
+            capture_exception(error, persist=False)
             raise SourceAccessError("SOURCE_UNAVAILABLE") from error
         yield directory
     finally:
@@ -54,9 +57,11 @@ def open_library_file(root: Path, relative_path: str) -> Iterator[int]:
             descriptor = os.open(
                 name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
             )
-        except FileNotFoundError:
+        except FileNotFoundError as _caught_error:
+            capture_exception(_caught_error, persist=False)
             raise
         except OSError as error:
+            capture_exception(error, persist=False)
             raise SourceAccessError("SOURCE_UNAVAILABLE") from error
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):

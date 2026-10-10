@@ -9,9 +9,10 @@ import app.bootstrap.download as download_bootstrap
 from app.bootstrap.system import prepare_system_event
 from app.models import LibraryBook, LibrarySourceNode
 from app.models.import_pipeline import DownloadTask
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.modules.download.application.dto import CreateDownloadTask
 from tests.conftest import recreate_application_schema
+from tests.support.log_events import log_records
 from tests.support.sqlalchemy import StatementRecorder
 
 
@@ -65,13 +66,13 @@ def _event(task_id: str):
     return prepare_system_event(
         source="download",
         action="created",
-        target_type="downloadTask",
-        target_id=task_id,
         message="Download task created",
     )
 
 
-def test_create_download_task_is_three_set_based_writes(db_session) -> None:
+def test_create_download_task_writes_only_business_state(db_session) -> None:
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     _prepare_schema(db_session)
     _seed_book(db_session)
     command = _command("download-set-write")
@@ -86,7 +87,7 @@ def test_create_download_task_is_three_set_based_writes(db_session) -> None:
         )
 
     assert result.id == command.id
-    assert recorder.dml_count == 3
+    assert recorder.dml_count == 2
     task = db_session.get(DownloadTask, command.id)
     assert task is not None
     assert task.book_id == "download-book"
@@ -98,9 +99,7 @@ def test_create_download_task_is_three_set_based_writes(db_session) -> None:
         )
         == '"/tmp/downloads"'
     )
-    assert db_session.scalar(
-        select(SystemEvent.id).where(SystemEvent.target_id == command.id)
-    )
+    assert next(iter([row.id for row in log_records() if row.source == 'download' and row.action == 'created']), None)
 
 
 def test_create_download_task_rolls_back_state_when_event_write_fails(

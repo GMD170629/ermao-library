@@ -21,7 +21,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_budget,
     reader_safety_rule,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.audio_types import (
     MAX_AUDIO_BUNDLE_TRACKS,
@@ -234,8 +234,8 @@ def parse_audio_metadata(
     try:
         merged = _read_with_mutagen(source)
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata.parse_audio_metadata.failed", error,
-                         context={"step": "parse_audio_metadata"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata.parse_audio_metadata.failed", error)
         merged = {}
     codec = _normalize_audio_codec(str(merged.get("codec") or "")) or None
     duration_ms = _positive_int(merged.get("duration_ms"))
@@ -257,6 +257,7 @@ def parse_audio_metadata(
             start_ms = int(item.get("start_ms") or 0)
             end_ms = int(item.get("end_ms") or 0)
         except (TypeError, ValueError, OverflowError) as error:
+            capture_exception(error, persist=False)
             raise _audio_policy_error(
                 ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
                 "音频章节时间范围无效",
@@ -333,6 +334,7 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     try:
         payload = json.loads(stdout.decode("utf-8", errors="strict") or "{}")
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        capture_exception(exc, persist=False)
         raise AudioInspectionError(
             "AUDIO_METADATA_INVALID", "ffprobe 返回了无效的音频元数据"
         ) from exc
@@ -459,14 +461,13 @@ def _raw_audio_duration_ms(
     )
     if returncode != 0:
         failure = subprocess.CalledProcessError(returncode, "ffprobe", stderr=_stderr)
-        record_exception(logging.getLogger(__name__), "audio.duration_probe_failed", failure,
-                         context={"step": "count_audio_packets", "exit_code": returncode})
+        record_exception(logging.getLogger(__name__), "audio.duration_probe_failed", failure)
         return 0
     try:
         payload = json.loads(stdout.decode("utf-8", errors="strict") or "{}")
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._raw_audio_duration_ms.failed", error,
-                         context={"step": "_raw_audio_duration_ms"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._raw_audio_duration_ms.failed", error)
         return 0
     streams = payload.get("streams") if isinstance(payload.get("streams"), list) else []
     packet_count = (
@@ -492,6 +493,7 @@ def _run_process_with_output_limit(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
     except OSError as exc:
+        capture_exception(exc, persist=False)
         raise ValueError(f"ffprobe 读取音频失败：{exc}") from exc
     stdout_pipe = process.stdout
     stderr_pipe = process.stderr
@@ -544,6 +546,7 @@ def _run_process_with_output_limit(
         try:
             returncode = process.wait(timeout=remaining)
         except subprocess.TimeoutExpired as exc:
+            capture_exception(exc)
             process.kill()
             process.wait()
             raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）") from exc
@@ -650,6 +653,7 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
         with LimitedReader(path) as source:
             audio = reader(source)
     except Exception as exc:
+        capture_exception(exc, persist=False)
         raise ValueError(f"Mutagen 读取音频失败：{exc}") from exc
     if audio is None:
         return {}
@@ -677,8 +681,8 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
             id3_chapters = list(tags.getall("CHAP"))
         # ID3 implementations can raise plugin-specific errors at this adapter boundary.
         except Exception as error:  # noqa: BLE001
-            record_exception(logging.getLogger(__name__), "services.audio_metadata._read_with_mutagen.failed", error,
-                             context={"step": "_read_with_mutagen"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.audio_metadata._read_with_mutagen.failed", error)
             id3_chapters = []
     if id3_chapters:
         chapters = []
@@ -785,8 +789,8 @@ def _normalized_mutagen_tags(
     try:
         items = tags.items()
     except AttributeError as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._normalized_mutagen_tags.failed", error,
-                         context={"step": "_normalized_mutagen_tags"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._normalized_mutagen_tags.failed", error)
         return output
     for key, value in items:
         frame = value
@@ -817,8 +821,8 @@ def _mutagen_declared_text_encoding(frame: Any) -> str | None:
     try:
         return MUTAGEN_TEXT_ENCODINGS.get(int(value))
     except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_declared_text_encoding.failed", error,
-                         context={"step": "_mutagen_declared_text_encoding"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_declared_text_encoding.failed", error)
         return None
 
 
@@ -870,8 +874,9 @@ def _repair_misdecoded_text(
         return value, None
     try:
         raw = value.encode("latin-1", errors="strict")
-    except UnicodeEncodeError:
+    except UnicodeEncodeError as _caught_error:
         # diagnostics-control-flow: Legacy-encoded tag detection is a probe; retain Unicode when not encodable.
+        capture_exception(_caught_error)
         return value, None
 
     original_score = _decoded_text_quality(value)
@@ -881,8 +886,9 @@ def _repair_misdecoded_text(
             decoded = raw.decode(encoding, errors="strict")
             if decoded.encode(encoding, errors="strict") != raw:
                 continue
-        except (UnicodeDecodeError, UnicodeEncodeError):
+        except (UnicodeDecodeError, UnicodeEncodeError) as _caught_error:
             # diagnostics-control-flow: Try alternate legacy encodings before retaining the original tag.
+            capture_exception(_caught_error)
             continue
         if decoded == value or not decoded.strip() or "\ufffd" in decoded:
             continue
@@ -1021,8 +1027,8 @@ def _mutagen_cover(tags: Any) -> tuple[bytes | None, str | None]:
             picture = next(iter(tags.getall("APIC")), None)
         # Cover frames come from third-party tag implementations with no common error type.
         except Exception as error:  # noqa: BLE001
-            record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_cover.failed", error,
-                             context={"step": "_mutagen_cover"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_cover.failed", error)
             picture = None
         data = getattr(picture, "data", None)
         if isinstance(data, bytes):
@@ -1031,8 +1037,8 @@ def _mutagen_cover(tags: Any) -> tuple[bytes | None, str | None]:
     try:
         covers = tags.get("covr") or tags.get("cover")
     except AttributeError as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_cover.failed", error,
-                         context={"step": "_mutagen_cover"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._mutagen_cover.failed", error)
         covers = None
     if isinstance(covers, (list, tuple)) and covers:
         data = bytes(covers[0])
@@ -1108,8 +1114,8 @@ def _seconds_to_ms(value: Any) -> int:
     try:
         return max(0, round(float(value) * 1000))
     except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._seconds_to_ms.failed", error,
-                         context={"step": "_seconds_to_ms"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._seconds_to_ms.failed", error)
         return 0
 
 
@@ -1119,8 +1125,8 @@ def _positive_int(value: Any) -> int | None:
     try:
         parsed = int(float(value))
     except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "services.audio_metadata._positive_int.failed", error,
-                         context={"step": "_positive_int"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.audio_metadata._positive_int.failed", error)
         return None
     return parsed if parsed > 0 else None
 

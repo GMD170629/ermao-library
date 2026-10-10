@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.media.application.resource_preview import (
     ResourcePreviewNotFoundError,
     ResourcePreviewUnavailableError,
@@ -24,6 +24,6 @@ class FilesystemFirstPageCover:
         try:
             return self._renderer.render(PageImageSource(source_format, path), 0)
         except (ResourcePreviewNotFoundError, ResourcePreviewUnavailableError) as error:
-            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.first_page_cover.extract.failed", error,
-                             context={"step": "extract"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.first_page_cover.extract.failed", error)
             return None

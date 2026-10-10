@@ -92,26 +92,17 @@ class FeedbackLogEvent(BaseModel):
     id: str
     level: str
     source: str
-    action: str
     message: str
     created_at: str = Field(alias="createdAt")
-    stage: str
     exception_type: str = Field(alias="exceptionType")
     diagnostic_message: str = Field(alias="diagnosticMessage")
     traceback: str
-
-
-class FeedbackRelatedBook(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    title: str
 
 
 class FeedbackLogDiagnostics(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     selected_event_id: str = Field(alias="selectedEventId")
     events: list[FeedbackLogEvent]
-    related_books: list[FeedbackRelatedBook] = Field(alias="relatedBooks")
 
 
 class FeedbackDiagnostics(BaseModel):

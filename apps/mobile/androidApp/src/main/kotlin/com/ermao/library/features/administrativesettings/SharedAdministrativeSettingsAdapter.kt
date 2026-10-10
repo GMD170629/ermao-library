@@ -220,7 +220,7 @@ class SharedAdministrativeSettingsAdapter(
             currentHealthRun = run
             AdministrativeCommandReceipt(setOf(AdministrativeSettingsRoute.Health(run.runId)))
         }
-        is AdministrativeCommand.SaveLogCapacity -> sharedRepository.updateLogCapacity(sharedContext, command.megabytes.toLong() * 1024L * 1024L).receipt(command)
+        is AdministrativeCommand.SaveLogRetention -> sharedRepository.updateLogRetention(sharedContext, command.days).receipt(command)
         is AdministrativeCommand.ExportLogs -> exportLogs(command)
         AdministrativeCommand.ClearInformationalLogs -> sharedRepository.clearManagementEvents(sharedContext).receipt(command)
     }
@@ -323,9 +323,9 @@ class SharedAdministrativeSettingsAdapter(
         }
         return AdministrativeResult.Content(
             LogsSnapshot(
-                LogQuery(), (page.storage.sizeBytes / 1_048_576L).toInt(), (page.storage.maximumBytes / 1_048_576L).toInt(),
+                LogQuery(), (page.storage.sizeBytes / 1_048_576L).toInt(), page.storage.retentionDays,
                 page.events.map { event ->
-                    LogRecord(event.id, event.createdAt.orEmpty(), event.level.toLogLevel(), event.source, event.message, event.metadata["correlation_id"].asText(), event.targetId)
+                    LogRecord(event.id, event.createdAt.orEmpty(), event.level.toLogLevel(), event.source, event.message)
                 },
             ),
         )
@@ -408,9 +408,9 @@ class SharedAdministrativeSettingsAdapter(
         val filter = command.query.toShared()
         return sharedRepository.loadAllManagementEventsForExport(sharedContext, filter).map { events ->
             val csv = buildString {
-                appendLine("id,timestamp,level,source,action,target_type,target_id,message")
+                appendLine("id,timestamp,level,source,message")
                 events.forEach { event ->
-                    appendLine(listOf(event.id, event.createdAt.orEmpty(), event.level, event.source, event.action, event.targetType.orEmpty(), event.targetId.orEmpty(), event.message).joinToString(",", transform = ::csv))
+                    appendLine(listOf(event.id, event.createdAt.orEmpty(), event.level, event.source, event.message).joinToString(",", transform = ::csv))
                 }
             }
             AdministrativeCommandReceipt(setOf(command.ownerRoute), AdministrativeExportFile("ermao-management-events.csv", "text/csv", csv.encodeToByteArray()))
@@ -686,6 +686,7 @@ private fun String.toHealthGroup() = when {
 }
 
 private fun String.toLogLevel() = when (lowercase()) {
+    "debug" -> LogLevel.Debug
     "error", "critical" -> LogLevel.Error
     "warning", "warn" -> LogLevel.Warning
     else -> LogLevel.Information

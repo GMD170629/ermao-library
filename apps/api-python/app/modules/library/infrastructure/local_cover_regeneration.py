@@ -10,7 +10,7 @@ from typing import TypedDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models import (
@@ -82,8 +82,8 @@ class FilesystemLocalMetadataCoverParser:
             resource_path = (root / source.resource_relative_path).resolve(strict=True)
             resource_path.relative_to(root)
         except (OSError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error,
-                             context={"step": "extract_cover"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error)
             return "LOCAL_METADATA_SOURCE_UNAVAILABLE"
 
         saw_readable_source = False
@@ -109,12 +109,12 @@ class FilesystemLocalMetadataCoverParser:
                     source_order=source.local_metadata_priority,
                 )
             except OSError as error:
-                record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error,
-                                 context={"step": "extract_cover"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error)
                 continue
             except (RuntimeError, ValueError) as error:
-                record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error,
-                                 context={"step": "extract_cover"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.library.infrastructure.local_cover_regeneration.extract_cover.failed", error)
                 saw_parse_failure = True
                 continue
             if not page_fallback:

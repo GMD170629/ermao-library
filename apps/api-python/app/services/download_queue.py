@@ -13,6 +13,7 @@ from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import (
+    capture_exception,
     exception_diagnostic_boundary,
     record_exception,
 )
@@ -61,18 +62,18 @@ class DownloadQueueWorker:
             self._thread.join()
 
     def process_once(self) -> bool:
-        with exception_diagnostic_boundary(logger, "download_queue.execution", context={}):
+        with exception_diagnostic_boundary(logger, "download_queue.execution"):
             if not self._process_lock.acquire(blocking=False):
                 return False
             try:
                 with self.db_factory() as db:
                     return process_next_download_task(db, self.settings)
             except Exception as exc:
+                capture_exception(exc, persist=False)
                 record_exception(
                     logger,
                     "download_queue.task_failed",
                     exc,
-                    context={"stage": "download_queue", "outcome": "error"},
                     source="download",
                     action="download.task_failed",
                 )
@@ -90,11 +91,11 @@ class DownloadQueueWorker:
                         processed=processed, error=None, status="running"
                     )
                 except Exception as exc:  # noqa: BLE001 - thread must not die
+                    capture_exception(exc, persist=False)
                     record_exception(
                         logger,
                         "download_queue.loop_failure",
                         exc,
-                        context={"stage": "download_queue", "outcome": "error"},
                         source="download",
                         action="download.loop_failure",
                     )
@@ -148,8 +149,8 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
                     flush=True,
                 )
             except Exception as exc:  # noqa: BLE001 - import handoff containment.
-                record_exception(logging.getLogger(__name__), "services.download_queue.process_next_download_task.failed", exc,
-                                 context={"step": "process_next_download_task"})
+                capture_exception(exc, persist=False)
+                record_exception(logging.getLogger(__name__), "services.download_queue.process_next_download_task.failed", exc)
 
     return True
 
@@ -163,8 +164,8 @@ def _library_id(db: Session, path: Path) -> str | None:
         try:
             root = Path(str(folder["rootPath"])).expanduser().resolve()
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "services.download_queue._library_id.failed", error,
-                             context={"step": "_library_id"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "services.download_queue._library_id.failed", error)
             continue
         if resolved == root or root in resolved.parents:
             matches.append((len(root.parts), str(folder["id"])))
@@ -181,7 +182,8 @@ def start_download_queue_worker(
     worker = DownloadQueueWorker(db_factory, settings, heartbeat_db_factory)
     try:
         worker.start()
-    except BaseException:
+    except BaseException as _caught_error:
+        capture_exception(_caught_error)
         worker.stop()
         raise
     return worker

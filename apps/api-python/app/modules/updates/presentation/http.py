@@ -22,7 +22,7 @@ from app.contracts.http_errors import (
 )
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
 from app.schemas.responses import fail, ok
 
@@ -55,11 +55,10 @@ def use_cases(request: Request) -> UpdatePreparation:
 
 
 def update_error(error: UpdateError) -> Response:
-    diagnostic_id = record_exception(
+    record_exception(
         LOGGER,
         "application_update.request_failed",
         error,
-        context={"stage": "update_request", "code": error.code},
         source="updates",
     )
     response = fail(
@@ -67,7 +66,7 @@ def update_error(error: UpdateError) -> Response:
         status_code=409 if error.code == "UPDATE_BUSY" else 400,
         code=error.code,
     )
-    response.headers["X-Error-Id"] = diagnostic_id
+
     return response
 
 
@@ -89,6 +88,7 @@ def check_updates(
     try:
         return ok(updates.check(allowed))
     except UpdateError as rejected:
+        capture_exception(rejected)
         return update_error(rejected)
 
 
@@ -131,6 +131,7 @@ def prepare_update(
             status_code=202,
         )
     except UpdateError as rejected:
+        capture_exception(rejected)
         return update_error(rejected)
 
 
@@ -178,6 +179,7 @@ def install_update(
             status_code=202,
         )
     except UpdateError as rejected:
+        capture_exception(rejected)
         return update_error(rejected)
 
 
@@ -204,6 +206,7 @@ def update_status(
     try:
         return ok(updates.status(allowed))
     except UpdateError as rejected:
+        capture_exception(rejected)
         return update_error(rejected)
 
 

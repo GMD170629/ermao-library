@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.bootstrap.automation import build_automation_authorizer, build_grant_manager
 from app.models import Library
 from app.models.auth import User
-from app.models.settings import SystemEvent
 from app.modules.automation.application.grants import AuthorizeAutomation, ManageGrants
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import (
@@ -25,6 +24,7 @@ from app.modules.system.infrastructure.automation_audit import SqlAlchemyAutomat
 from app.modules.system.infrastructure.automation_settings import (
     SqlAlchemyAutomationSettings,
 )
+from tests.support.log_events import log_records
 
 
 class Identities:
@@ -227,4 +227,5 @@ def test_audit_failure_rolls_back_grant_and_event_together(db_session, tmp_path)
             ),
         )
     assert list(db_session.scalars(select(AutomationGrantRow))) == []
-    assert list(db_session.scalars(select(SystemEvent))) == []
+    assert not any(row.action == "automation.grant.created" for row in log_records())
+    assert any("injected audit persistence failure" in row.message for row in log_records())

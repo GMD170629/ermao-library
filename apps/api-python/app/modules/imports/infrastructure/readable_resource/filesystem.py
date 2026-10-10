@@ -9,7 +9,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import read_optional_file
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.imports.application.readable_resource.ports import (
@@ -64,11 +64,11 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     continue
                 metadata = parse_opf_metadata(content)
             except (OSError, OpfMetadataError) as error:
+                capture_exception(error, persist=False)
                 record_exception(
                     logging.getLogger(__name__),
                     "modules.imports.infrastructure.readable_resource.filesystem.metadata_input_observations.failed",
                     error,
-                    context={"step": "metadata_input_observations"},
                 )
                 continue
             cover = safe_sidecar_cover_path(path, metadata.cover_href)
@@ -89,12 +89,14 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         try:
             candidate.relative_to(root_resolved)
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise ValueError("path_escapes_library_root") from error
         if candidate.is_symlink():
             real = candidate.parent.resolve() / candidate.name
             try:
                 real.relative_to(root_resolved)
             except ValueError as error:
+                capture_exception(error, persist=False)
                 raise ValueError("symlink_escapes_library_root") from error
         return candidate
 
@@ -115,11 +117,11 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                         else int(stat.st_size)
                     )
                 except OSError as error:
+                    capture_exception(error, persist=False)
                     record_exception(
                         logging.getLogger(__name__),
                         "modules.imports.infrastructure.readable_resource.filesystem.iter_directory_entries.failed",
                         error,
-                        context={"step": "iter_directory_entries"},
                     )
                     yield UnreadableDirectoryEntry(name=entry.name, error=error)
                     continue
@@ -176,11 +178,11 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     else self.iter_directory_entries(absolute)
                 )
             except OSError as error:
+                capture_exception(error, persist=False)
                 record_exception(
                     logging.getLogger(__name__),
                     "modules.imports.infrastructure.readable_resource.filesystem.probe_directory.failed",
                     error,
-                    context={"step": "probe_directory"},
                 )
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
@@ -229,11 +231,11 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     if cached is None and listings is not None:
                         listings[relative_dir] = tuple(complete)
             except OSError as error:
+                capture_exception(error, persist=False)
                 record_exception(
                     logging.getLogger(__name__),
                     "modules.imports.infrastructure.readable_resource.filesystem.probe_directory.failed",
                     error,
-                    context={"step": "probe_directory"},
                 )
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
@@ -259,11 +261,11 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             iterator.close()
             return True
         except OSError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.imports.infrastructure.readable_resource.filesystem.path_is_readable_directory.failed",
                 error,
-                context={"step": "path_is_readable_directory"},
             )
             return False
 
@@ -283,20 +285,20 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         except FileNotFoundError as error:
             # diagnostics-control-flow: optional metadata candidates may be absent;
             # required source files and referenced cover assets still record ENOENT.
-            if not missing_ok:
-                record_exception(
-                    logging.getLogger(__name__),
-                    "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
-                    error,
-                    context={"step": "observe_readable_file"},
-                )
-            return None
-        except OSError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
                 error,
-                context={"step": "observe_readable_file"},
+                level="debug" if missing_ok else "error",
+            )
+            return None
+        except OSError as error:
+            capture_exception(error, persist=False)
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
+                error,
             )
             return None
 
@@ -315,6 +317,7 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         try:
             target.relative_to(root_resolved)
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise ValueError("path_escapes_library_root") from error
         if target == root_resolved:
             raise ValueError("refuse_to_delete_library_root")

@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from app.contracts.automation_upload import UploadError, UploadPublication, UploadTarget
 from app.contracts.file_operation import FileOperationError
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.copied_file_attributes import (
     apply_copy_attributes,
     read_copy_attributes,
@@ -82,10 +83,12 @@ class AtomicUploadedFilePublisher:
                     )
                 )
         except OSError as exc:
+            capture_exception(exc, persist=False)
             raise UploadPublicationError(
                 "unable to save upload files", saved_files=tuple(saved_files)
             ) from exc
         except UploadPublicationError as exc:
+            capture_exception(exc)
             exc.saved_files = tuple(saved_files)
             raise
         return tuple(saved_files)
@@ -102,8 +105,9 @@ class AtomicUploadedFilePublisher:
             self._check_parent(directory, target)
             try:
                 existing = os.stat(name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
+            except FileNotFoundError as _caught_error:
                 # diagnostics-control-flow: absence is expected for a new upload.
+                capture_exception(_caught_error, level="debug")
                 if target.original is not None:
                     raise UploadError("SOURCE_CHANGED") from None
             else:
@@ -118,8 +122,9 @@ class AtomicUploadedFilePublisher:
                     0o600,
                     dir_fd=directory,
                 )
-            except FileExistsError:
+            except FileExistsError as _caught_error:
                 # diagnostics-control-flow: an uncheckpointed prepare may be retried.
+                capture_exception(_caught_error)
                 descriptor = os.open(
                     staged, os.O_RDWR | os.O_NOFOLLOW, dir_fd=directory
                 )
@@ -181,8 +186,9 @@ class AtomicUploadedFilePublisher:
             self._check_parent(directory, target)
             try:
                 observed = os.stat(name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
+            except FileNotFoundError as _caught_error:
                 # diagnostics-control-flow: a new upload has no destination yet.
+                capture_exception(_caught_error, level="debug")
                 observed = None
             if target.original is None:
                 if observed is not None:
@@ -211,6 +217,7 @@ class AtomicUploadedFilePublisher:
                         dst_dir_fd=directory,
                     )
             except FileOperationError as error:
+                capture_exception(error, persist=False)
                 raise UploadError(
                     "UPLOAD_NAME_CONFLICT"
                     if str(error) == "DESTINATION_EXISTS"

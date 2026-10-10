@@ -4,9 +4,13 @@ Runtime behavior lives in System application/infrastructure modules; this file
 keeps existing process entry points stable while those dependencies are wired.
 """
 
+from app.modules.system.infrastructure.log_files import (
+    configure_log_directory,
+    export_log_files,
+)
 from app.modules.system.infrastructure.runtime import (
     clear_system_events,
-    configured_max_event_bytes,
+    configured_retention_days,
     create_or_reuse_health_run,
     fail_abandoned_health_runs,
     get_setting,
@@ -30,7 +34,7 @@ from app.modules.system.infrastructure.runtime import (
     record_queue_heartbeat,
     record_system_event,
     run_system_health_checks,
-    set_max_event_bytes,
+    set_retention_days,
     start_health_run,
     system_event_size_bytes,
     system_event_storage_view,
@@ -42,8 +46,10 @@ from app.modules.system.infrastructure.runtime import (
 
 __all__ = [
     "clear_system_events",
-    "configured_max_event_bytes",
+    "configure_log_directory",
+    "configured_retention_days",
     "create_or_reuse_health_run",
+    "export_log_files",
     "fail_abandoned_health_runs",
     "get_setting",
     "get_system_event",
@@ -66,7 +72,7 @@ __all__ = [
     "record_queue_heartbeat",
     "record_system_event",
     "run_system_health_checks",
-    "set_max_event_bytes",
+    "set_retention_days",
     "start_health_run",
     "system_event_size_bytes",
     "system_event_storage_view",

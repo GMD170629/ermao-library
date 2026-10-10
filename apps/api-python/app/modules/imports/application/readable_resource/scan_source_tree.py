@@ -10,6 +10,7 @@ from itertools import chain
 from pathlib import Path
 from uuid import uuid4
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -168,9 +169,10 @@ class ScanLibrarySourceTree:
                     incomplete_paths=incomplete_paths,
                     after_batch=after_batch,
                 )
-            except Exception:
+            except Exception as _caught_error:
                 # A visited range is resolved and replaced by the exact failed
                 # sub-ranges of this round; only unvisited ranges stay unknown.
+                capture_exception(_caught_error)
                 self._apply_scan_round(
                     task_id,
                     config.library_id,
@@ -183,7 +185,6 @@ class ScanLibrarySourceTree:
             )
         self._log.emit(
             "source_tree.scan.completed",
-            library_id=config.library_id,
             stage="scan",
             outcome="ok",
         )
@@ -288,7 +289,8 @@ class ScanLibrarySourceTree:
                     incomplete_paths=incomplete_paths,
                     after_batch=after_batch,
                 )
-            except Exception:
+            except Exception as _caught_error:
+                capture_exception(_caught_error)
                 self._apply_scan_round(
                     task_id,
                     config.library_id,
@@ -322,6 +324,7 @@ class ScanLibrarySourceTree:
                 if close is not None:
                     close()
         except OSError as error:
+            capture_exception(error, persist=False)
             raise SourceScanStartUnavailableError() from error
         if isinstance(first, UnreadableDirectoryEntry):
             raise SourceScanStartUnavailableError() from first.error
@@ -406,11 +409,10 @@ class ScanLibrarySourceTree:
                         parent = self._confirmed_missing_parent(config, relative)
                         pending.insert(0, ScanScope(parent))
                     except SourceScanIncompleteError as error:
+                        capture_exception(error)
                         self._log.emit(
                             "source_tree.scan.scope_unavailable",
                             error=error,
-                            library_id=config.library_id,
-                            task_id=task_id,
                             stage="scan",
                             step="inspect_scope",
                             outcome="incomplete",
@@ -435,10 +437,11 @@ class ScanLibrarySourceTree:
                         result = self.execute_source(
                             node.id, task_id=task_id, after_batch=after_batch
                         )
-                    except SourceScanStartUnavailableError:
+                    except SourceScanStartUnavailableError as _caught_error:
                         # diagnostics-control-flow: confirmed deletion reschedules the parent; unreadability raises below.
                         # Confirm absence before reconciling the parent. An
                         # unreadable file must keep its existing scan gap.
+                        capture_exception(_caught_error)
                         parent = self._confirmed_missing_parent(config, relative)
                         pending[0:0] = [ScanScope(parent), scope]
                         continue
@@ -463,11 +466,10 @@ class ScanLibrarySourceTree:
                 ):
                     totals[index] += value
             except SourceScanIncompleteError as error:
+                capture_exception(error)
                 self._log.emit(
                     "source_tree.scan.scope_unavailable",
                     error=error,
-                    library_id=config.library_id,
-                    task_id=task_id,
                     stage="scan",
                     step="inspect_scope",
                     outcome="incomplete",
@@ -482,9 +484,10 @@ class ScanLibrarySourceTree:
                     resolved=(scope,),
                     incomplete=self._paths_to_scopes(failed_paths, scope),
                 )
-            except Exception:
+            except Exception as _caught_error:
                 # Resolve what was visited, then gate the current failure and
                 # every range this round never reached.
+                capture_exception(_caught_error)
                 self._apply_scan_round(
                     task_id,
                     config.library_id,
@@ -558,11 +561,13 @@ class ScanLibrarySourceTree:
                         close()
             except FileNotFoundError as error:
                 # diagnostics-control-flow: a removed intermediate directory requires checking its parent; a missing library root propagates as incomplete.
+                capture_exception(error, level="debug")
                 if not parent:
                     raise SourceScanIncompleteError() from error
                 candidate = parent
                 continue
             except OSError as error:
+                capture_exception(error, persist=False)
                 raise SourceScanIncompleteError() from error
             return parent
         raise SourceScanIncompleteError()
@@ -628,6 +633,7 @@ class ScanLibrarySourceTree:
                     )
                 except (OSError, SourceScanIncompleteError) as error:
                     # diagnostics-control-flow: retain the original cause and raise after marking every incomplete scope.
+                    capture_exception(error)
                     if active_stream is not None:
                         active_stream.close()
                         active_stream = None
@@ -667,11 +673,10 @@ class ScanLibrarySourceTree:
                             with self._uow.transaction():
                                 self._mark_node_covered_by_directory_resource(parent_id)
                     except SourceScanIncompleteError as error:
+                        capture_exception(error)
                         self._log.emit(
                             "source_tree.scan.scope_unavailable",
                             error=error,
-                            library_id=config.library_id,
-                            task_id=task_id,
                             stage="scan",
                             step="inspect_scope",
                             outcome="incomplete",
@@ -812,7 +817,6 @@ class ScanLibrarySourceTree:
                                     collisions += 1
                                     self._log.emit(
                                         "source_tree.scan.path_key_collision",
-                                        library_id=config.library_id,
                                         stage="scan",
                                         outcome=SourceNodeViolationCode.PATH_KEY_COLLISION.value,
                                     )
@@ -908,6 +912,7 @@ class ScanLibrarySourceTree:
                                 )
                             except SourceScanIncompleteError as error:
                                 # diagnostics-control-flow: retain the first cause and finish independent child scopes before raising.
+                                capture_exception(error)
                                 failed = True
                                 failed_error = failed_error or error
                                 continue
@@ -944,7 +949,8 @@ class ScanLibrarySourceTree:
                         owner=owner,
                     )
 
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             if active_stream is not None:
                 active_stream.close()
             if incomplete_paths is not None:
@@ -978,12 +984,11 @@ class ScanLibrarySourceTree:
             if batch:
                 yield tuple(batch)
         except (OSError, SourceScanIncompleteError) as error:
+            capture_exception(error)
             self._log.emit(
                 "source_tree.scan.directory_unreadable",
                 error=error,
-                task_id=task_id,
                 step="list_directory",
-                library_id=library_id,
                 stage="scan",
                 outcome="io_error",
             )

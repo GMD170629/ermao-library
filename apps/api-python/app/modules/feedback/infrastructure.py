@@ -12,6 +12,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import capture_exception
 from app.db.session import release_read_transaction
 
 from .domain import FeedbackReceipt
@@ -32,16 +33,13 @@ class Attachment:
 @dataclass(frozen=True)
 class DatabaseFeedbackDiagnostics:
     db: Session
-    book_titles_lookup: Callable[[Session, frozenset[str]], dict[str, str]]
     event_bundle_lookup: Callable[[Session, str], list[dict[str, object]]]
 
     def event_bundle(self, event_id: str) -> list[dict[str, object]]:
-        return self.event_bundle_lookup(self.db, event_id)
-
-    def book_titles(self, book_ids: frozenset[str]) -> dict[str, str]:
-        titles = self.book_titles_lookup(self.db, book_ids)
+        events = self.event_bundle_lookup(self.db, event_id)
         release_read_transaction(self.db)
-        return titles
+        return events
+
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -77,4 +75,5 @@ def send_to_official_site(payload: dict[str, object], attachments: tuple[Attachm
             value: object = json.loads(response.read(2048))
         return FeedbackReceipt.model_validate(value)
     except (OSError, urllib.error.URLError, ValueError, ValidationError) as error:
+        capture_exception(error, persist=False)
         raise FeedbackDeliveryError("Official feedback delivery failed") from error

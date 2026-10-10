@@ -1,3 +1,4 @@
+
 import asyncio
 import json
 import logging
@@ -22,9 +23,9 @@ from app.contracts.http_errors import AdditionalStatusCodes, ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
-from app.modules.system.domain.events import validate_log_max_bytes
+from app.modules.system.domain.events import validate_log_retention_days
 from app.modules.system.presentation.health_schemas import (
     DatabasePingPayload,
     DatabasePingResponse,
@@ -33,8 +34,8 @@ from app.modules.system.presentation.health_schemas import (
     HealthRunNotFoundError,
     HealthRunPayload,
     HealthRunResponse,
-    InvalidLogMaxBytesBody,
-    InvalidLogMaxBytesError,
+    InvalidLogRetentionDaysBody,
+    InvalidLogRetentionDaysError,
     LogSettingsPayload,
     LogSettingsResponse,
     ServiceHealthPayload,
@@ -48,8 +49,8 @@ from app.modules.system.presentation.health_schemas import (
     UpdateLogSettingsRequest,
 )
 from app.modules.system.public import (
-    MAX_MAX_EVENT_BYTES,
-    MIN_MAX_EVENT_BYTES,
+    MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS,
 )
 
 router = APIRouter(tags=["health"], route_class=TypedContractRoute)
@@ -180,11 +181,11 @@ def stream_health_run(
     try:
         initial_version = max(0, int(raw_last_id))
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.system.presentation.health.stream_health_run.failed",
             error,
-            context={"stage": "stream_health_run"},
         )
         initial_version = 0
     factory = request.app.state.session_factory
@@ -255,8 +256,8 @@ def get_log_settings(
         data=LogSettingsPayload.model_validate(
             {
                 "storage": system_event_storage_view(db),
-                "minBytes": MIN_MAX_EVENT_BYTES,
-                "maxBytes": MAX_MAX_EVENT_BYTES,
+                "minDays": MIN_RETENTION_DAYS,
+                "maxDays": MAX_RETENTION_DAYS,
             }
         )
     )
@@ -273,34 +274,33 @@ def update_log_settings(
     ErrorResponses(
         UnauthorizedError,
         SystemManagerRequiredError,
-        InvalidLogMaxBytesError,
+        InvalidLogRetentionDaysError,
     ),
 ]:
     user = _system_manager(db, request, settings)
     try:
-        max_bytes = validate_log_max_bytes(payload.max_bytes)
+        retention_days = validate_log_retention_days(payload.retention_days)
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.system.presentation.health.update_log_settings.failed",
             error,
-            context={"stage": "update_log_settings"},
         )
-        raise InvalidLogMaxBytesError(
-            InvalidLogMaxBytesBody(message="日志容量上限必须在 1 MB 到 100 MB 之间")
+        raise InvalidLogRetentionDaysError(
+            InvalidLogRetentionDaysBody(message="日志保留天数必须在 1 到 365 天之间")
         )
     prepared_event = prepare_system_event(
         source="system",
         action="settings.updated",
-        message="更新系统日志容量上限",
+        message="更新系统日志保留天数和记录级别",
         level="warning",
         actor_type="admin",
         actor_id=user.id,
-        target_type="settings",
-        metadata={"key": "system.logs.maxBytes", "maxBytes": max_bytes},
+        metadata={"key": "system.logs.retentionDays", "retentionDays": retention_days},
     )
 
-    persist_log_settings_update(db, max_bytes=max_bytes, event=prepared_event)
+    persist_log_settings_update(db, retention_days=retention_days, minimum_level=payload.minimum_level, event=prepared_event)
     return LogSettingsResponse(
         data=LogSettingsPayload.model_validate(
             {"storage": system_event_storage_view(db)}

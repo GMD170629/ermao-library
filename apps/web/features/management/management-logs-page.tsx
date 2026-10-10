@@ -1,18 +1,18 @@
 'use client';
 
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, HardDrive, MessageCircleWarning, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
-import Link from 'next/link';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, MessageCircleWarning, RefreshCw, Save, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Badge, type BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { Select } from '../../components/ui/select';
 import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
 import { ignoredImportEventSummary } from './system-event-presentation';
-import { systemEventsCsv } from './system-event-export';
 import {
   clearManagementEvents,
+  downloadManagementLogFiles,
   fetchManagementEventDetail,
   fetchManagementEvents,
   updateSystemLogLimit,
@@ -30,20 +30,13 @@ function tone(level: string): BadgeTone {
 }
 
 function levelLabel(level: string) {
-  return { info: '信息', warning: '警告', warn: '警告', error: '错误' }[level] ?? level;
+  return { debug: '调试', info: '信息', warning: '警告', warn: '警告', error: '错误' }[level] ?? level;
 }
 
 function sourceLabel(source: string) {
   return { import: '导入', download: '下载', folder: '书库', kindle: 'Kindle', library: '书库', system: '系统' }[source] ?? source;
 }
 
-function targetHref(event: ManagementEvent) {
-  if (event.targetType === 'book' && event.targetId) return `/books/${event.targetId}`;
-  if (event.targetType === 'kindleSendTask') return '/settings/email?tab=queue';
-  if (event.targetType === 'importTask') return '/settings/library';
-  if (event.targetType === 'library') return '/settings/library';
-  return '';
-}
 
 type DiagnosticMetadata = {
   exceptionType?: unknown;
@@ -83,10 +76,8 @@ function DiagnosticDetails({ event, loading }: { event: ManagementEvent; loading
 
   return (
     <div className="mt-3 rounded-xl border border-red-100 bg-red-50/60 p-3 text-xs leading-5 text-[#68625C]">
-      <div><span className={labelClass}>{t('异常类型：')}</span>{diagnosticText(diagnostics.exceptionType) || '—'}</div>
-      <div><span className={labelClass}>{t('执行阶段：')}</span>{diagnosticText(event.metadata.stage ?? event.metadata.step ?? diagnostics.stage) || '—'}</div>
-      {diagnosticText(diagnostics.location) ? <div><span className={labelClass}>{t('抛出位置：')}</span>{diagnosticText(diagnostics.location)}</div> : null}
-      {diagnosticText(diagnostics.message) ? <div><span className={labelClass}>{t('异常信息：')}</span>{diagnosticText(diagnostics.message)}</div> : null}
+      <div><span className={labelClass}>{t('异常类型：')}</span><span data-i18n-skip>{diagnosticText(diagnostics.exceptionType) || '—'}</span></div>
+      {diagnosticText(diagnostics.message) ? <div><span className={labelClass}>{t('异常信息：')}</span><span data-i18n-skip>{diagnosticText(diagnostics.message)}</span></div> : null}
       {diagnostics.truncated ? <p className="mt-1 text-[#B45309]">{t('堆栈信息已截断')}</p> : null}
       {loading && !traceback ? <p className="mt-2 text-[#918A83]">{t('加载堆栈中…')}</p> : null}
       {traceback ? (
@@ -98,16 +89,11 @@ function DiagnosticDetails({ event, loading }: { event: ManagementEvent; loading
               {copied ? t('已复制堆栈') : t('复制堆栈')}
             </button>
           </div>
-          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#4F4A45]">{traceback}</pre>
+          <pre data-i18n-skip className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#4F4A45]">{traceback}</pre>
         </>
       ) : null}
     </div>
   );
-}
-
-function localDateBoundary(value: string, nextDay = false) {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day + (nextDay ? 1 : 0), 0, 0, 0, 0).toISOString();
 }
 
 export function ManagementLogsPage({ embedded = false }: { embedded?: boolean }) {
@@ -118,8 +104,6 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [level, setLevel] = useState('');
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -129,8 +113,9 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
-  const [storage, setStorage] = useState<EventStorage>({ sizeBytes: 0, maxBytes: 5 * 1024 * 1024 });
-  const [logMaxMb, setLogMaxMb] = useState(5);
+  const [storage, setStorage] = useState<EventStorage>({ sizeBytes: 0, retentionDays: 3, minimumLevel: 'error' });
+  const [retentionDays, setRetentionDays] = useState(3);
+  const [minimumLevel, setMinimumLevel] = useState<EventStorage['minimumLevel']>('error');
   const [savingLimit, setSavingLimit] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [feedbackEventId, setFeedbackEventId] = useState<string | null>(null);
@@ -142,17 +127,10 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
     if (source) params.set('source', source);
     if (level) params.set('level', level);
     if (appliedSearch) params.set('search', appliedSearch);
-    if (dateFrom) params.set('dateFrom', localDateBoundary(dateFrom));
-    if (dateTo) params.set('dateTo', localDateBoundary(dateTo, true));
     return params;
-  }, [appliedSearch, dateFrom, dateTo, level, source]);
+  }, [appliedSearch, level, source]);
 
   const load = useCallback(async () => {
-    if (dateFrom && dateTo && dateFrom > dateTo) {
-      setError('开始日期不能晚于结束日期');
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const payload = await fetchManagementEvents(buildParams(page));
@@ -160,14 +138,15 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       setTotal(payload.total);
       setTotalPages(Math.max(1, payload.totalPages));
       setStorage(payload.storage);
-      setLogMaxMb(Math.round(payload.storage.maxBytes / 1024 / 1024));
+      setRetentionDays(payload.storage.retentionDays);
+      setMinimumLevel(payload.storage.minimumLevel);
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取日志失败');
     } finally {
       setLoading(false);
     }
-  }, [buildParams, dateFrom, dateTo, page]);
+  }, [buildParams, page]);
 
   async function clearLogs() {
     if (clearing || !await confirm({
@@ -194,24 +173,24 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   }
 
   async function saveLogLimit() {
-    if (!Number.isInteger(logMaxMb) || logMaxMb < 1 || logMaxMb > 100) {
-      toast.error('日志容量设置无效', '容量上限必须在 1 MB 到 100 MB 之间');
+    if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 365) {
+      toast.error('日志保留天数无效', '保留天数必须在 1 到 365 天之间');
       return;
     }
-    const nextBytes = logMaxMb * 1024 * 1024;
-    if (nextBytes < storage.maxBytes && !await confirm({
-      title: '降低日志容量上限？',
-      description: '降低容量上限会立即删除最旧日志，是否继续？',
+    const nextDays = retentionDays;
+    if (nextDays < storage.retentionDays && !await confirm({
+      title: '缩短日志保留天数？',
+      description: '缩短保留天数会立即删除过期日志文件，是否继续？',
       confirmLabel: '继续保存',
       tone: 'danger'
     })) return;
     setSavingLimit(true);
     try {
-      setStorage(await updateSystemLogLimit(nextBytes));
-      toast.success('日志容量上限已保存');
+      setStorage(await updateSystemLogLimit(nextDays, minimumLevel));
+      toast.success('日志设置已保存');
       await load();
     } catch (reason) {
-      toast.error('保存日志容量失败', reason instanceof Error ? reason.message : '请稍后重试');
+      toast.error('保存日志设置失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
       setSavingLimit(false);
     }
@@ -252,26 +231,14 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
   async function exportLogs() {
     setExporting(true);
     try {
-      const exported: ManagementEvent[] = [];
-      let exportPage = 1;
-      let exportPages = 1;
-      do {
-        const params = buildParams(exportPage, 100);
-        params.set('includeDiagnostics', 'true');
-        const payload = await fetchManagementEvents(params);
-        exported.push(...payload.events);
-        exportPages = Math.max(1, payload.totalPages);
-        exportPage += 1;
-      } while (exportPage <= exportPages);
-
-      const blob = new Blob([systemEventsCsv(exported, locale, i18nAttribute)], { type: 'text/csv;charset=utf-8' });
+      const blob = await downloadManagementLogFiles();
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = href;
-      link.download = `shuku-system-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = 'shuku-system-logs.zip';
       link.click();
       URL.revokeObjectURL(href);
-      toast.success(`已导出 ${exported.length} 条日志`);
+      toast.success('日志原文件已导出');
     } catch (reason) {
       toast.error('导出日志失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
@@ -285,79 +252,60 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-6'}>
-      {!embedded ? <PageTitle title={i18nAttribute("系统日志")} desc={i18nAttribute("按级别、来源、日期和关键字查看系统事件。")} action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>} /> : null}
+      {!embedded ? <PageTitle title={i18nAttribute("系统日志")} desc={i18nAttribute("按级别、来源和关键字查看系统事件。")} action={<Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>} /> : null}
       {!embedded ? <ManagementNav /> : null}
-      <div className="flex justify-end"><Button variant="secondary" icon={MessageCircleWarning} onClick={() => setFeedbackEventId('')}>{i18nAttribute('报告问题')}</Button></div>
-
-      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4 sm:p-5" aria-labelledby="log-storage-title">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <HardDrive size={20} className="mt-0.5 text-[#ED4D2D]" />
-            <div>
-              <h2 id="log-storage-title" className="font-semibold text-[#2A2825]"><I18nText>日志容量管理</I18nText></h2>
-              <p className="mt-1 text-sm leading-6 text-[#77716A]">
-                {i18nAttribute('当前使用 {used} MB / {max} MB', {
-                  used: (storage.sizeBytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 2 }),
-                  max: (storage.maxBytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 0 })
-                })}
-              </p>
-              <p className="text-xs text-[#918A83]">
-                {storage.lastPrunedAt
-                  ? i18nAttribute('上次自动清理：{time}', { time: new Date(storage.lastPrunedAt).toLocaleString(locale) })
-                  : i18nAttribute('尚未执行自动清理')}
-              </p>
-            </div>
+      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-labelledby="log-storage-title">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 id="log-storage-title" className="text-sm font-semibold text-[#2A2825]"><I18nText>日志保留设置</I18nText></h2>
+            <p className="mt-1 text-xs leading-5 text-[#918A83]">
+              {i18nAttribute('按天保存（包含今天） · 当前 {size} MB', { size: (storage.sizeBytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 2 }) })}
+            </p>
           </div>
-          <div className="flex items-end gap-2">
+          <div className="flex w-full flex-wrap items-end gap-3 sm:w-auto">
             <label className="text-xs text-[#716B64]">
-              <I18nText>容量上限（MB）</I18nText>
+              <I18nText>保留天数</I18nText>
               <input
                 type="number"
                 min={1}
-                max={100}
+                max={365}
                 step={1}
-                value={logMaxMb}
-                onChange={(event) => setLogMaxMb(Number(event.target.value))}
-                className="mt-1 h-10 w-28 rounded-xl border border-[#DEDAD4] px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]"
+                value={retentionDays}
+                onChange={(event) => setRetentionDays(Number(event.target.value))}
+                className="mt-1 block h-11 w-24 rounded-xl border border-[#DEDAD4] px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]"
               />
             </label>
+            <div className="grid gap-1 text-xs text-[#716B64]">
+              <span><I18nText>最低记录级别</I18nText></span>
+              <Select
+                value={minimumLevel}
+                onChange={setMinimumLevel}
+                ariaLabel="最低记录级别"
+                options={(['debug', 'info', 'warning', 'error'] as const).map((value) => ({ value, label: levelLabel(value) }))}
+              />
+            </div>
             <Button variant="secondary" icon={Save} loading={savingLimit} loadingText={i18nAttribute("保存中")} onClick={() => void saveLogLimit()}><I18nText>保存</I18nText></Button>
           </div>
         </div>
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#EEEAE6]">
-          <div className="h-full rounded-full bg-[#ED6A4F]" style={{ width: `${Math.min(100, storage.maxBytes ? storage.sizeBytes / storage.maxBytes * 100 : 0)}%` }} />
-        </div>
-      </section>
 
-      <section className="rounded-[22px] border border-[#DEDAD4] bg-white p-4" aria-label={i18nAttribute("日志筛选")}>
-        <div className="flex flex-wrap gap-2">
-          {['', 'info', 'warning', 'error'].map((item) => (
-            <button key={item || 'all-level'} type="button" onClick={() => { setLevel(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${level === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? levelLabel(item) : i18nAttribute("全部级别")}</button>
-          ))}
-          <span className="mx-1 hidden h-9 w-px bg-[#DEDAD4] sm:block" />
-          {['', 'import', 'download', 'folder', 'library', 'system'].map((item) => (
-            <button key={item || 'all-source'} type="button" onClick={() => { setSource(item); setPage(1); }} className={`min-h-9 rounded-xl border px-3 text-sm ${source === item ? 'border-[#F4B7A8] bg-[#FCE5DE] text-[#ED4D2D]' : 'border-[#DEDAD4] text-[#625D57] hover:bg-[#F6F3F0]'}`}>{item ? sourceLabel(item) : i18nAttribute("全部来源")}</button>
-          ))}
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-[150px_150px_minmax(0,1fr)] lg:items-end">
-          <label className="text-xs text-[#716B64]">
-            <I18nText>开始日期</I18nText><input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
-          </label>
-          <label className="text-xs text-[#716B64]">
-            <I18nText>结束日期</I18nText><input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} className="mt-1 h-10 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 text-sm text-[#2A2825] outline-none focus:border-[#F0A28F] focus:ring-2 focus:ring-[#FAD9D0]" />
-          </label>
-          <label className="text-xs text-[#716B64]">
-            <I18nText>关键字</I18nText><span className="mt-1 flex h-10 items-center gap-2 rounded-xl border border-[#DEDAD4] px-3 focus-within:border-[#F0A28F] focus-within:ring-2 focus-within:ring-[#FAD9D0]">
-              <Search size={15} className="text-[#958F88]" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} className="min-w-0 flex-1 bg-transparent text-sm text-[#2A2825] outline-none" placeholder={i18nAttribute("搜索摘要、动作或关联对象")} />
-            </span>
-          </label>
-          <div className="flex flex-wrap justify-end gap-2 lg:col-span-3">
-            <Button variant="secondary" icon={Search} className="whitespace-nowrap" onClick={applySearch}><I18nText>搜索</I18nText></Button>
-            <Button variant="secondary" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} className="whitespace-nowrap" onClick={() => void load()}><I18nText>刷新</I18nText></Button>
-            <Button variant="secondary" icon={Download} loading={exporting} loadingText={i18nAttribute("导出中")} className="whitespace-nowrap" onClick={() => void exportLogs()}><I18nText>导出</I18nText></Button>
-            <Button variant="ghost" icon={Trash2} loading={clearing} loadingText={i18nAttribute('清理中')} className="whitespace-nowrap" onClick={() => void clearLogs()}><I18nText>清理</I18nText></Button>
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[#EEEAE6] pt-4" aria-label={i18nAttribute("日志筛选")}>
+          <Select value={level} onChange={(value) => { setLevel(value); setPage(1); }} ariaLabel="级别"
+            options={['', 'debug', 'info', 'warning', 'error'].map((value) => ({ value, label: value ? levelLabel(value) : '全部级别' }))} />
+          <Select value={source} onChange={(value) => { setSource(value); setPage(1); }} ariaLabel="来源"
+            options={['', 'import', 'download', 'folder', 'library', 'system'].map((value) => ({ value, label: value ? sourceLabel(value) : '全部来源' }))} />
+          <div className="flex min-w-0 basis-full items-center gap-2 sm:min-w-64 sm:flex-1 sm:basis-auto">
+            <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#DEDAD4] px-3 focus-within:border-[#F0A28F] focus-within:ring-2 focus-within:ring-[#FAD9D0]">
+              <span className="sr-only"><I18nText>关键字</I18nText></span>
+              <Search size={15} className="shrink-0 text-[#958F88]" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} className="min-w-0 w-full bg-transparent text-sm text-[#2A2825] outline-none" placeholder={i18nAttribute("搜索错误信息")} />
+            </label>
+            <Button variant="secondary" onClick={applySearch}><I18nText>搜索</I18nText></Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <Button variant="ghost" icon={RefreshCw} loading={loading} loadingText={i18nAttribute("刷新中")} onClick={() => void load()}><I18nText>刷新</I18nText></Button>
+            <Button variant="ghost" icon={Download} loading={exporting} loadingText={i18nAttribute("导出中")} onClick={() => void exportLogs()}><I18nText>导出</I18nText></Button>
+            <Button variant="ghost" icon={Trash2} loading={clearing} loadingText={i18nAttribute('清理中')} onClick={() => void clearLogs()}><I18nText>清理</I18nText></Button>
+            <Button variant="ghost" icon={MessageCircleWarning} onClick={() => setFeedbackEventId('')}>{i18nAttribute('报告问题')}</Button>
           </div>
         </div>
       </section>
@@ -367,10 +315,8 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
       <div className="space-y-3 md:hidden">
         {!loading && events.length === 0 ? <div className="rounded-[22px] border border-[#DEDAD4] bg-white px-5 py-10 text-center text-sm text-[#817B75]"><I18nText>当前筛选条件下暂无日志。</I18nText></div> : null}
         {events.map((event) => {
-          const href = targetHref(event);
           const expanded = expandedEventId === event.id;
-          const safeMetadata = event.metadata;
-          const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
+          const summary = event.level === 'error' || event.metadata.diagnostics ? event.message : ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
           return (
             <article key={event.id} data-testid="system-event-mobile-card" className="rounded-[22px] border border-[#DEDAD4] bg-white p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -378,15 +324,10 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
                 <Badge tone="slate">{sourceLabel(event.source)}</Badge>
                 <time className="text-xs tabular-nums text-[#77716A]">{new Date(event.createdAt).toLocaleString(locale)}</time>
               </div>
-              <p className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{summary}</p>
+              <p data-i18n-skip className="mt-3 break-words text-sm font-medium leading-6 text-[#2A2825]">{summary}</p>
               {expanded ? (
                 <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
-                  <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
-                  <div><span className="text-[#969089]"><I18nText>执行者：</I18nText></span>{event.actorType || 'system'}</div>
-                  {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
                   <DiagnosticDetails event={eventDetails[event.id] ?? event} loading={Boolean(detailLoading[event.id])} />
-                  {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
-                  {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
                   {event.level === 'error' ? <button type="button" onClick={() => setFeedbackEventId(event.id)} className="mt-2 block font-medium text-[#ED4D2D]"><I18nText>反馈此问题</I18nText></button> : null}
                 </div>
               ) : null}
@@ -415,24 +356,18 @@ export function ManagementLogsPage({ embedded = false }: { embedded?: boolean })
               <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-[#817B75]"><I18nText>当前筛选条件下暂无日志。</I18nText></td></tr>
             ) : null}
             {events.map((event) => {
-              const href = targetHref(event);
               const expanded = expandedEventId === event.id;
-              const safeMetadata = event.metadata;
-              const summary = ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
+              const summary = event.level === 'error' || event.metadata.diagnostics ? event.message : ignoredImportEventSummary(event, i18nAttribute) ?? i18nAttribute(event.message);
               return (
                 <tr key={event.id} className="group align-top hover:bg-[#FCFAF8]">
                   <td className="px-4 py-3.5 tabular-nums text-[#716B64]">{new Date(event.createdAt).toLocaleString(locale)}</td>
                   <td className="px-3 py-3"><Badge tone={tone(event.level)}>{levelLabel(event.level)}</Badge></td>
                   <td className="px-3 py-3 text-[#5F5A54]">{sourceLabel(event.source)}</td>
                   <td className="px-3 py-3.5">
-                    <div className="break-words font-medium leading-6 text-[#2A2825]">{summary}</div>
+                    <div data-i18n-skip className="break-words font-medium leading-6 text-[#2A2825]">{summary}</div>
                     {expanded ? (
                       <div className="mt-3 rounded-xl bg-[#F7F4F1] p-3 text-xs leading-5 text-[#68625C]">
-                        <div><span className="text-[#969089]"><I18nText>动作：</I18nText></span>{event.action || '—'}</div>
-                        <div><span className="text-[#969089]"><I18nText>执行者：</I18nText></span>{event.actorType || 'system'}</div>
-                        {event.targetType ? <div><span className="text-[#969089]"><I18nText>关联：</I18nText></span>{event.targetType}{event.targetId ? ` · ${event.targetId}` : ''}</div> : null}
-                        {Object.keys(event.metadata ?? {}).length > 0 ? <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-white p-2 text-[11px] text-[#716B64]">{JSON.stringify(safeMetadata, null, 2)}</pre> : null}
-                        {href ? <Link href={href} className="mt-2 inline-flex font-medium text-[#ED4D2D] hover:text-[#C83B23]"><I18nText>打开关联对象</I18nText></Link> : null}
+                        <DiagnosticDetails event={eventDetails[event.id] ?? event} loading={Boolean(detailLoading[event.id])} />
                         {event.level === 'error' ? <button type="button" onClick={() => setFeedbackEventId(event.id)} className="mt-2 block font-medium text-[#ED4D2D]"><I18nText>反馈此问题</I18nText></button> : null}
                       </div>
                     ) : null}

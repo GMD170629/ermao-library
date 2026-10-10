@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Literal, Protocol
 
+from app.core.exception_diagnostics import capture_exception
+
 
 class AuthUnitOfWork(Protocol):
     def commit(self) -> None: ...
@@ -30,7 +32,8 @@ class AuthWriteTransaction:
             return False
         try:
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return False

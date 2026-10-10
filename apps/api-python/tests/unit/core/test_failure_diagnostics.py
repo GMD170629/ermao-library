@@ -37,11 +37,11 @@ def test_hidden_and_long_sql_parameters_survive_storage_projection():
     error = OperationalError(statement, parameters, sqlite3.OperationalError("database is locked"), hide_parameters=True)
     result = diagnostics.format_exception_diagnostics(error)
     stored = prepare_event_metadata({"diagnostics": result, "taskId": "import-123"})
-    exported = serialize_system_event({"metadata": stored}, include_diagnostics=True)
+    exported = serialize_system_event({"metadata": stored})
     operation = exported["metadata"]["diagnostics"]["databaseOperations"][0]
     assert operation["statement"] == statement
     assert operation["parameters"] == list(parameters)
-    assert exported["metadata"]["taskId"] == "import-123"
+    assert "taskId" not in exported["metadata"]
 
 
 def test_long_transaction_trace_survives_event_metadata_projection():
@@ -58,10 +58,12 @@ def test_long_transaction_trace_survives_event_metadata_projection():
     failure = prepare_event_metadata({"diagnostics": {"databaseTrace": trace}})
     slow = prepare_event_metadata({"databaseTrace": {"statements": [operation]}})
     assert failure["diagnostics"]["databaseTrace"]["transaction_statements"][0] == operation
+    assert "transaction_id" not in failure["diagnostics"]["databaseTrace"]
+    assert "statement_id" not in failure["diagnostics"]["databaseTrace"]
     assert slow["databaseTrace"]["statements"][0] == operation
 
 
-def test_group_sql_and_each_root_survive_metadata_clipping():
+def test_group_sql_and_each_root_survive_metadata_projection():
     from app.modules.system.domain.events import prepare_event_metadata
 
     sql = OperationalError("UPDATE books SET title = ?", ("x" * 80_000,), sqlite3.OperationalError("database is locked"))
@@ -83,7 +85,7 @@ def test_system_error_preserves_number_and_private_paths(number):
     assert result["directCause"]["errno"] == number
     assert result["rootCause"]["errorName"] == errno.errorcode[number]
     assert "observed failure" in result["rootCause"]["message"]
-    assert "/private/books" not in json.dumps(result)
+    assert "/private/books" in json.dumps(result)
 
 
 def test_long_chain_keeps_outer_direct_and_root():
@@ -93,12 +95,27 @@ def test_long_chain_keeps_outer_direct_and_root():
         outer.__cause__ = current
         current = outer
     result = diagnostics.format_exception_diagnostics(current)
-    assert result["chainTruncated"] is True
+    assert result["chainTruncated"] is False
     assert result["chainLength"] == 21
-    assert len(result["chain"]) <= diagnostics.MAX_CHAIN_ITEMS
+    assert len(result["chain"]) == 21
     assert result["chain"][0]["message"] == "wrapper 19"
     assert result["directCause"]["message"] == "wrapper 18"
-    assert result["chain"][-1]["errno"] == errno.ENOSPC
+    assert any(item.get("errno") == errno.ENOSPC for item in result["chain"])
+
+
+def test_nested_group_inside_cause_keeps_every_group_frame_and_note():
+    leaf = ValueError("token=raw-leaf")
+    leaf.add_note("raw note /private/path")
+    try:
+        raise ExceptionGroup("inner group", [leaf])
+    except ExceptionGroup as inner:
+        group = ExceptionGroup("outer group", [inner, OSError("second leaf")])
+    wrapper = RuntimeError("wrapper")
+    wrapper.__cause__ = group
+    result = diagnostics.format_exception_diagnostics(wrapper)
+    for value in ("wrapper", "outer group", "inner group", "token=raw-leaf", "raw note /private/path", "second leaf", "test_nested_group_inside_cause"):
+        assert value in result["traceback"]
+    assert result["chainLength"] == 5
 
 
 def test_database_original_code_protocol_and_exit_status():
@@ -116,17 +133,17 @@ def test_database_original_code_protocol_and_exit_status():
     process = subprocess.CalledProcessError(17, ["cmd", "unlabelled-secret"], stderr="private-body")
     result = diagnostics.format_exception_diagnostics(process)
     assert result["directException"]["exitCode"] == 17
-    assert "unlabelled-secret" not in json.dumps(result)
-    assert "private-body" not in json.dumps(result)
+    assert "unlabelled-secret" in json.dumps(result)
+    assert "private-body" in json.dumps(result)
 
 
-def test_validation_does_not_log_rejected_body():
+def test_validation_records_original_error():
     class Input(BaseModel):
         count: int
     with pytest.raises(ValidationError) as caught:
         Input(count="body-secret")
     result = diagnostics.format_exception_diagnostics(caught.value)
-    assert "body-secret" not in json.dumps(result)
+    assert "body-secret" in json.dumps(result)
     assert "int_parsing" in result["message"]
 
 
@@ -138,46 +155,44 @@ def test_unknown_has_actual_type_and_no_invented_cause():
     assert result["directCause"] is None
 
 
-def test_wrapper_reuses_incident_but_other_attempt_is_distinct(caplog):
+def test_new_wrapper_keeps_its_stack_and_same_exception_is_deduplicated(caplog):
     error = OSError(errno.EIO, "read failed")
-    first = diagnostics.prepare_exception_diagnostic(LOGGER, "read", error, context={"attempt": 1})
+    first = diagnostics.prepare_exception_diagnostic(LOGGER, "read", error)
     wrapper = RuntimeError("unavailable")
     wrapper.__cause__ = error
-    second = diagnostics.prepare_exception_diagnostic(LOGGER, "converted", wrapper, context={"attempt": 1})
-    third = diagnostics.prepare_exception_diagnostic(LOGGER, "read", error, context={"attempt": 2})
-    assert first is second
-    assert first.diagnostic_id != third.diagnostic_id
-    assert caplog.text.count(first.diagnostic_id) == 1
+    second = diagnostics.prepare_exception_diagnostic(LOGGER, "converted", wrapper)
+    third = diagnostics.prepare_exception_diagnostic(LOGGER, "read", error)
+    assert first is not second
+    assert second.metadata["diagnostics"]["directCause"]["message"] == str(error)
+    assert first is third
+    assert first.diagnostic_id not in caplog.text
 
 
 def test_deferred_scope_waits_for_transaction_owner():
     factory = Mock(side_effect=AssertionError("must not open log database yet"))
-    with diagnostics.deferred_exception_persistence(context={"task_id": "task-9"}) as pending:  # noqa: SIM117 - deliberately exercise nested scope ownership
-        with diagnostics.deferred_exception_persistence(context={"step": "publish"}) as nested:
+    with diagnostics.deferred_exception_persistence() as pending:  # noqa: SIM117 - deliberately exercise nested scope ownership
+        with diagnostics.deferred_exception_persistence() as nested:
             snapshot = diagnostics.prepare_exception_diagnostic(LOGGER, "publish", OSError(errno.EROFS, "read only"))
             assert not diagnostics.persist_exception_diagnostic(LOGGER, snapshot, factory)
             assert nested is pending
     factory.assert_not_called()
     assert pending == [snapshot]
-    assert snapshot.metadata["taskId"] == "task-9"
-    assert snapshot.metadata["step"] == "publish"
+    assert "taskId" not in snapshot.metadata
+    assert "step" not in snapshot.metadata
 
 
-def test_storage_commit_rollback_close_failures_are_independent(monkeypatch, capsys):
-    session = Mock()
-    session.info = {}
-    session.commit.side_effect = sqlite3.OperationalError("database is locked")
-    session.rollback.side_effect = OSError(errno.EIO, "rollback failed")
-    session.close.side_effect = OSError(errno.EBADF, "close failed")
-    monkeypatch.setattr("app.modules.system.infrastructure.events.write_prepared_system_events", lambda *args: None)
+def test_file_write_failure_retains_original_and_outlet_error(monkeypatch, capsys):
+    from app.modules.system.infrastructure import log_files
+    def broken_lock():
+        raise OSError(errno.EIO, "log file write failed")
+    monkeypatch.setattr(log_files, "log_file_lock", broken_lock)
     snapshot = diagnostics.prepare_exception_diagnostic(LOGGER, "original", OSError(errno.ENOSPC, "disk full"))
-    assert not diagnostics.persist_exception_diagnostic(LOGGER, snapshot, lambda: session)
+    factory = Mock(side_effect=AssertionError("diagnostics must not open a database"))
+    assert not diagnostics.persist_exception_diagnostic(LOGGER, snapshot, factory)
+    factory.assert_not_called()
     output = capsys.readouterr().err
-    for message in ("database is locked", "rollback failed", "close failed"):
-        assert message in output
-    rows = [json.loads(row) for row in output.splitlines()]
-    assert len({row["diagnosticId"] for row in rows}) == 3
-    assert all(row["parentDiagnosticId"] == snapshot.diagnostic_id for row in rows)
+    assert "log file write failed" in output and "disk full" in output
+    assert "Traceback" in output
     assert snapshot.metadata["diagnostics"]["rootCause"]["errno"] == errno.ENOSPC
 
 
@@ -186,10 +201,10 @@ def test_broken_logger_uses_stderr_with_original_and_logger_cause(capsys):
     logger.log.side_effect = OSError(errno.ENOSPC, "log disk full")
     snapshot = diagnostics.prepare_exception_diagnostic(logger, "operation", ValueError("original error token=private-token"))
     output = capsys.readouterr().err
-    assert snapshot.diagnostic_id in output
+    assert snapshot.diagnostic_id not in output
     assert "original error" in output
     assert "log disk full" in output
-    assert "private-token" not in output
+    assert "private-token" in output
 
 
 def test_standard_logging_swallowed_emit_failure_keeps_primary(capsys):
@@ -207,7 +222,7 @@ def test_standard_logging_swallowed_emit_failure_keeps_primary(capsys):
     output = capsys.readouterr().err
     assert "log disk full" in output
     assert "read only" in output
-    assert snapshot.diagnostic_id in output
+    assert snapshot.diagnostic_id not in output
 
 
 def test_formatter_failure_does_not_erase_original(monkeypatch, capsys):
@@ -218,7 +233,7 @@ def test_formatter_failure_does_not_erase_original(monkeypatch, capsys):
     assert "disk error" in snapshot.message
     output = capsys.readouterr().err
     assert "formatter broken" in output
-    assert '"errno": 5' in output
+    assert "[Errno 5] disk error" in output
 
 
 def test_broken_exception_str_records_original_type_and_formatter_failure(capsys):
@@ -231,10 +246,10 @@ def test_broken_exception_str_records_original_type_and_formatter_failure(capsys
     output = capsys.readouterr().err
     assert "message renderer broke" in output
     assert "TypeError" in output
-    assert "private-value" not in output
+    assert "private-value" in output
 
 
-def test_validation_wrapper_never_reintroduces_input_value():
+def test_validation_wrapper_preserves_original_input_value():
     class Input(BaseModel):
         count: int
     with pytest.raises(ValidationError) as caught:
@@ -244,10 +259,10 @@ def test_validation_wrapper_never_reintroduces_input_value():
     result = diagnostics.format_exception_diagnostics(wrapper)
     assert result["exceptionType"] == "RuntimeError"
     assert "int_parsing" in result["message"]
-    assert "secret-invalid-input" not in json.dumps(result)
+    assert "secret-invalid-input" in json.dumps(result)
 
 
-def test_known_subprocess_diagnostics_preserve_localized_reason_and_redact_spaced_paths():
+def test_subprocess_diagnostics_preserve_localized_reason_and_spaced_paths():
     source = "/private/books/書名 with spaces/第一卷.epub"
     target = "/private/目的地 with spaces/第一卷.epub"
     child = subprocess.CalledProcessError(
@@ -262,10 +277,10 @@ def test_known_subprocess_diagnostics_preserve_localized_reason_and_redact_space
     assert "只读文件系统" in result["traceback"]
     serialized = json.dumps(result, ensure_ascii=False)
     for private in ("書名", "目的地", "第一卷", "with spaces", "private stdout"):
-        assert private not in serialized
+        assert private in serialized
     filesystem = diagnostics.format_exception_diagnostics(OSError(errno.EROFS, "read only", source))
-    assert "書名" not in json.dumps(filesystem, ensure_ascii=False)
-    assert "spaces" not in json.dumps(filesystem)
+    assert "書名" in json.dumps(filesystem, ensure_ascii=False)
+    assert "spaces" in json.dumps(filesystem)
 
 
 def test_logging_formatter_failure_retains_original_and_secondary(monkeypatch, capsys):
@@ -273,11 +288,15 @@ def test_logging_formatter_failure_retains_original_and_secondary(monkeypatch, c
     original = OSError(errno.EROFS, "original read only", "/private/a.epub")
     record = logging.LogRecord("test", logging.ERROR, __file__, 1, "operation", (), (type(original), original, None))
     monkeypatch.setattr(logging_config, "format_exception_diagnostics", Mock(side_effect=TypeError("formatter failed")))
-    assert logging_config.SanitizingFilter().filter(record)
+    stream = __import__("io").StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging_config.ExceptionFormatter("%(message)s"))
+    logging_config.install_handler_fallback(handler)
+    handler.emit(record)
     output = capsys.readouterr().err
     assert "original read only" in output
     assert "formatter failed" in output
-    assert "/private/a.epub" not in output
+    assert "/private/a.epub" in output
 
 
 def test_plain_logger_exception_keeps_primary_when_handler_swallows_emit_failure(capsys):
@@ -297,7 +316,7 @@ def test_plain_logger_exception_keeps_primary_when_handler_swallows_emit_failure
     output = capsys.readouterr().err
     assert "original filesystem read only" in output
     assert "log device full" in output
-    assert "/private/library/book.epub" not in output
+    assert "/private/library/book.epub" in output
 
 
 def test_group_formatter_failure_retains_every_leaf(monkeypatch, capsys):
@@ -316,20 +335,22 @@ def test_diagnostic_storage_failure_cannot_recursively_persist(monkeypatch, capl
     session.info = {}
     factory = Mock(return_value=session)
     nested = []
-    def write(_session, _events):
+    def write(_event):
         error = ValueError("corrupt event retention setting")
         nested.append(diagnostics.record_exception(LOGGER, "settings.read_failed", error))
-    monkeypatch.setattr("app.modules.system.infrastructure.events.write_prepared_system_events", write)
+        return False
+    monkeypatch.setattr("app.modules.system.infrastructure.log_files.append_log_event", write)
     diagnostics.configure_exception_storage(factory)
     try:
         parent = diagnostics.record_exception(LOGGER, "business.failed", OSError(errno.EIO, "original IO"))
     finally:
         diagnostics.reset_exception_storage(expected_factory=factory)
-    factory.assert_called_once()
-    session.commit.assert_called_once()
+    factory.assert_not_called()
+    session.commit.assert_not_called()
     assert len(nested) == 1
-    record = next(record for record in caplog.records if "settings.read_failed" in record.message)
-    assert record.parent_diagnostic_id == parent
+    record = next(record for record in caplog.records if "corrupt event retention setting" in record.message)
+    assert not hasattr(record, "parent_diagnostic_id")
+    assert parent not in record.message
     assert "corrupt event retention setting" in record.message
     assert diagnostics._persisting.get() is None
 
@@ -353,15 +374,34 @@ def test_emergency_fallback_keeps_stream_failure_and_both_failed_exits_do_not_ra
     monkeypatch.setattr(diagnostics.sys, "stderr", sink)
     monkeypatch.setattr(diagnostics.os, "write", raw_write)
     original = OSError(errno.EIO, "original device failure")
-    diagnostics.emergency_diagnostic("operation", original, diagnostic_id="diag_test")
+    diagnostics.emergency_diagnostic("operation", original)
     output = raw_write.call_args.args[1].decode()
     assert "original device failure" in output
     assert "stderr stream full" in output
     raw_write.side_effect = OSError(errno.EBADF, "fd closed")
-    diagnostics.emergency_diagnostic("operation", original, diagnostic_id="diag_test")
+    diagnostics.emergency_diagnostic("operation", original)
 
 
-def test_existing_root_handler_sanitizes_plain_logger_exception():
+def test_fd_fallback_keeps_all_members_of_deep_log_sink_failure(monkeypatch):
+    members = [OSError(f"raw sink failure {index:03}") for index in range(30)]
+    failure = ExceptionGroup("sink group", members)
+    for depth in range(15):
+        failure = ExceptionGroup(f"nested sink {depth}", [failure])
+    sink = Mock()
+    sink.write.side_effect = failure
+    raw_write = Mock()
+    monkeypatch.setattr(diagnostics.sys, "stderr", sink)
+    monkeypatch.setattr(diagnostics.os, "write", raw_write)
+    diagnostics.emergency_diagnostic("operation", RuntimeError("original operation failure"))
+    output = raw_write.call_args.args[1].decode()
+    assert "original operation failure" in output
+    for member in members:
+        assert str(member) in output
+    assert "max_group_depth" not in output
+    assert "and 15 more" not in output
+
+
+def test_existing_root_handler_preserves_plain_logger_exception():
     import io
 
     from app.core.logging_config import configure_logging
@@ -384,9 +424,9 @@ def test_existing_root_handler_sanitizes_plain_logger_exception():
     assert handler.formatter is formatter
     output = stream.getvalue()
     assert "device error" in output
-    assert "private-secret" not in output
-    assert "a b" not in output
-    assert "/private" not in output
+    assert "private-secret" in output
+    assert "a b" in output
+    assert "/private" in output
 
 
 def test_immutable_exception_attachment_does_not_lose_diagnostic(caplog):
@@ -396,7 +436,8 @@ def test_immutable_exception_attachment_does_not_lose_diagnostic(caplog):
                 raise AttributeError("immutable exception")
             super().__setattr__(name, value)
     snapshot = diagnostics.prepare_exception_diagnostic(LOGGER, "immutable", ImmutableError("original failure"))
-    assert snapshot.diagnostic_id in caplog.text
+    assert "original failure" in caplog.text
+    assert snapshot.diagnostic_id not in caplog.text
     assert snapshot.message == "original failure"
 
 
@@ -410,7 +451,7 @@ def test_validation_context_does_not_replace_distinct_cleanup_cause():
     result = diagnostics.format_exception_diagnostics(cleanup)
     assert "rollback device failed" in result["directException"]["message"]
     assert result["directException"]["errno"] == errno.EIO
-    assert "secret-invalid-input" not in json.dumps(result)
+    assert "secret-invalid-input" in json.dumps(result)
 
 
 def test_database_sql_literals_survive_diagnostics_through_wrapper():
@@ -489,11 +530,11 @@ def test_long_causal_chain_preserves_middle_root_before_context():
         wrapper.__cause__ = current
         current = wrapper
     result = diagnostics.format_exception_diagnostics(current)
-    assert result["chainTruncated"] is True
+    assert result["chainTruncated"] is False
     assert result["directException"]["message"] == "wrapper 19"
     assert result["directCause"]["message"] == "wrapper 18"
     assert result["rootCause"]["errno"] == errno.EIO
-    assert result["chain"][-1]["errno"] == errno.EIO
+    assert any(item.get("errno") == errno.EIO for item in result["chain"])
     assert result["contexts"][0]["errno"] == errno.ENOSPC
 
 

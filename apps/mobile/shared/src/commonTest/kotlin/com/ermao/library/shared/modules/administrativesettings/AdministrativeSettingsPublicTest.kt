@@ -61,11 +61,11 @@ class AdministrativeSettingsPublicTest {
         assertFalse(isValidAdministrativeAttachmentMegabytes(50.01))
         assertFalse(isValidAdministrativeAttachmentMegabytes(0.99))
         assertFalse(isValidAdministrativeAttachmentMegabytes(Double.NaN))
-        assertTrue(isValidAdministrativeLogMegabytes(100))
-        assertFalse(isValidAdministrativeLogMegabytes(101))
+        assertTrue(isValidAdministrativeLogRetentionDays(365))
+        assertFalse(isValidAdministrativeLogRetentionDays(366))
         assertEquals(10, administrativeMinimumPasswordLength())
         assertEquals(128, administrativeMaximumPasswordLength())
-        assertEquals(1, administrativeMinimumLogMegabytes())
-        assertEquals(100, administrativeMaximumLogMegabytes())
+        assertEquals(1, administrativeMinimumLogRetentionDays())
+        assertEquals(365, administrativeMaximumLogRetentionDays())
     }
 }

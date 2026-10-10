@@ -24,7 +24,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyAlgorithmId,
     ReaderSafetyRuleId,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 _NAME = r"[A-Za-z_:][A-Za-z0-9_.:-]*"
 _ENTITY_REFERENCE = re.compile(
@@ -162,6 +162,7 @@ def _decode_source(content: bytes) -> str:
         codecs.lookup(encoding)
         return content.decode(encoding, errors="strict")
     except (LookupError, UnicodeDecodeError) as error:
+        capture_exception(error, persist=False)
         raise XmlPolicyDecodeError(
             f"XML source encoding cannot be decoded: {encoding}"
         ) from error
@@ -414,8 +415,8 @@ def _reference_operations(
                 16 if match.group("hex") is not None else 10,
             )
         except ValueError as error:
-            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.xml_policy.numeric_value.failed", error,
-                             context={"step": "numeric_value"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.xml_policy.numeric_value.failed", error)
             return None
         if (
             codepoint in {0x9, 0xA, 0xD}

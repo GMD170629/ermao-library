@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 
 class BackupRecordValidationError(ValueError):
@@ -64,20 +64,20 @@ class ApplyValidatedBackupRestore:
             self._writer.apply(plan)
             self._unit_of_work.commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "backup.transaction.failed",
                 error,
-                context={"stage": "apply_restore_plan", "kind": plan.kind},
             )
             try:
                 self._unit_of_work.rollback()
             except Exception as rollback_error:  # noqa: BLE001 - preserve both failures at the rollback boundary.
+                capture_exception(rollback_error, persist=False)
                 record_exception(
                     logging.getLogger(__name__),
                     "backup.transaction.rollback_failed",
                     rollback_error,
-                    context={"stage": "rollback", "kind": plan.kind},
                 )
                 raise ExceptionGroup(
                     "Backup transaction and rollback failed", [error, rollback_error]

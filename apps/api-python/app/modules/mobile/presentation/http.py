@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.typed_route import TypedContractRoute
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.db.session import get_db
 from app.modules.mobile.application.compatibility import (
     GetMobileCompatibility,
@@ -46,6 +47,7 @@ def get_mobile_compatibility(
             server_version=settings.app_version,
         ).execute()
     except ServerIdentityUnavailable as error:
+        capture_exception(error, persist=False)
         raise MobileCompatibilityUnavailableError(
             MobileCompatibilityUnavailableBody()
         ) from error

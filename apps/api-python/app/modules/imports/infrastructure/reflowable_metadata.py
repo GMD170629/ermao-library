@@ -15,7 +15,7 @@ from pathlib import Path
 # adapter boundary.
 from lxml import etree  # type: ignore[import-untyped]
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import (
     COVER_BYTES,
     METADATA_BYTES,
@@ -76,6 +76,7 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
         encoding = detect_sample_encoding(sample)
         text = sample[:100_000].decode(encoding, errors="ignore")
     except (OSError, UnicodeError, TextEncodingError) as exc:
+        capture_exception(exc, persist=False)
         raise ReflowableMetadataError("Unable to inspect TXT metadata") from exc
     return ReflowableBookMetadata(
         title=None,
@@ -129,6 +130,7 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         root_name = root_match.group()[1:].split(None, 1)[0].rstrip(b">")
         root = etree.fromstring(bytes(prefix) + b"</" + root_name + b">", parser)
     except (OSError, etree.XMLSyntaxError) as exc:
+        capture_exception(exc, persist=False)
         raise ReflowableMetadataError("Unable to inspect FB2 metadata") from exc
     if _local_name(root) != "FictionBook":
         raise ReflowableMetadataError("Invalid FB2 root element")
@@ -162,8 +164,8 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
     try:
         series_index = float(series_index_raw) if series_index_raw else None
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._inspect_fb2.failed", error,
-                         context={"step": "_inspect_fb2"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._inspect_fb2.failed", error)
         series_index = None
     cover = _fb2_cover(root, title_info)
     return ReflowableBookMetadata(
@@ -208,6 +210,7 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
             header_bytes = source.read(offsets[1] - offsets[0])
             records = (header_bytes,)
     except OSError as exc:
+        capture_exception(exc, persist=False)
         raise ReflowableMetadataError("Unable to read MOBI metadata") from exc
     if not records:
         raise ReflowableMetadataError("MOBI-family publication has no records")
@@ -354,8 +357,8 @@ def _sidecar_cover(path: Path) -> EmbeddedBookCover | None:
                 if cover is not None:
                     return cover
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._sidecar_cover.failed", error,
-                             context={"step": "_sidecar_cover"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._sidecar_cover.failed", error)
             continue
     return None
 
@@ -383,8 +386,8 @@ def _fb2_cover(
             re.sub(rb"\s+", b"", (binary.text or "").encode("ascii")), validate=True
         )
     except (UnicodeEncodeError, binascii.Error, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._fb2_cover.failed", error,
-                         context={"step": "_fb2_cover"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.reflowable_metadata._fb2_cover.failed", error)
         return None
     return _image_cover(content)
 

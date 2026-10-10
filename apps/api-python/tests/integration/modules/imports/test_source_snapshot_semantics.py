@@ -255,7 +255,7 @@ def test_empty_root_policy_is_shared_by_full_and_local_scans(
             assert task is not None
             assert task.state == ("SUCCEEDED" if allow_cleanup else "FAILED")
             assert task.error_summary == (
-                None if allow_cleanup else "EMPTY_LIBRARY_PROTECTED"
+                None if allow_cleanup else "app.modules.imports.application.readable_resource.scan_source_tree.EmptyLibraryProtectedError: EMPTY_LIBRARY_PROTECTED"
             )
             assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == (
                 0 if allow_cleanup else 1
@@ -321,7 +321,11 @@ def test_failed_directory_preserves_data_while_other_scope_updates(
             db.expire_all()
             task = db.get(LibraryImportTask, result.task_id)
             assert task is not None and task.state == "FAILED"
-            assert task.error_summary == "SOURCE_SCAN_INCOMPLETE"
+            assert task.error_summary.startswith(
+                "app.modules.imports.application.readable_resource.scan_source_tree.SourceScanIncompleteError: SOURCE_SCAN_INCOMPLETE"
+            )
+            if failure_mode == "iteration":
+                assert "OSError: interrupted directory enumeration" in task.error_summary
             # The request scope is immutable; only the unfinished scope stays
             # in the diagnostic gap record after the good sibling completes.
             assert {scope.relative_path for scope in decode_scan_scopes(task.scan_scopes) or ()} == {"bad", "good"}
@@ -771,7 +775,7 @@ def test_direct_rescan_of_missing_file_fails_without_deleting_data(
             failed = db.get(LibraryImportTask, result.task_id)
             assert failed is not None
             assert failed.state == "FAILED"
-            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
+            assert failed.error_summary == "app.modules.imports.application.readable_resource.scan_source_tree.SourceScanStartUnavailableError: SOURCE_SCAN_START_UNAVAILABLE"
     finally:
         engine.dispose()
 
@@ -820,7 +824,7 @@ def test_direct_rescan_of_missing_directory_fails_without_deleting_subtree(
             failed = db.get(LibraryImportTask, result.task_id)
             assert failed is not None
             assert failed.state == "FAILED"
-            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
+            assert failed.error_summary == "app.modules.imports.application.readable_resource.scan_source_tree.SourceScanStartUnavailableError: SOURCE_SCAN_START_UNAVAILABLE"
     finally:
         engine.dispose()
 
@@ -854,7 +858,7 @@ def test_manual_scan_of_missing_library_root_fails_without_deleting_data(
             failed = db.get(LibraryImportTask, result.task_id)
             assert failed is not None
             assert failed.state == "FAILED"
-            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
+            assert failed.error_summary == "app.modules.imports.application.readable_resource.scan_source_tree.SourceScanStartUnavailableError: SOURCE_SCAN_START_UNAVAILABLE"
     finally:
         engine.dispose()
 

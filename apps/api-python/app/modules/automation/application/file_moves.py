@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.grants import GrantUnitOfWork
 from app.modules.automation.application.receipts import (
@@ -53,7 +54,8 @@ class AutomationFileMoves:
             self.store.save_plan(plan)
             self.uow.commit()
             return move_plan_result(plan)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise
 
@@ -84,7 +86,8 @@ class AutomationFileMoves:
             self.receipts.complete(access.grant_id, request_id, result)
             self.uow.commit()
             return result
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise
 
@@ -106,6 +109,7 @@ class AutomationFileMoves:
             self.store.progress(operation_id, move_actor(current))
             self.uow.commit()
             return move_progress_result(progress)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise

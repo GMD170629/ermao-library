@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.reader.application.dto import (
     ReaderAssetDto,
     ReaderNavigationUnitDto,
@@ -63,6 +64,7 @@ def _require_uuid(value: str, *, name: str) -> None:
     try:
         UUID(value)
     except (AttributeError, ValueError, TypeError) as error:
+        capture_exception(error, persist=False)
         raise ValueError(f"{name} must be a UUID") from error
 
 

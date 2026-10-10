@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import hash_password
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import release_read_transaction
 from app.models.auth import User, cuid, db_timestamp
 from app.modules.auth.application.user_management import (
@@ -124,8 +124,6 @@ class SqlAlchemyUserAdministrationGateway:
             message="管理员创建了用户",
             actor_type="admin",
             actor_id=prepared.actor_id,
-            target_type="user",
-            target_id=prepared.user_id,
             metadata={
                 "role": prepared.role,
                 "canManageSystem": prepared.can_manage_system,
@@ -141,6 +139,7 @@ class SqlAlchemyUserAdministrationGateway:
                 event=event,
             )
         except IntegrityError as exc:
+            capture_exception(exc, persist=False)
             raise UserAdministrationError("EMAIL_IN_USE", "该邮箱已被使用") from exc
         persisted = get_user(self._db, prepared.user_id)
         if persisted is None:
@@ -154,8 +153,6 @@ class SqlAlchemyUserAdministrationGateway:
             message="管理员更新了用户与权限",
             actor_type="admin",
             actor_id=prepared.actor_id,
-            target_type="user",
-            target_id=prepared.user_id,
             metadata={
                 "role": prepared.role,
                 "status": prepared.status,
@@ -188,6 +185,7 @@ class SqlAlchemyUserAdministrationGateway:
                 event=event,
             )
         except IntegrityError as exc:
+            capture_exception(exc, persist=False)
             raise UserAdministrationError("EMAIL_IN_USE", "该邮箱已被使用") from exc
         persisted = get_user(self._db, prepared.user_id)
         if persisted is None:
@@ -204,8 +202,6 @@ class SqlAlchemyUserAdministrationGateway:
             message="管理员重置了用户密码并撤销会话",
             actor_type="admin",
             actor_id=actor_id,
-            target_type="user",
-            target_id=user_id,
         )
         persist_admin_password_reset(
             self._db,
@@ -230,16 +226,14 @@ class SqlAlchemyUserAdministrationGateway:
                 candidate.relative_to(self._settings.resolved_storage_root)
                 avatar_path = candidate
             except ValueError as error:
-                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error,
-                                 context={"step": "delete_user"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error)
         event = prepare_system_event(
             source="authorization",
             action="user.deleted",
             message="管理员永久删除了用户及其个人数据",
             actor_type="admin",
             actor_id=actor_id,
-            target_type="user",
-            target_id=anonymous_user_id,
             metadata={"formerRole": user.role, "deidentified": True},
         )
         persist_admin_user_delete(
@@ -253,5 +247,5 @@ class SqlAlchemyUserAdministrationGateway:
             try:
                 avatar_path.parent.rmdir()
             except OSError as error:
-                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error,
-                                 context={"step": "delete_user"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.auth.infrastructure.user_administration.delete_user.failed", error)

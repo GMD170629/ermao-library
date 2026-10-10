@@ -447,14 +447,10 @@ class PipelineLogPort(Protocol):
         self,
         event: str,
         *,
-        library_id: str | None = None,
-        resource_id: str | None = None,
-        task_id: str | None = None,
         stage: str | None = None,
         outcome: str | None = None,
         error: BaseException | None = None,
         step: str | None = None,
-        source_node_id: str | None = None,
     ) -> None: ...
 
 

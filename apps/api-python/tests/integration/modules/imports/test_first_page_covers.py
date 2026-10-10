@@ -909,7 +909,7 @@ def test_thousand_images_batch_import_and_incremental_reuse(
                 LibraryResourceAsset.import_state == "FAILED"
             )
         )
-        assert failed.failure_reason == "IMAGE_FILE_UNREADABLE"
+        assert failed.failure_reason == "OSError: injected unreadable image"
         assert failed.processed_source_version is None
         monkeypatch.setattr(RegistryResourceAdapterExecutor, "parse_file", parse_count)
         parsed_names.clear()
@@ -1128,7 +1128,7 @@ def test_image_failed_file_summary_counts_assets_not_tasks(library, monkeypatch)
     )
     assert failed_task is not None
     assert failed_task.state == "FAILED"
-    assert failed_task.error_summary == "IMAGE_ASSETS_FAILED"
+    assert failed_task.error_summary == "OSError: injected file error"
     assert failed_task.retry_count == 0
     assert failed_task.next_attempt_at is None
 
@@ -2201,9 +2201,7 @@ def test_unchanged_directory_continue_recovers_failed_resource(
                 LibraryResourceAsset.import_state == "FAILED"
             )
         )
-        assert failed.failure_reason == (
-            "IMAGE_FILE_UNREADABLE" if media == "image" else "AUDIO_FILE_UNREADABLE"
-        )
+        assert failed.failure_reason == "OSError: temporary read failure"
         assert failed.processed_source_version is None
         assert db.get(LibraryImportTask, task_id).error_summary
     for _ in range(5):

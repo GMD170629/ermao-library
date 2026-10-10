@@ -1375,6 +1375,13 @@ def test_resource_step_records_directory_parse_failure_without_a_resource_task_r
 ) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
+
+    class UnreadableAdapter(StubAlwaysOkAdapter):
+        def parse_file(self, *, absolute_path: Path, **kwargs) -> FileParseResult:
+            if absolute_path.name == "02.png":
+                raise PermissionError(13, "Permission denied", str(absolute_path))
+            return super().parse_file(absolute_path=absolute_path, **kwargs)
+
     try:
         with Session(engine) as db:
             _add_library(db, root)
@@ -1383,7 +1390,7 @@ def test_resource_step_records_directory_parse_failure_without_a_resource_task_r
             comic.mkdir()
             (comic / "01.png").write_bytes(b"png")
             (comic / "02.png").write_bytes(b"png")
-            pipeline, _ = _pipeline(db, adapters=StubFailOnceAdapter({"02.png"}))
+            pipeline, _ = _pipeline(db, adapters=UnreadableAdapter())
             pipeline.scan_library_source_tree.execute_library("lib-1")
             resource = db.scalar(
                 select(LibraryReadableResource).where(
@@ -1407,7 +1414,8 @@ def test_resource_step_records_directory_parse_failure_without_a_resource_task_r
             )
 
             assert result.outcome == "failed"
-            assert run.failures == ["IMAGE_ASSETS_FAILED"]
+            expected_error = f"PermissionError: [Errno 13] Permission denied: {str(comic / '02.png')!r}"
+            assert run.failures == [expected_error]
             assets = {
                 asset.source_node_id: asset
                 for asset in db.scalars(
@@ -1429,7 +1437,7 @@ def test_resource_step_records_directory_parse_failure_without_a_resource_task_r
             assert valid_node is not None and failed_node is not None
             assert assets[valid_node.id].import_state == "READY"
             assert assets[failed_node.id].import_state == "FAILED"
-            assert assets[failed_node.id].failure_reason == "PARSE_FAILED"
+            assert assets[failed_node.id].failure_reason == expected_error
             assert db.scalar(
                 select(func.count()).select_from(LibraryImportTask).where(
                     LibraryImportTask.kind == "IMPORT_RESOURCE"
@@ -1770,7 +1778,9 @@ def test_discovery_parent_stays_succeeded_after_child_terminal_failure(
                 LibraryImportTask.state == "FAILED",
             ))
             assert parent is not None and parent.state == "SUCCEEDED"
-            assert book is not None and book.error_summary == "BOOK_COMPLETION_WRITE_FAILED"
+            assert book is not None
+            assert "sqlalchemy.exc.OperationalError:" in book.error_summary
+            assert "interrupted" in book.error_summary
             db.commit()
             assert worker.process_once() == "book"
             db.refresh(parent)
@@ -1892,10 +1902,10 @@ def test_startup_marks_running_as_worker_interrupted(tmp_path: Path, caplog) -> 
             assert row is not None
             assert row.state == "FAILED"
             assert row.error_summary == "WORKER_INTERRUPTED"
-            record = next(record for record in caplog.records if "import.task_interrupted" in record.message)
-            assert record.task_id == task.id
-            assert record.library_id == "lib-1"
-            assert record.task_kind == "SCAN_LIBRARY"
+            record = next(record for record in caplog.records if "persisted RUNNING task" in record.message)
+            assert not hasattr(record, "task_id")
+            assert not hasattr(record, "library_id")
+            assert not hasattr(record, "task_kind")
             assert "persisted RUNNING task" in record.message
             assert "without its executor" in record.message
             assert worker.process_once() == "idle"
@@ -3005,7 +3015,7 @@ def test_partial_asset_failure_keeps_ready_resource(tmp_path: Path) -> None:
                 select(LibraryImportTask).where(LibraryImportTask.kind == "IMPORT_BOOK")
             )
             assert task is not None
-            assert task.error_summary == "AUDIO_ASSETS_FAILED"
+            assert task.error_summary == "PARSE_FAILED"
             assert failed[0].failure_reason == "PARSE_FAILED"
             book_metadata = db.get(LibraryBookMetadata, resource.book_id)
             assert book_metadata is not None and book_metadata.metadata_state == "COMPLETED"
@@ -3124,7 +3134,7 @@ class StubBoomAdapter(StubAlwaysOkAdapter):
         raise RuntimeError("simulated adapter crash")
 
 
-def test_unexpected_adapter_error_is_contained_as_worker_error(tmp_path: Path) -> None:
+def test_unexpected_adapter_error_preserves_original_type_and_message(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -3142,7 +3152,7 @@ def test_unexpected_adapter_error_is_contained_as_worker_error(tmp_path: Path) -
                 )
             ).all()
             assert len(failed) == 1
-            assert failed[0].error_summary == "WORKER_ERROR"
+            assert failed[0].error_summary == "RuntimeError: simulated adapter crash"
             assert failed[0].error_summary != "UNHANDLED_ERROR"
             summaries = [
                 task.error_summary

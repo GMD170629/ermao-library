@@ -16,10 +16,10 @@ from urllib.request import urlopen
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.database_errors import is_database_busy_error
-from app.core.exception_diagnostics import record_exception
-from app.core.time import now_timestamp_ms
 from app.contracts.bibliographic_identity import UNKNOWN_AUTHOR, normalize_identity_part
+from app.core.database_errors import is_database_busy_error
+from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure import external_cache as metadata_cache
@@ -46,8 +46,9 @@ def parse_json_value(value: Any) -> Any:
             return None
         try:
             return json.loads(stripped)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as _caught_error:
             # diagnostics-control-flow: Organizer preferences accept literal strings as well as structured JSON.
+            capture_exception(_caught_error)
             return value
     return value
 
@@ -356,8 +357,8 @@ def publication_datetime_or_none(*values: Any) -> str | None:
             tzinfo=UTC,
         )
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "services.organize_service.publication_datetime_or_none.failed", error,
-                         context={"step": "publication_datetime_or_none"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.organize_service.publication_datetime_or_none.failed", error)
         return None
     return parsed.isoformat()
 
@@ -414,8 +415,8 @@ def parse_json_ld_book(html: str) -> dict[str, Any] | None:
         payload = json.loads(match.group(1).strip())
         return payload if isinstance(payload, dict) else None
     except json.JSONDecodeError as error:
-        record_exception(logging.getLogger(__name__), "services.organize_service.parse_json_ld_book.failed", error,
-                         context={"step": "parse_json_ld_book"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.organize_service.parse_json_ld_book.failed", error)
         return None
 
 
@@ -544,8 +545,8 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
     try:
         payload = json.loads(match.group(1))
     except json.JSONDecodeError as error:
-        record_exception(logging.getLogger(__name__), "services.organize_service.parse_douban_search_html.failed", error,
-                         context={"step": "parse_douban_search_html"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.organize_service.parse_douban_search_html.failed", error)
         return []
     items: list[Any] = cast(
         list[Any],
@@ -1132,9 +1133,9 @@ def external_metadata_cache_put(
         ):
             metadata_cache.write_prepared_cache_entry(writer, prepared)
     except SQLAlchemyError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             LOGGER, "metadata.cache_write_failed", exc,
-            context={"step": "write_metadata_cache", "resource_id": provider},
         )
         if not is_database_busy_error(exc):
             raise

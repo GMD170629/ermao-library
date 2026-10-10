@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records
+
 """Exact-byte MCP attachment transfers using real journals and publication."""
 
 import base64
@@ -19,7 +21,7 @@ from app.bootstrap.automation import (
     build_grant_manager,
 )
 from app.contracts.automation_upload import UploadError, UploadSpec
-from app.models import LibraryBookMetadata, LibraryImportTask, SystemEvent
+from app.models import LibraryBookMetadata, LibraryImportTask
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import AutomationAccessError, Scope
 from tests.integration.modules.automation.test_file_reads import file_access
@@ -288,11 +290,9 @@ def test_failure_after_publish_is_not_replayed_and_keeps_diagnostic(
         assert (
             restarted.scalar(select(func.count()).select_from(LibraryImportTask)) == 0
         )
-        event = restarted.scalar(
-            select(SystemEvent).where(SystemEvent.action == "upload.complete_failed")
-        )
-        assert event.metadata_json["operationId"] == upload_id
-        assert event.metadata_json["step"] == "publish_upload"
+        event = next(iter([row for row in log_records() if row.action == 'upload.complete_failed']), None)
+        assert "operationId" not in event.metadata_json
+        assert "step" not in event.metadata_json
         assert event.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO
 
 
@@ -700,19 +700,12 @@ def test_partial_browser_upload_keeps_files_requests_existing_scan_and_reports_f
     assert (root / "saved.txt").read_bytes() == b"Saved readable text."
     assert not (root / "failed.txt").exists()
     assert next(root.glob(".upload-*.part")).read_bytes() == b"partial"
-    primary = db_session.scalar(
-        select(SystemEvent).where(
-            SystemEvent.action
-            == "modules.imports.presentation.writes.import_book_files.failed"
-        )
-    )
+    primary = next(iter([row for row in log_records() if row.action == 'modules.imports.presentation.writes.import_book_files.failed']), None)
     assert primary.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.ENOSPC
-    assert response.headers["X-Error-Id"] == primary.id
+    assert "X-Error-Id" not in response.headers
     if scan_fails:
-        secondary = db_session.scalar(
-            select(SystemEvent).where(SystemEvent.action == "upload.partial_batch_scan_failed")
-        )
-        assert secondary.metadata_json["parentDiagnosticId"] == primary.id
+        secondary = next(iter([row for row in log_records() if row.action == 'upload.partial_batch_scan_failed']), None)
+        assert "parentDiagnosticId" not in secondary.metadata_json
         assert secondary.metadata_json["diagnostics"]["directException"]["errno"] == errno.EIO
         assert secondary.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO
         assert secondary.metadata_json["diagnostics"]["directCause"] is None

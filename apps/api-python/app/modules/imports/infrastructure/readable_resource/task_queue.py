@@ -770,13 +770,6 @@ class SqlAlchemyLibraryImportTaskQueue(
                 ImportTaskInterrupted(
                     "Startup observed a persisted RUNNING task without its executor"
                 ),
-                context={
-                    "task_id": task.id, "task_kind": task.kind,
-                    "library_id": task.library_id, "book_id": task.book_id,
-                    "resource_id": task.resource_id,
-                    "source_node_id": task.source_node_id, "step": "startup_finalization",
-                    "outcome": "FAILED", "code": WORKER_INTERRUPTED,
-                },
             )
             if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"} and not task.scan_round_started:
                 self._record_gaps_for_task(task)

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import release_read_transaction
 from app.models.library import Library
 from app.modules.system.domain.health import (
@@ -27,7 +27,6 @@ def _env_check(name: str, value: str | None, required: bool = True) -> dict[str,
             logging.getLogger(__name__),
             "system.health_configuration_missing",
             HealthCheckFailure(f"Required configuration {name} is absent"),
-            context={"stage": "health_configuration", "resource_id": name},
         )
         return health_check_item(name, "error", f"{name} 未配置")
     return health_check_item(
@@ -46,7 +45,6 @@ def _check_libraries(paths: list[tuple[str, Path]]) -> dict[str, str]:
                 HealthCheckFailure(
                     "Enabled library root does not exist or is not a directory"
                 ),
-                context={"stage": "library_root_probe", "library_id": library_id},
             )
             return health_check_item(
                 "libraryRootsReadable", "warning", f"书库不存在：{path}"
@@ -54,11 +52,11 @@ def _check_libraries(paths: list[tuple[str, Path]]) -> dict[str, str]:
         try:
             next(path.iterdir(), None)
         except OSError as exc:
+            capture_exception(exc, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.system.infrastructure.health._check_libraries.failed",
                 exc,
-                context={"stage": "_check_libraries", "library_id": library_id},
             )
             return health_check_item(
                 "libraryRootsReadable", "warning", f"书库不可读：{exc}"
@@ -74,11 +72,11 @@ def _check_storage_root(path: Path) -> dict[str, str]:
             probe.flush()
         return health_check_item("storageWritable", "ok", "书库文件夹可写")
     except OSError as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.system.infrastructure.health._check_storage_root.failed",
             exc,
-            context={"stage": "_check_storage_root"},
         )
         return health_check_item("storageWritable", "error", f"书库文件夹不可写：{exc}")
 
@@ -96,11 +94,11 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
         probe_database(db)
         checks.append(health_check_item("database", "ok", "数据库可连接"))
     except Exception as exc:  # noqa: BLE001 - health checks report failures.
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.system.infrastructure.health.run_system_health_checks.failed",
             exc,
-            context={"stage": "run_system_health_checks"},
         )
         checks.append(health_check_item("database", "error", f"数据库不可用：{exc}"))
 

@@ -13,7 +13,7 @@ from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import to_timestamp_ms
 from app.models import (
@@ -37,8 +37,8 @@ def parse_json(value: Any, fallback: Any) -> Any:
     try:
         return json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError) as error:
-        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.facets.parse_json.failed", error,
-                         context={"step": "parse_json"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.facets.parse_json.failed", error)
         return fallback
 
 

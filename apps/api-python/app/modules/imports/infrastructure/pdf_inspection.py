@@ -7,7 +7,7 @@ from pypdf.errors import PdfReadError
 from pypdf.generic import Destination
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import LimitedReader
 from app.infrastructure.pdf_embedded_metadata import read_pdf_embedded_metadata
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
@@ -45,8 +45,8 @@ def inspect_pdf(path: Path, original_name: str | None = None) -> PdfInspection:
     except (OSError, ValueError, PdfReadError, KeyError, TypeError, RecursionError) as error:
         # Optional metadata inspection cannot turn a readable file into a
         # failed import. Actual reader errors remain owned by the reader.
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.pdf_inspection.inspect_pdf.failed", error,
-                         context={"step": "inspect_pdf"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.pdf_inspection.inspect_pdf.failed", error)
     return PdfInspection(
         embedded_metadata=metadata or PublicationMetadata(),
         fallback_title=Path(original_name or path.name).stem,

@@ -30,7 +30,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_comic_page_mime_type,
     reader_safety_rule,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
@@ -169,8 +169,9 @@ def _title_from_file(path: Path) -> str:
 def _safe_entry_name(name: str) -> bool:
     try:
         normalize_archive_path(name)
-    except UnsafeArchivePathError:
+    except UnsafeArchivePathError as _caught_error:
         # diagnostics-control-flow: Unsafe names are quarantined, never extracted; required entries are validated separately.
+        capture_exception(_caught_error)
         return False
     return True
 
@@ -210,8 +211,8 @@ def _first_text(xml: str, tag: str) -> str | None:
     try:
         value = ElementTree.fromstring(f"<x>{value}</x>").text or value
     except ElementTree.ParseError as error:
-        record_exception(logging.getLogger(__name__), "infrastructure.comic_archives._first_text.failed", error,
-                         context={"step": "_first_text"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "infrastructure.comic_archives._first_text.failed", error)
     return re.sub(r"\s+", " ", value).strip() or None
 
 
@@ -290,20 +291,24 @@ class ComicArchiveStream:
         try:
             return self._source.read(size)
         except rarfile.RarCannotExec as exc:
+            capture_exception(exc, persist=False)
             raise ComicArchiveBackendUnavailableError(
                 "系统缺少 RAR 解压器，请安装 unrar 或 unar"
             ) from exc
         except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
+            capture_exception(exc, persist=False)
             raise _comic_capability_error(
                 "RAR 漫画压缩包需要密码",
                 ComicArchiveEncryptedError,
             ) from exc
         except rarfile.Error as exc:
+            capture_exception(exc, persist=False)
             raise _comic_integrity_error(
                 "RAR 漫画压缩包条目校验失败",
                 optional=True,
             ) from exc
         except RuntimeError as exc:
+            capture_exception(exc)
             if "encrypt" in str(exc).casefold() or "password" in str(exc).casefold():
                 raise _comic_capability_error(
                     "漫画压缩包需要密码",
@@ -314,6 +319,7 @@ class ComicArchiveStream:
                 optional=True,
             ) from exc
         except zipfile.BadZipFile as exc:
+            capture_exception(exc, persist=False)
             raise _comic_integrity_error(
                 "漫画压缩包条目校验失败",
                 optional=True,
@@ -355,26 +361,31 @@ class ComicArchive:
                 if source is None:
                     rarfile.tool_setup()
                 return archive
-            except ComicArchiveError:
+            except ComicArchiveError as _caught_error:
+                capture_exception(_caught_error, persist=False)
                 raise
             except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
+                capture_exception(exc, persist=False)
                 raise _comic_capability_error(
                     "RAR 漫画压缩包需要密码",
                     ComicArchiveEncryptedError,
                 ) from exc
             except rarfile.NeedFirstVolume as exc:
+                capture_exception(exc, persist=False)
                 raise _comic_policy_error(
                     ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
                     "暂不支持分卷 RAR 漫画压缩包",
                     ComicArchiveMultiVolumeError,
                 ) from exc
             except rarfile.RarCannotExec as exc:
+                capture_exception(exc)
                 if archive is not None:
                     archive.close()
                 raise ComicArchiveBackendUnavailableError(
                     "系统缺少 RAR 解压器，请安装 unrar 或 unar"
                 ) from exc
             except rarfile.Error as exc:
+                capture_exception(exc)
                 if archive is not None:
                     archive.close()
                 raise _comic_policy_error(
@@ -384,6 +395,7 @@ class ComicArchive:
         try:
             return zipfile.ZipFile(source if source is not None else path)
         except zipfile.BadZipFile as exc:
+            capture_exception(exc, persist=False)
             raise _comic_policy_error(
                 ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE,
                 "ZIP 漫画压缩包已损坏",
@@ -407,6 +419,7 @@ class ComicArchive:
             self._raise_if_ambiguous(name)
             return self._entry(self._archive.getinfo(name))
         except (KeyError, rarfile.NoRarEntry) as exc:
+            capture_exception(exc, persist=False)
             raise KeyError(name) from exc
 
     def open(
@@ -418,20 +431,24 @@ class ComicArchive:
             source = cast(BinaryIO, self._archive.open(name, mode))
             return ComicArchiveStream(source)
         except rarfile.RarCannotExec as exc:
+            capture_exception(exc, persist=False)
             raise ComicArchiveBackendUnavailableError(
                 "系统缺少 RAR 解压器，请安装 unrar 或 unar"
             ) from exc
         except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
+            capture_exception(exc, persist=False)
             raise _comic_capability_error(
                 "RAR 漫画压缩包需要密码",
                 ComicArchiveEncryptedError,
             ) from exc
         except rarfile.Error as exc:
+            capture_exception(exc, persist=False)
             raise _comic_integrity_error(
                 "漫画压缩包条目校验失败",
                 optional=True,
             ) from exc
         except RuntimeError as exc:
+            capture_exception(exc)
             if "encrypt" in str(exc).casefold() or "password" in str(exc).casefold():
                 raise _comic_capability_error(
                     "漫画压缩包需要密码",
@@ -442,6 +459,7 @@ class ComicArchive:
                 optional=True,
             ) from exc
         except zipfile.BadZipFile as exc:
+            capture_exception(exc, persist=False)
             raise _comic_integrity_error(
                 "漫画压缩包条目校验失败",
                 optional=True,
@@ -574,8 +592,8 @@ def inspect_comic_archive(
             except (ComicArchiveError, OSError, UnicodeError) as error:
                 # ComicInfo is optional metadata; a bad copy must not hide
                 # otherwise readable pages.
-                record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error,
-                                 context={"step": "inspect_comic_archive"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error)
                 comic_info = None
         pages: list[ComicPageInspection] = [
             {
@@ -632,8 +650,8 @@ def inspect_comic_archive(
                     if len(candidate) <= COVER_BYTES:
                         cover_content = candidate
                 except (ComicArchiveError, OSError, ValueError) as error:
-                    record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error,
-                                     context={"step": "inspect_comic_archive"})
+                    capture_exception(error, persist=False)
+                    record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error)
         return {
             "coverContent": cover_content,
             "title": (comic_info or {}).get("title")
@@ -683,10 +701,11 @@ def _validate_comic_entries(
             )
         try:
             canonical_name = _canonical_entry_name(entry.filename)
-        except UnsafeArchivePathError:
+        except UnsafeArchivePathError as _caught_error:
             # No member is extracted. An unaddressable entry is isolated while
             # its declared bytes still count toward the archive-wide budgets.
             # diagnostics-control-flow: Unused unsafe archive members are quarantined; budgets still count them.
+            capture_exception(_caught_error)
             continue
         if canonical_name in names:
             integrity_entries.add(canonical_name)
@@ -731,7 +750,8 @@ def extract_comic_cover(
             ):
                 shutil.copyfileobj(source, destination, length=1024 * 1024)
         temporary.replace(target)
-    except Exception:
+    except Exception as _caught_error:
+        capture_exception(_caught_error)
         temporary.unlink(missing_ok=True)
         raise
     return str(target)

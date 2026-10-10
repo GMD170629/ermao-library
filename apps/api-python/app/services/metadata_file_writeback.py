@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.system import prepare_system_event, write_prepared_system_events
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import (
+    capture_exception,
     exception_diagnostic_boundary,
     record_exception,
 )
@@ -224,8 +225,6 @@ def _fail_target_uow(
         action="metadata.opf_write_failed",
         message="旁车 OPF 保存失败，任务不会重试",
         level="warning",
-        target_type="metadataOpfTarget",
-        target_id=target_id,
         metadata=event_metadata,
     )
     now = db_timestamp()
@@ -306,7 +305,6 @@ def process_next_metadata_writeback(
         if preparation is not None:
             with exception_diagnostic_boundary(
                 LOGGER, "metadata.writeback_preparation_failed",
-                context={"task_id": str(preparation["id"]), "operation_id": str(preparation["operationId"]), "step": "prepare_writeback_targets"},
             ):
                 try:
                     targets = writeback_queue.prepare_targets_from_snapshot(preparation)
@@ -326,7 +324,6 @@ def process_next_metadata_writeback(
         if preparation is not None:
             with exception_diagnostic_boundary(
                 LOGGER, "metadata.writeback_preparation_failed",
-                context={"task_id": str(preparation["id"]), "operation_id": str(preparation["operationId"]), "step": "prepare_writeback_targets"},
             ):
                 try:
                     targets = writeback_queue.prepare_targets_from_snapshot(preparation)
@@ -344,7 +341,6 @@ def process_next_metadata_writeback(
         return False
     with exception_diagnostic_boundary(
         LOGGER, "metadata.writeback_target_failed",
-        context={"task_id": str(target["id"]), "operation_id": str(target.get("payload", {}).get("standard_operation_id") or target.get("operationId") or ""), "step": "writeback_target"},
     ):
         try:
             if "standard_operation_id" in target.get("payload", {}):
@@ -399,13 +395,13 @@ def process_next_metadata_writeback(
                     warning_code=warning_code,
                 )
             except Exception as exc:
+                capture_exception(exc, persist=False)
                 if prepared_path:
                     # Publication or its acknowledgement may already have happened.
                     # Preserve the prepared file, lease and durable state for inspection;
                     # do not translate uncertainty into a failed task or replay it.
                     raise RuntimeError("WRITEBACK_OUTCOME_REQUIRES_REVIEW") from exc
-                record_exception(LOGGER, "metadata.opf_prepare_failed", exc,
-                                 context={"operation_id": target.get("operationId"), "task_id": target_id, "step": "prepare_opf"})
+                record_exception(LOGGER, "metadata.opf_prepare_failed", exc)
                 _fail_target_uow(
                     db,
                     target=target,

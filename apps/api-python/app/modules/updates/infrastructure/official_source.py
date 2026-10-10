@@ -14,6 +14,8 @@ from typing import IO, Protocol
 
 from pydantic import ValidationError
 
+from app.core.exception_diagnostics import capture_exception
+
 from ..application.models import (
     REPOSITORY,
     GHCRReleaseReference,
@@ -95,6 +97,7 @@ class OfficialHTTP:
                         raise UpdateError("SIZE_LIMIT")
                     yield chunk
         except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+            capture_exception(error, persist=False)
             raise UpdateError("DOWNLOAD_FAILED") from error
 
 
@@ -147,6 +150,7 @@ class OfficialReleases:
                 result.append((version, packages))
             return result
         except (ValueError, TypeError, KeyError, ValidationError) as error:
+            capture_exception(error, persist=False)
             raise UpdateError("INVALID_MANIFEST") from error
 
 

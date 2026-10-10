@@ -2,8 +2,7 @@
 
 Two instances are installed by the composition root:
 
-* the inner instance converts unhandled route errors into a correlation-id
-  response without leaking internals;
+* the inner instance converts unhandled route errors into a failure response using the existing HTTP envelope;
 * the outer instance additionally covers middleware-layer database and
   permission failures and records before re-raising so existing propagation
   contracts are preserved.
@@ -16,14 +15,15 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import uuid4
 
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.exception_diagnostics import (
     DiagnosticSnapshot,
+    capture_exception,
     deferred_exception_persistence,
+    exception_message,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
 )
@@ -54,36 +54,11 @@ class DiagnosticBoundaryMiddleware:
         if self.respond_with_json:
             await self._invoke(scope, receive, send)
             return
-        headers = {
-            key.decode("latin-1").lower(): value.decode("latin-1")
-            for key, value in scope.get("headers", [])
-        }
-        request_id = headers.get("x-request-id") or uuid4().hex
-
-        async def correlated_send(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                message = {
-                    **message,
-                    "headers": [
-                        *message.get("headers", []),
-                        (
-                            b"x-request-id",
-                            request_id.encode("latin-1", errors="replace"),
-                        ),
-                    ],
-                }
-            await send(message)
-
         pending: list[DiagnosticSnapshot] = []
         try:
             with deferred_exception_persistence(
-                context={
-                    "path": scope.get("path", ""),
-                    "method": scope.get("method", ""),
-                    "request_id": request_id,
-                }
             ) as pending:
-                await self._invoke(scope, receive, correlated_send)
+                await self._invoke(scope, receive, send)
         finally:
             # The application has unwound its sessions and transactions before
             # independent diagnostic writes can acquire the database writer.
@@ -103,7 +78,8 @@ class DiagnosticBoundaryMiddleware:
 
         try:
             await self.app(scope, receive, send_wrapper)
-        except Exception as error:  # unified HTTP failure boundary
+        except BaseException as error:  # record cancellation without converting it to HTTP 500
+            capture_exception(error)
             snapshot = self._prepare(scope, error)
             await run_in_threadpool(
                 persist_exception_diagnostic,
@@ -111,30 +87,16 @@ class DiagnosticBoundaryMiddleware:
                 snapshot,
                 self.session_factory,
             )
-            if self.respond_with_json and not response_started:
-                await self._send_failure(scope, receive, send, snapshot)
+            if isinstance(error, Exception) and self.respond_with_json and not response_started:
+                await self._send_failure(scope, receive, send, snapshot, error)
                 return
             raise
 
     def _prepare(self, scope: Scope, error: BaseException) -> DiagnosticSnapshot:
-        headers = {
-            key.decode("latin-1").lower(): value.decode("latin-1")
-            for key, value in scope.get("headers", [])
-        }
         return prepare_exception_diagnostic(
             LOGGER,
             "api.request_failed",
             error,
-            context={
-                "stage": "api_request" if self.respond_with_json else "http_boundary",
-                "path": scope.get("path", ""),
-                "method": scope.get("method", ""),
-                **(
-                    {"request_id": headers["x-request-id"]}
-                    if headers.get("x-request-id")
-                    else {}
-                ),
-            },
             source="system",
             action="api.request_failed",
         )
@@ -145,14 +107,14 @@ class DiagnosticBoundaryMiddleware:
         receive: Receive,
         send: Send,
         snapshot: DiagnosticSnapshot,
+        error: BaseException,
     ) -> None:
         response = fail(
-            "服务器内部错误",
+            exception_message(error),
             status_code=500,
-            details={"eventId": snapshot.diagnostic_id},
-            code="INTERNAL_ERROR",
+            details={"exceptionType": type(error).__name__},
+            code=type(error).__name__,
         )
-        response.headers["X-Error-Id"] = snapshot.diagnostic_id
         await response(scope, receive, send)
 
 

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.audit import AutomationAuditPort
 from app.modules.automation.domain.access import (
     AutomationAccessError,
@@ -153,7 +154,8 @@ class ManageGrants:
             self._store.add(grant, credential.digest)
             self._audit.write(event)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return CreatedGrant(grant, credential.token)
@@ -209,7 +211,8 @@ class ManageGrants:
                 raise AutomationAccessError("GRANT_INACTIVE")
             self._audit.write(event)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return updated
@@ -235,7 +238,8 @@ class ManageGrants:
             self._audit.write(event)
             self._uow.commit()
             return token
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -248,7 +252,8 @@ class ManageGrants:
                 raise AutomationAccessError("GRANT_NOT_FOUND")
             self._audit.write(event)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -337,6 +342,7 @@ class RecordGrantUse:
         try:
             self._store.record_use(grant_id, now)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise

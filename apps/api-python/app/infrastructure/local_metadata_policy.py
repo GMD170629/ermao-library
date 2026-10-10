@@ -14,7 +14,7 @@ from app.contracts.local_metadata import (
     LocalMetadataSource,
     validate_local_metadata_priority,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models.organize import OrganizePolicy
 
 
@@ -51,8 +51,8 @@ def prepare_local_metadata_priority(
         parsed = json.loads(projection.stored_json or "[]")
         return validate_local_metadata_priority(parsed)
     except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "infrastructure.local_metadata_policy.prepare_local_metadata_priority.failed", error,
-                         context={"step": "prepare_local_metadata_priority"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "infrastructure.local_metadata_policy.prepare_local_metadata_priority.failed", error)
         return DEFAULT_LOCAL_METADATA_PRIORITY
 
 

@@ -18,6 +18,7 @@ from app.contracts.automation_upload import (
     UploadTarget,
 )
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.receipts import (
     ReceiptStore,
@@ -230,7 +231,6 @@ class AutomationUploads:
         target = self._gateway(spec).target(actor, spec)
         self.uow.rollback()
         now = self.clock_ms()
-        step = "claim_receipt"
         try:
             previous = self.receipts.claim(
                 access.grant_id, request_id, "begin_upload", fingerprint, now
@@ -254,31 +254,25 @@ class AutomationUploads:
                 now + LIFETIME_MS,
                 execution_version=2,
             )
-            step = "save_state"
             self.store.save(record)
             self.receipts.complete(
                 access.grant_id, request_id, {"upload_id": record.id}
             )
-            step = "commit"
             self.uow.commit()
             return self.view(record)
         except Exception as error:
+            capture_exception(error, persist=False)
             diagnostic = self.diagnostics.prepare(
                 error,
                 event="upload.begin_failed",
-                context={"request_id": request_id, "step": step},
             )
             try:
                 self.uow.rollback()
             except Exception as rollback_error:
+                capture_exception(rollback_error, persist=False)
                 secondary = self.diagnostics.prepare(
                     rollback_error,
                     event="upload.rollback_failed",
-                    context={
-                        "request_id": request_id,
-                        "step": "rollback",
-                        "parent_diagnostic_id": diagnostic.diagnostic_id,
-                    },
                 )
                 self.diagnostics.persist(secondary)
                 raise
@@ -294,6 +288,7 @@ class AutomationUploads:
         try:
             data = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
+            capture_exception(error, persist=False)
             raise UploadError("INVALID_BASE64") from error
         if not data or len(data) > CHUNK_BYTES or offset < 0:
             raise UploadError("INVALID_CHUNK")
@@ -353,7 +348,6 @@ class AutomationUploads:
             if record.offset != record.spec.size_bytes:
                 raise UploadError("UPLOAD_INCOMPLETE")
             gateway = self._gateway(record.spec)
-            step = "validate_target"
             try:
                 if record.spec.purpose != "cover":
                     if record.execution_version != 2 or (
@@ -370,20 +364,16 @@ class AutomationUploads:
                     if target != record.target:
                         raise UploadError("UPLOAD_TARGET_CHANGED")
                     self.uow.rollback()
-                    step = "verify_upload"
                     source = self.files.verify(
                         upload_id, record.spec.size_bytes, record.spec.sha256
                     )
-                    step = "prepare_upload"
                     publication = gateway.prepare(
                         upload_id, record.spec, target, source
                     )
                     record = replace(
                         record, status="PUBLISHING", publication=publication
                     )
-                    step = "save_state"
                     self.store.save(record)
-                    step = "commit"
                     self.uow.commit()
                 actor = self._current_actor(access, record)
                 # A saved file needs only scan registration on a subsequent call.
@@ -394,44 +384,29 @@ class AutomationUploads:
                 self.uow.rollback()
                 if record.status == "PUBLISHING":
                     assert record.publication is not None
-                    step = "publish_upload"
                     gateway.publish(record.publication)
                     record = replace(record, status="SAVED", file_saved=True)
-                    step = "save_state"
                     self.store.save(record)
-                    step = "commit"
                     self.uow.commit()
                 actor = self._current_actor(access, record)
                 assert record.publication is not None
-                step = "register_upload"
                 outcome = gateway.register(actor, record.spec, record.publication)
                 record = replace(record, status=outcome.status, outcome=outcome)
-                step = "save_state"
                 self.store.save(record)
-                step = "commit"
                 self.uow.commit()
             except Exception as error:
+                capture_exception(error, persist=False)
                 diagnostic = self.diagnostics.prepare(
                     error,
                     event="upload.complete_failed",
-                    context={
-                        "operation_id": upload_id,
-                        "library_id": record.target.library_id,
-                        "stage": record.status,
-                        "step": step,
-                    },
                 )
                 try:
                     self.uow.rollback()
                 except Exception as rollback_error:
+                    capture_exception(rollback_error, persist=False)
                     secondary = self.diagnostics.prepare(
                         rollback_error,
                         event="upload.rollback_failed",
-                        context={
-                            "operation_id": upload_id,
-                            "step": "rollback",
-                            "parent_diagnostic_id": diagnostic.diagnostic_id,
-                        },
                     )
                     self.diagnostics.persist(secondary)
                     raise
@@ -456,9 +431,7 @@ class AutomationUploads:
                     if record.publication is not None
                     else "UPLOAD_SAVE_FAILED",
                 )
-                step = "save_state"
                 self.store.save(record)
-                step = "commit"
                 self.uow.commit()
                 if not isinstance(error, UploadError):
                     raise
@@ -470,9 +443,7 @@ class AutomationUploads:
             )
             self.files.remove(upload_id)
             record = replace(record, staging_cleaned=True)
-            step = "save_state"
             self.store.save(record)
-            step = "commit"
             self.uow.commit()
             return self.view(record)
 
@@ -524,7 +495,6 @@ class AutomationUploads:
         records = self.store.expired(self.clock_ms())
         self.uow.rollback()
         for candidate in records:
-            step = "lock_upload"
             try:
                 with self.files.lock(candidate.id):
                     record = self.store.get(
@@ -544,49 +514,34 @@ class AutomationUploads:
                         self.store.defer_cleanup(
                             candidate.id, self.clock_ms() + LIFETIME_MS
                         )
-                        step = "commit"
                         self.uow.commit()
                         continue
                     if record.status in TRANSFER_STATES or record.status == "SAVED":
                         record = replace(
                             record, status="EXPIRED", error_code="UPLOAD_EXPIRED"
                         )
-                        step = "save_state"
                         self.store.save(record)
-                        step = "commit"
                         self.uow.commit()
                     self.uow.rollback()
-                    step = "discard_staging"
                     self._gateway(record.spec).discard(
                         record.id, record.target, record.publication
                     )
-                    step = "remove_staging"
                     self.files.remove(record.id)
                     self.store.mark_cleaned(record)
-                    step = "commit"
                     self.uow.commit()
             except Exception as error:
+                capture_exception(error, persist=False)
                 diagnostic = self.diagnostics.prepare(
                     error,
                     event="upload.cleanup_failed",
-                    context={
-                        "operation_id": candidate.id,
-                        "library_id": candidate.target.library_id,
-                        "stage": candidate.status,
-                        "step": step,
-                    },
                 )
                 try:
                     self.uow.rollback()
                 except Exception as rollback_error:
+                    capture_exception(rollback_error, persist=False)
                     secondary = self.diagnostics.prepare(
                         rollback_error,
                         event="upload.cleanup_rollback_failed",
-                        context={
-                            "operation_id": candidate.id,
-                            "step": "rollback",
-                            "parent_diagnostic_id": diagnostic.diagnostic_id,
-                        },
                     )
                     self.diagnostics.persist(secondary)
                     raise
@@ -596,7 +551,6 @@ class AutomationUploads:
                     raise
                 # Retain uncertain staging, but do not let 20 such rows starve cleanup.
                 self.store.defer_cleanup(candidate.id, self.clock_ms() + 5 * 60 * 1000)
-                step = "commit"
                 self.uow.commit()
             finally:
                 self.uow.rollback()

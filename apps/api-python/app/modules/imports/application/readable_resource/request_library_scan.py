@@ -80,8 +80,6 @@ class RequestLibraryScan:
 
         self._log.emit(
             "library_scan.requested",
-            library_id=command.library_id,
-            task_id=task.id,
             stage=command.trigger.lower(),
             outcome="enqueued" if enqueued else "coalesced",
         )

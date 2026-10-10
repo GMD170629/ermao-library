@@ -8,7 +8,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.i18n import configured_locale
 from app.models import (
     LibraryBook,
@@ -108,11 +108,11 @@ def complete_missing_metadata(
     try:
         generated = generate_metadata(config, summary)
     except Exception as error:  # noqa: BLE001 - preserve usable A/B results on optional generation failure.
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "metadata.generate_failed",
             error,
-            context={"step": "generate", "book_id": book_id},
         )
         return result
     fields = []

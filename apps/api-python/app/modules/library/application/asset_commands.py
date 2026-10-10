@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
+
 
 @dataclass(frozen=True, slots=True)
 class ResourceAssetDeletion:
@@ -58,7 +60,8 @@ class DeleteResourceAsset:
             if deletion.ready_asset_count == 0:
                 self._port.mark_resource_failed(resource_id=deletion.resource_id)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return DeleteResourceAssetResult(asset_id=deletion.asset_id, deleted=True)

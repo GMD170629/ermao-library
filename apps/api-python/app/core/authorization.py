@@ -9,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
 
+from app.core.exception_diagnostics import capture_exception
 from app.models.auth import User, UserLibraryAccess, UserPreference
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -200,8 +201,9 @@ def read_user_preferences(db: Session, user_id: str) -> dict[str, Any]:
         raw = row.value
         try:
             preferences[str(row.key)] = json.loads(str(raw))
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError, json.JSONDecodeError) as _caught_error:
             # diagnostics-control-flow: User preference values support literal strings in addition to JSON encoded values.
+            capture_exception(_caught_error)
             preferences[str(row.key)] = raw
     return preferences
 

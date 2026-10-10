@@ -1195,6 +1195,8 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "from types import MappingProxyType",
         "from typing import Final",
         "",
+        "from app.core.exception_diagnostics import capture_exception",
+        "",
         "",
     ]
     enum_groups = [
@@ -1477,8 +1479,9 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "def reader_safety_format_policy(source_format: str) -> ReaderSafetyFormatDefinition | None:",
         "    try:",
         "        format_id = ReaderSafetyFormat(source_format.strip().upper())",
-        "    except ValueError:",
+        "    except ValueError as _caught_error:",
         "        # diagnostics-control-flow: unknown formats intentionally return no policy; require_reader_safety_format_policy rejects them.",
+        "        capture_exception(_caught_error)",
         "        return None",
         "    return READER_SAFETY_FORMATS[format_id]",
         "",

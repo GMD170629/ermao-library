@@ -1,17 +1,17 @@
+from tests.support.log_events import log_records, one_log
+
 """Restore preflight failures preserve their actual I/O/programming cause."""
 
 import errno
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
-from app.models.settings import SystemEvent
 from app.modules.backup.application.restore import BackupRecordValidationError
 from app.modules.backup.infrastructure import archive
 
@@ -54,18 +54,21 @@ def test_restore_preflight_does_not_misclassify_infrastructure_failures(tmp_path
             assert ("User.id" if kind == "known_record" else "temporary database I/O failed" if kind == "io" else "restore writer invariant failed") in response.json()["error"]["message"]
             assert observed_temporary_database == ["database"]
             assert client.get("/api/auth/me").status_code == 200
-        with factory() as db:
-            failure = db.get(SystemEvent, response.headers["X-Error-Id"])
+        with factory() as _db:
+            assert "X-Error-Id" not in response.headers
+            assert "X-Request-Id" not in response.headers
+            failure = one_log([row for row in log_records() if row.message == str(original)])
             assert failure is not None
             facts = failure.metadata_json["diagnostics"]["directException"]
             assert facts["type"].endswith(type(original).__name__)
             if kind == "io":
                 assert facts["errno"] == errno.EIO
                 assert facts["errorName"] == "EIO"
-            assert failure.id in caplog.text
-            assert failure.metadata_json["requestId"] == response.headers["X-Request-Id"]
-            matching = db.scalars(select(SystemEvent).where(SystemEvent.id == failure.id)).all()
+            assert str(original) in caplog.text
+            assert "requestId" not in failure.metadata_json
+            matching = [row for row in log_records() if row.id == failure.id]
             assert len(matching) == 1
-        assert "/private/restore-validation" not in caplog.text + response.text
+        if kind == "io":
+            assert "/private/restore-validation" in caplog.text
     finally:
         engine.dispose()

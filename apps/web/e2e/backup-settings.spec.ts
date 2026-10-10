@@ -28,7 +28,7 @@ for (const locale of ['zh-CN', 'en-US']) {
         await route.fulfill({ json: { ok: true, data: { backups: archives } } });
       } else if (path.endsWith('/restore')) {
         restores++;
-        await route.fulfill({ status: 400, headers: { 'X-Error-Id': 'diag-backup-test' }, json: { ok: false,
+        await route.fulfill({ status: 400, json: { ok: false,
           error: { code: 'BACKUP_REQUIRED_FIELD', message: '验证备份数据：缺少必填字段：User.id',
             params: { messageEn: 'Validate backup data: Required field is missing: User.id' } } } });
       } else {
@@ -48,7 +48,7 @@ for (const locale of ['zh-CN', 'en-US']) {
     await goodRow.getByRole('button', { name: en ? 'Restore' : '恢复', exact: true }).click();
     await page.getByRole('button', { name: en ? 'Continue Restore' : '继续恢复', exact: true }).click();
     await expect(page.getByTestId('app-shell-content').getByRole('alert')).toContainText('User.id');
-    await expect(page.getByTestId('app-shell-content').getByRole('alert')).toContainText('diag-backup-test');
+    await expect(page.getByTestId('app-shell-content').getByRole('alert')).not.toContainText('diag-backup-test');
     expect(restores).toBe(1);
   });
 }

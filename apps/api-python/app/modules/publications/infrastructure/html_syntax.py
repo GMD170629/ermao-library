@@ -17,6 +17,7 @@ from typing import TextIO
 import html5lib  # type: ignore[import-untyped]
 from html5lib import _tokenizer  # type: ignore[import-untyped]
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.infrastructure.html_serialization import (
     quoted_html_attribute,
 )
@@ -299,6 +300,7 @@ def prepare_html_markup(
     try:
         parser.parse(session.source, scripting=True)
     except TypeError as error:
+        capture_exception(error, persist=False)
         raise XmlPolicyPreparationError(
             "HTML SDK attribute projection is inconsistent"
         ) from error

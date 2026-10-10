@@ -2,35 +2,28 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import event, insert
+import json
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from app.models.settings import SystemEvent
+from app.modules.system.infrastructure.log_files import log_directory
 from app.modules.system.application.queries import parse_event_date_bounds
 from app.modules.system.infrastructure.events import list_system_events_page
 
 
-def test_system_event_page_filters_in_database(db_session: Session) -> None:
+def test_system_event_page_streams_files_without_database_queries(db_session: Session) -> None:
     now = datetime.now(UTC)
     event_count = 100_000
-    for start in range(0, event_count, 1_000):
-        stop = min(event_count, start + 1_000)
-        db_session.execute(
-            insert(SystemEvent),
-            [
-                {
-                    "id": f"event-scale-{index:06d}",
-                    "level": "warning" if index % 5 == 0 else "info",
-                    "source": f"source-{index % 10}",
-                    "actor_type": "system",
-                    "action": "scale.test",
-                    "message": "bounded event query",
-                    "created_at": now - timedelta(seconds=index),
-                }
-                for index in range(start, stop)
-            ],
-        )
-    db_session.commit()
+    directory = log_directory() / "api"
+    directory.mkdir(parents=True)
+    with (directory / f"{now.astimezone().date()}.jsonl").open("w", encoding="utf-8") as stream:
+        for index in reversed(range(event_count)):
+            stream.write(json.dumps({
+                "id": f"event-scale-{index:06d}", "level": "warning" if index % 5 == 0 else "info",
+                "source": f"source-{index % 10}", "actorType": "system", "actorId": None,
+                "action": "scale.test", "message": "bounded event query", "metadata": {},
+                "createdAt": (now - timedelta(seconds=index)).isoformat(),
+            }) + "\n")
     select_count = 0
     select_statements: list[str] = []
 
@@ -65,8 +58,8 @@ def test_system_event_page_filters_in_database(db_session: Session) -> None:
     assert sum(item["count"] for item in snapshot.sources) == event_count
     assert sum(item["count"] for item in snapshot.levels) == event_count
     assert snapshot.size_bytes > 0
-    assert select_count == 4
-    assert any("FROM dbstat" in statement for statement in select_statements)
+    assert select_count == 0
+    assert select_statements == []
     assert not any("length(" in statement.lower() for statement in select_statements)
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.imports.application.library_paths import LibraryPathError
 
 
@@ -26,6 +27,7 @@ def resolve_library_root_path(value: object) -> Path:
     try:
         real_target = target.resolve(strict=True)
     except (OSError, RuntimeError) as error:
+        capture_exception(error, persist=False)
         raise LibraryPathError(
             "书库路径不存在或不可读",
             status_code=404,
@@ -49,6 +51,7 @@ def resolve_library_root_path(value: object) -> Path:
         with os.scandir(real_target) as entries:
             next(entries, None)
     except OSError as error:
+        capture_exception(error, persist=False)
         raise LibraryPathError(
             "书库路径不可读",
             status_code=400,

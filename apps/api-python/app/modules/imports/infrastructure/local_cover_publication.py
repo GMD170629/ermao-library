@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.imports.application.readable_resource.ports import PreparedLocalCover
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -26,6 +26,7 @@ def validated_cover_suffix(content: bytes) -> str:
             image_format = str(image.format or "").upper()
             image.verify()
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as error:
+        capture_exception(error, persist=False)
         raise ValueError("local cover could not be validated") from error
     suffix = _SUFFIXES.get(image_format)
     if suffix is None:
@@ -44,8 +45,9 @@ class FilesystemLocalCoverPublication:
     def validates(self, content: bytes) -> bool:
         try:
             validated_cover_suffix(content)
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: Invalid optional image candidates are a normal validation result.
+            capture_exception(_caught_error)
             return False
         return True
 
@@ -96,8 +98,8 @@ class FilesystemLocalCoverPublication:
                 return None
             return target.read_bytes()
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.read_candidate.failed", error,
-                             context={"step": "read_candidate"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.read_candidate.failed", error)
             return None
 
     def matches(self, stored_path: str | None, content: bytes) -> bool:
@@ -111,8 +113,8 @@ class FilesystemLocalCoverPublication:
                 target.stat().st_size == len(content) and target.read_bytes() == content
             )
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.matches.failed", error,
-                             context={"step": "matches"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.local_cover_publication.matches.failed", error)
             return False
 
     def publish(self, prepared: PreparedLocalCover) -> None:
@@ -121,8 +123,9 @@ class FilesystemLocalCoverPublication:
         try:
             # A shared content path must never replace a file another task uses.
             os.link(prepared.temporary_path, prepared.final_path)
-        except FileExistsError:
+        except FileExistsError as _caught_error:
             # diagnostics-control-flow: Concurrent publication of identical content is idempotent; mismatches still raise.
+            capture_exception(_caught_error)
             if (
                 prepared.final_path.is_symlink()
                 or prepared.final_path.stat().st_size

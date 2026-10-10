@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 
 OPDS_ENABLED_SETTING_KEY = "opds.enabled"
 OPDS_PUBLIC_BASE_URL_SETTING_KEY = "opds.publicBaseUrl"
@@ -32,6 +33,7 @@ def normalize_opds_public_base_url(public_base_url: str) -> str:
     try:
         parsed = urlsplit(normalized)
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise OpdsPublicBaseUrlInvalid(
             "Configured public URL could not be parsed"
         ) from error
@@ -63,10 +65,10 @@ def resolve_opds_settings(
             else None
         )
     except OpdsPublicBaseUrlInvalid as error:
+        capture_exception(error, persist=False)
         diagnostic = diagnostics.prepare(
             error,
             event="opds.stored_public_url_invalid",
-            context={"step": "validate_stored_public_url"},
         )
         diagnostics.persist(diagnostic)
         normalized_base_url = None

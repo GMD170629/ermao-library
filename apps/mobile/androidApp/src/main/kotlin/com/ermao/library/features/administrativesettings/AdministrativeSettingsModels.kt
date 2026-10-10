@@ -578,7 +578,7 @@ enum class HealthStatus { Healthy, Warning, Checking, Failed }
 data class LogsSnapshot(
     val query: LogQuery,
     val usedMegabytes: Int,
-    val capacityMegabytes: Int,
+    val retentionDays: Int,
     val records: List<LogRecord>,
 ) : AdministrativePageSnapshot
 
@@ -589,7 +589,7 @@ data class LogQuery(
     val days: Int = 7,
 )
 
-enum class LogLevel { Information, Warning, Error }
+enum class LogLevel { Debug, Information, Warning, Error }
 
 data class LogRecord(
     val id: String,
@@ -597,8 +597,6 @@ data class LogRecord(
     val level: LogLevel,
     val source: String,
     val summary: String,
-    val correlationId: String?,
-    val target: String?,
 )
 
 data class AdministrativeExportFile(
@@ -657,7 +655,7 @@ enum class AdministrativeOperation {
     DeleteBackup,
     SaveDetailOrder,
     RunHealthCheck,
-    SaveLogCapacity,
+    SaveLogRetention,
     ExportLogs,
     ClearInformationalLogs,
 }

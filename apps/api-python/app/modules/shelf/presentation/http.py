@@ -23,7 +23,7 @@ from app.core.authorization import (
     authorization_context,
 )
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db
 from app.models.auth import User
 from app.modules.shelf.application import (
@@ -105,11 +105,11 @@ def _parse_json(value: Any, fallback: Any) -> Any:
     try:
         return json.loads(str(value))
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http._parse_json.failed",
             error,
-            context={"stage": "_parse_json"},
         )
         return fallback
 
@@ -600,11 +600,11 @@ def create_shelf(
     try:
         kind = ShelfKind.parse(payload.get("kind"))
     except ShelfCollectionPolicyError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.create_shelf.failed",
             error,
-            context={"stage": "create_shelf"},
         )
         return _collection_policy_response(error)
     rules, rules_error = normalize_smart_shelf_rules(payload.get("rules"))
@@ -628,11 +628,11 @@ def create_shelf(
                 has_smart_rules=bool(rules),
             )
         except ShelfCollectionPolicyError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.shelf.presentation.http.create_shelf.failed",
                 error,
-                context={"stage": "create_shelf"},
             )
             return _collection_policy_response(error)
         book_ids: list[str] = []
@@ -668,11 +668,11 @@ def create_shelf(
                 owner_id=user.id,
             )
     except ShelfCollectionPolicyError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.create_shelf.failed",
             error,
-            context={"stage": "create_shelf"},
         )
         return _collection_policy_response(error)
 
@@ -730,11 +730,11 @@ def update_shelf(
         if (existing_kind is ShelfKind.COLLECTION) != (kind is ShelfKind.COLLECTION):
             raise ShelfCollectionPolicyError("INVALID_SHELF_KIND_TRANSITION")
     except ShelfCollectionPolicyError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.update_shelf.failed",
             error,
-            context={"stage": "update_shelf"},
         )
         return _collection_policy_response(error)
     rules, rules_error = normalize_smart_shelf_rules(
@@ -769,11 +769,11 @@ def update_shelf(
             has_smart_rules=bool(rules),
         )
     except ShelfCollectionPolicyError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.update_shelf.failed",
             error,
-            context={"stage": "update_shelf"},
         )
         return _collection_policy_response(error)
     member_shelf_ids = (
@@ -814,11 +814,11 @@ def update_shelf(
                     owner_id=user.id,
                 )
     except ShelfCollectionPolicyError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.update_shelf.failed",
             error,
-            context={"stage": "update_shelf"},
         )
         return _collection_policy_response(error)
     updated_at = _now()
@@ -892,11 +892,11 @@ def delete_shelf(
             )
         )
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.shelf.presentation.http.delete_shelf.failed",
             error,
-            context={"stage": "delete_shelf"},
         )
         if str(error) != "SHELF_COLLECTION_NOT_EMPTY":
             raise

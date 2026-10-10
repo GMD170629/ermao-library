@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from app.contracts.automation_upload import UploadError
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.deletions import AutomationDeletions
 from app.modules.automation.application.file_moves import AutomationFileMoves
 from app.modules.automation.application.uploads import AutomationUploads
@@ -28,6 +29,7 @@ class AutomationOperations:
                 return self.deletions.progress(access, operation_id)
             except FileMoveError as error:
                 # diagnostics-control-flow: no owned deletion with this ID means try upload progress; all other deletion errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if {
@@ -39,6 +41,7 @@ class AutomationOperations:
                 return self.uploads.progress(access, operation_id)
             except UploadError as error:
                 # diagnostics-control-flow: no owned upload with this ID means try move progress; all other upload errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if Scope.FILES_MODIFY in access.permissions.scopes:
@@ -46,6 +49,7 @@ class AutomationOperations:
                 return self.moves.progress(access, operation_id)
             except FileMoveError as error:
                 # diagnostics-control-flow: no owned move with this ID means try writeback progress; all other move errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if Scope.FILES_MODIFY in access.permissions.scopes:
@@ -58,6 +62,7 @@ class AutomationOperations:
                 return self.deletions.cancel(access, operation_id)
             except FileMoveError as error:
                 # diagnostics-control-flow: no owned deletion with this ID means try upload cancellation; all other deletion errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if {
@@ -69,6 +74,7 @@ class AutomationOperations:
                 return self.uploads.cancel(access, operation_id)
             except UploadError as error:
                 # diagnostics-control-flow: no owned upload with this ID means try move cancellation; all other upload errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if Scope.FILES_MODIFY in access.permissions.scopes:
@@ -76,6 +82,7 @@ class AutomationOperations:
                 return self.moves.cancel(access, operation_id)
             except FileMoveError as error:
                 # diagnostics-control-flow: no owned move with this ID means try writeback cancellation; all other move errors propagate.
+                capture_exception(error)
                 if str(error) != "RESOURCE_NOT_FOUND":
                     raise
         if Scope.FILES_MODIFY in access.permissions.scopes:

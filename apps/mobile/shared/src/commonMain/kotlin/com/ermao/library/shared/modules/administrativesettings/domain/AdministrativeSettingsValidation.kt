@@ -9,9 +9,8 @@ internal object AdministrativeSettingsValidation {
     const val MAXIMUM_SMTP_PORT = 65_535
     const val MINIMUM_ATTACHMENT_MEGABYTES = 1.0
     const val MAXIMUM_ATTACHMENT_MEGABYTES = 50.0
-    const val MINIMUM_LOG_MEGABYTES = 1
-    const val MAXIMUM_LOG_MEGABYTES = 100
-    private const val BYTES_PER_MEGABYTE = 1024L * 1024L
+    const val MINIMUM_LOG_RETENTION_DAYS = 1
+    const val MAXIMUM_LOG_RETENTION_DAYS = 365
 
     fun isValidDisplayName(value: String): Boolean =
         value.trim().length in 1..MAXIMUM_DISPLAY_NAME_LENGTH
@@ -39,10 +38,7 @@ internal object AdministrativeSettingsValidation {
     fun isValidAttachmentMegabytes(value: Double): Boolean =
         value.isFinite() && value in MINIMUM_ATTACHMENT_MEGABYTES..MAXIMUM_ATTACHMENT_MEGABYTES
 
-    fun isValidLogMegabytes(value: Int): Boolean =
-        value in MINIMUM_LOG_MEGABYTES..MAXIMUM_LOG_MEGABYTES
+    fun isValidLogRetentionDays(value: Int): Boolean =
+        value in MINIMUM_LOG_RETENTION_DAYS..MAXIMUM_LOG_RETENTION_DAYS
 
-    fun isValidLogBytes(value: Long): Boolean =
-        value % BYTES_PER_MEGABYTE == 0L &&
-            value / BYTES_PER_MEGABYTE in MINIMUM_LOG_MEGABYTES.toLong()..MAXIMUM_LOG_MEGABYTES.toLong()
 }

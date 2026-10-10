@@ -5,6 +5,7 @@ from typing import BinaryIO
 
 from mutagen.id3 import ID3
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.metadata.application.standard_files import StandardMetadataError
 from app.modules.metadata.infrastructure.audio_structure import read_at, syncsafe
 
@@ -41,6 +42,7 @@ def write_selected_id3(
                     ]
                     selected = frame[14:].decode(codec).split("\0", 1)[0] == ""
                 except (KeyError, UnicodeError) as error:
+                    capture_exception(error, persist=False)
                     raise StandardMetadataError("INVALID_ID3_DESCRIPTION") from error
         if not selected:
             kept.append(frame)

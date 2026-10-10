@@ -97,7 +97,7 @@ def packages(tmp_path, program_package):
     installed_wheel = wheel(seed / "wheels")
     initial = generate(image, seed)
     storage = tmp_path / "storage"
-    storage.mkdir()
+    storage.mkdir(exist_ok=True)  # API startup may have created its daily log directory.
     shutil.copytree(image, storage / "runtime", symlinks=True)
     business = storage / "dependencies/python"
     venv.EnvBuilder(with_pip=False).create(business)

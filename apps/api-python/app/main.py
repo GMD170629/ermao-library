@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import signal
@@ -28,12 +29,14 @@ from app.bootstrap.prestart import verify_current_schema
 from app.bootstrap.publication_navigation import (
     build_publication_navigation_runtime,
 )
+from app.bootstrap.system import configure_log_directory
 from app.bootstrap.updates import UpdateRuntime
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import (
+    capture_exception,
     configure_exception_storage,
     emergency_diagnostic,
     install_exception_hooks,
@@ -147,6 +150,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_log_directory(settings.resolved_storage_root)
         configure_logging()
         configure_exception_storage(background_runtime_factory)
         try:
@@ -160,27 +164,24 @@ def create_app(
                         LOGGER,
                         "api.background_unavailable",
                         error,
-                        context={"stage": stage, "outcome": "paused"},
                         source="system",
                         action="api.background_unavailable",
                     )
                 except Exception as diagnostic_error:  # noqa: BLE001 - safe fallback.
-                    from uuid import uuid4
+                    capture_exception(diagnostic_error)
 
-                    diagnostic_id = f"diag_{uuid4().hex}"
                     emergency_diagnostic(
                         f"api.background_unavailable.{stage}", error,
-                        diagnostic_id=diagnostic_id,
                     )
                     emergency_diagnostic(
                         "api.diagnostic_record_failed", diagnostic_error,
-                        diagnostic_id=f"diag_{uuid4().hex}", parent_diagnostic_id=diagnostic_id,
                     )
 
             def release(stage: str, action: Callable[[], object]) -> None:
                 try:
                     action()
                 except Exception as error:  # noqa: BLE001 - continue releasing other owners.
+                    capture_exception(error)
                     report(stage, error)
 
             download_queue_worker = None
@@ -193,6 +194,7 @@ def create_app(
                     heartbeat_runtime_factory,
                 )
             except Exception as error:  # noqa: BLE001 - optional component boundary.
+                capture_exception(error)
                 report("download_start", error)
             try:
                 kindle_send_queue_worker = start_kindle_send_queue_worker(
@@ -201,6 +203,7 @@ def create_app(
                     heartbeat_runtime_factory,
                 )
             except Exception as error:  # noqa: BLE001 - optional component boundary.
+                capture_exception(error)
                 report("kindle_start", error)
             try:
                 log_maintenance_worker = SystemEventMaintenanceWorker(
@@ -209,6 +212,7 @@ def create_app(
                 )
                 log_maintenance_worker.start()
             except Exception as error:  # noqa: BLE001 - optional component boundary.
+                capture_exception(error)
                 report("maintenance_start", error)
                 if log_maintenance_worker is not None:
                     release("maintenance_stop", log_maintenance_worker.stop)
@@ -304,7 +308,7 @@ def create_app(
             return database_maintenance_is_active(maintenance_db)
 
     # Inner boundary: unexpected route errors become a 500 envelope that still
-    # carries a correlation id and never leaks internals.
+    # retains the existing HTTP error contract.
     app.add_middleware(
         DiagnosticBoundaryMiddleware,
         session_factory=background_runtime_factory,

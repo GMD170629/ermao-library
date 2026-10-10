@@ -18,7 +18,7 @@ from app.modules.library.infrastructure.source_node_cover import (
 
 
 @pytest.mark.parametrize("kind", ["resource", "source_node", "avatar"])
-def test_staged_image_write_and_cleanup_have_separate_linked_diagnostics(
+def test_staged_image_write_and_cleanup_have_separate_complete_diagnostics(
     tmp_path, monkeypatch, kind, caplog
 ):
     original = OSError(errno.ENOSPC, "disk full", "/private/library/staged-image")
@@ -49,9 +49,10 @@ def test_staged_image_write_and_cleanup_have_separate_linked_diagnostics(
     assert len(pending) == 2
     assert pending[0].metadata["diagnostics"]["directException"]["errno"] == errno.ENOSPC
     assert pending[1].metadata["diagnostics"]["directException"]["errno"] == errno.EACCES
-    assert pending[1].metadata["parentDiagnosticId"] == pending[0].diagnostic_id
+    assert "parentDiagnosticId" not in pending[1].metadata
+    assert pending[1].diagnostic_id != pending[0].diagnostic_id
     assert "disk full" in caplog.text and "cleanup denied" in caplog.text
-    assert "/private/library" not in caplog.text
+    assert "/private/library" in caplog.text
 
 
 @pytest.mark.parametrize("kind", ["resource", "source_node"])

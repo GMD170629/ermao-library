@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records, one_log
+
 """Provider failures retain the observed external cause after a failed result."""
 
 import json
@@ -5,7 +7,6 @@ import ssl
 from urllib.error import HTTPError
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
@@ -16,7 +17,7 @@ from app.core.exception_diagnostics import (
 )
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.services import metadata_provider_registry as providers
 
 
@@ -85,35 +86,31 @@ def test_provider_failure_result_has_real_runtime_and_event_cause(
         with exception_diagnostic_boundary(
             providers.LOGGER,
             "provider.request_failed",
-            context={"request_id": "provider-request-1"},
+
         ):
             result, provider = providers.test_metadata_provider(db, "douban")
             db.close()
 
     assert result["ok"] is False
     assert provider["lastTestStatus"] == "failed"
-    with factory() as observer:
-        rows = observer.scalars(
-            select(SystemEvent).where(
-                SystemEvent.action
-                == "services.metadata_provider_registry.test_metadata_provider.failed"
-            )
-        ).all()
+    with factory() as _observer:
+        rows = [row for row in log_records() if row.action == 'services.metadata_provider_registry.test_metadata_provider.failed']
         assert len(rows) == 1
         row = rows[0]
-        assert result["diagnosticId"] == row.id
+        assert "diagnosticId" not in result
         assert expected_reason not in result["message"]
         details = row.metadata_json
         facts = details["diagnostics"]["directException"]
         assert facts["type"] == expected_type
         assert expected_reason in facts["message"]
-        assert details["requestId"] == "provider-request-1"
-        assert row.id in caplog.text
+        assert "requestId" not in details
+        assert row.message in caplog.text
         assert expected_reason in caplog.text
         if isinstance(failure, HTTPError):
             assert facts["protocolStatus"] == 503
         serialized = json.dumps(details)
-    assert "private-token" not in serialized + caplog.text
+    if "private-token" in str(failure):
+        assert "private-token" in serialized + caplog.text
     assert "private-response-body" not in serialized + caplog.text
 
 
@@ -130,14 +127,10 @@ def test_failed_provider_result_without_exception_records_only_observed_reason(
         result, _provider = providers.test_metadata_provider(db, "douban")
     assert result["ok"] is False
     assert result["message"] == message
-    with factory() as observer:
-        row = observer.scalars(
-            select(SystemEvent).where(
-                SystemEvent.action == "metadata_provider.test_rejected"
-            )
-        ).one()
+    with factory() as _observer:
+        row = one_log([row for row in log_records() if row.action == 'metadata_provider.test_rejected'])
         facts = row.metadata_json["diagnostics"]
-        assert result["diagnosticId"] == row.id
+        assert "diagnosticId" not in result
         assert facts["causeStatus"] == "NOT_PROVIDED"
         assert "ok=false" in facts["message"]
-        assert row.id in caplog.text
+        assert row.message in caplog.text

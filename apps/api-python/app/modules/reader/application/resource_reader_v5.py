@@ -9,6 +9,7 @@ from typing import Literal
 from uuid import UUID
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderResourceContextDto,
@@ -188,15 +189,10 @@ class ResourceReaderV5Service:
                 command.captured_at_epoch_millis / 1000, tz=UTC
             )
         except (OverflowError, OSError, ValueError) as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="reader_v5.progress_rejected",
-                context={
-                    "resource_id": command.resource_id,
-                    "operation_id": command.mutation_id,
-                    "step": "convert_captured_at",
-                    "outcome": "captured_at_invalid",
-                },
             )
             self._diagnostics.persist(diagnostic)
             raise ReaderV5CapturedAtInvalid from error
@@ -217,12 +213,6 @@ class ResourceReaderV5Service:
                 diagnostic = self._diagnostics.prepare(
                     rejection,
                     event="reader_v5.progress_rejected",
-                    context={
-                        "resource_id": command.resource_id,
-                        "operation_id": command.mutation_id,
-                        "step": "validate_mutation_payload",
-                        "outcome": "mutation_reuse",
-                    },
                 )
                 self._diagnostics.persist(diagnostic)
                 raise rejection
@@ -267,27 +257,18 @@ class ResourceReaderV5Service:
             )
             self._unit_of_work.commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="reader_v5.progress_storage_failed",
-                context={
-                    "resource_id": command.resource_id,
-                    "operation_id": command.mutation_id,
-                    "step": "save_progress_transaction",
-                },
             )
             try:
                 self._unit_of_work.rollback()
             except Exception as rollback_error:
+                capture_exception(rollback_error, persist=False)
                 secondary = self._diagnostics.prepare(
                     rollback_error,
                     event="reader_v5.progress_rollback_failed",
-                    context={
-                        "resource_id": command.resource_id,
-                        "operation_id": command.mutation_id,
-                        "step": "rollback",
-                        "parent_diagnostic_id": diagnostic.diagnostic_id,
-                    },
                 )
                 self._diagnostics.persist(secondary)
                 raise
@@ -304,12 +285,6 @@ class ResourceReaderV5Service:
                     diagnostic = self._diagnostics.prepare(
                         rejection,
                         event="reader_v5.progress_rejected",
-                        context={
-                            "resource_id": command.resource_id,
-                            "operation_id": command.mutation_id,
-                            "step": "validate_mutation_payload",
-                            "outcome": "mutation_reuse",
-                        },
                     )
                     self._diagnostics.persist(diagnostic)
                     raise rejection from error
@@ -376,7 +351,8 @@ class ResourceReaderV5Service:
                 updated_at=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return status
@@ -412,7 +388,8 @@ class ResourceReaderV5Service:
                 updated_at=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return bookmarks
@@ -443,6 +420,7 @@ def _validate_mutation_id(value: str) -> None:
     try:
         UUID(value)
     except (AttributeError, TypeError, ValueError) as error:
+        capture_exception(error, persist=False)
         raise ValueError("mutation_id must be a UUID") from error
 
 

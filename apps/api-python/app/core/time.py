@@ -8,6 +8,8 @@ from typing import Any
 from sqlalchemy import BigInteger
 from sqlalchemy.types import TypeDecorator
 
+from app.core.exception_diagnostics import capture_exception
+
 TIMESTAMP_MILLISECONDS_MIN = 100_000_000_000
 
 
@@ -36,8 +38,9 @@ def to_timestamp_ms(value: Any, *, naive_timezone=None) -> int | None:
     else:
         try:
             parsed = datetime.fromisoformat(text_value)
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: This optional legacy timestamp decoder returns None for unsupported representations.
+            capture_exception(_caught_error)
             return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=naive_timezone or UTC)

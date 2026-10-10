@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import InspectionLimitReached
 from app.infrastructure.comic_archives import ComicArchiveError, inspect_comic_archive
 from app.models import (
@@ -122,11 +122,11 @@ class FilesystemComicArchivePageReader:
                         self._cache_bytes -= evicted_weight
             return pages, current_source
         except (ComicArchiveError, InspectionLimitReached, OSError, ValueError) as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.media.infrastructure.page_index.comic_archive_read.failed",
                 error,
-                context={"step": "comic_archive_page_index", "resource_id": resource_id},
             )
             return (), source
 

@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import LibraryBook
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.shelf.application.catalog import (
@@ -101,8 +101,8 @@ class SqlAlchemyCatalogShelfQueries:
                     else []
                 )
             except (TypeError, ValueError, json.JSONDecodeError) as error:
-                record_exception(logging.getLogger(__name__), "modules.shelf.infrastructure.catalog.list_shelf_book_ids.failed", error,
-                                 context={"step": "list_shelf_book_ids"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.shelf.infrastructure.catalog.list_shelf_book_ids.failed", error)
                 book_ids = []
             # Smart rules resolve for the user, while a caller may carry a
             # narrower resource grant. Apply that scope before counts/pagination.

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.file_move_plans import (
     DestinationInspection,
     PlannedMove,
@@ -81,12 +82,15 @@ class SystemMovePublication:
             except subprocess.CalledProcessError as error:
                 # mv implementations differ on the exit status for -n skips.
                 # Inspect the actual outcome while retaining the native failure.
+                capture_exception(error)
                 try:
                     self.is_published(move)
                 except FileMoveError as outcome:
+                    capture_exception(outcome, persist=False)
                     raise outcome from error
                 raise FileMoveError("FILE_MOVE_FAILED") from error
             except OSError as error:
+                capture_exception(error, persist=False)
                 raise FileMoveError("FILE_MOVE_FAILED") from error
         if not self.is_published(move):
             raise FileMoveError("FILE_MOVE_INCOMPLETE")

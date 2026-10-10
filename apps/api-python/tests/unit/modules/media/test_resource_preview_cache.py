@@ -162,9 +162,9 @@ def test_prune_failure_records_cause_and_continues_other_entries(
     assert blocked.exists()
     assert not removable.exists()
     assert "PermissionError" in caplog.text
-    assert "prune_entry" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert f"[Errno {errno.EACCES}]" in caplog.text
-    assert str(blocked) not in caplog.text
+    assert str(blocked) in caplog.text
 
 
 def test_prune_accepts_empty_cache_and_cancellation(tmp_path, monkeypatch):

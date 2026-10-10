@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.metadata.application.standard_writeback import (
     PreparedStandardFile,
     StandardWriteFile,
@@ -47,14 +48,10 @@ class MaintainStandardBackups:
             try:
                 self.files.clear_backup(plan.targets[ordinal].file, proof)
             except Exception as error:  # noqa: BLE001 - retain evidence and retry; never delete an unverified file.
+                capture_exception(error, persist=False)
                 diagnostic = self.diagnostics.prepare(
                     error,
                     event="standard_write.backup_cleanup_failed",
-                    context={
-                        "operation_id": operation_id,
-                        "target_ordinal": ordinal,
-                        "step": "clear_backup",
-                    },
                 )
                 self.diagnostics.persist(diagnostic)
                 failed = True

@@ -60,16 +60,6 @@ function roleLabel(role: NonNullable<LibraryImportTask['role']>): string {
   }[role];
 }
 
-function scanErrorLabel(code: string): string {
-  switch (code) {
-    case 'SOURCE_SCAN_START_UNAVAILABLE': return '书库或扫描路径不可访问，已保留原数据';
-    case 'SOURCE_SCAN_INCOMPLETE': return '部分目录扫描失败，失败目录的数据已保留';
-    case 'EMPTY_LIBRARY_PROTECTED': return '书库意外为空，已保留原数据；可在书库设置中允许清空';
-    case 'SOURCE_SCAN_CANCELLED': return '扫描已取消';
-    default: return code;
-  }
-}
-
 function taskTitle(task: LibraryImportTask): string {
   if (task.kind === 'SCAN_LIBRARY') return task.libraryName ?? task.libraryId;
   if (task.kind === 'CONTINUE_SOURCE') {
@@ -344,7 +334,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                       {task.sourceNodeId ? <><br />source: {task.sourceNodeId}</> : null}
                     </div>
                   </details>
-                  {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><I18nText>{scanErrorLabel(task.errorSummary)}</I18nText></div> : null}
+                  {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span data-i18n-skip className="min-w-0 whitespace-pre-wrap break-words">{task.errorSummary}</span></div> : null}
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2 text-sm text-slate-500">

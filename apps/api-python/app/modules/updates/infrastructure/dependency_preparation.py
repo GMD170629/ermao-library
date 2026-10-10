@@ -14,6 +14,7 @@ from email.parser import Parser
 from pathlib import Path
 from threading import Event
 
+from app.core.exception_diagnostics import capture_exception
 from shuku_dependencies import (
     Package,
     canonical_digest,
@@ -52,9 +53,11 @@ def read_local(storage: Path) -> tuple[DependencySet, str]:
         raw = read_bounded(storage / "dependencies/installed.json", MAX_INSTALLED)
         target = DependencySet.model_validate_json(raw, context={"runtime": True})
         return target, canonical_digest(target.model_dump())
-    except UpdateError:
+    except UpdateError as _caught_error:
+        capture_exception(_caught_error, persist=False)
         raise
     except (ValueError, OSError, KeyError, TypeError) as error:
+        capture_exception(error, persist=False)
         raise UpdateError("LOCAL_DEPENDENCIES_INVALID") from error
 
 

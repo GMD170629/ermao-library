@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records
+
 """Real write-lock release and independent cause preservation at DB cleanup."""
 
 import errno
@@ -5,7 +7,7 @@ import logging
 import sqlite3
 
 import pytest
-from sqlalchemy import create_engine, event, insert, select
+from sqlalchemy import create_engine, event, insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,9 +32,15 @@ def database(tmp_path):
         engine.dispose()
 
 
-def test_real_business_write_is_released_before_event_insert(database, caplog):
+def test_real_business_write_is_released_before_file_append(database, caplog, monkeypatch):
     engine, recorder = database
     sequence = []
+    from app.modules.system.infrastructure import log_files
+    append = log_files.append_log_event
+    def capture_append(row):
+        sequence.append("append_file")
+        return append(row)
+    monkeypatch.setattr(log_files, "append_log_event", capture_append)
     with DiagnosticSession(engine) as session:
         event.listen(session, "after_rollback", lambda _: sequence.append("rollback"))
         event.listen(
@@ -54,14 +62,14 @@ def test_real_business_write_is_released_before_event_insert(database, caplog):
         except OSError:
             session.rollback()
     with recorder() as check:
-        events = check.scalars(select(SystemEvent)).all()
+        events = log_records()
         assert len(events) == 1
         assert check.get(SystemSetting, "business") is None
         metadata = events[0].metadata_json
         assert metadata["diagnostics"]["rootCause"]["errno"] == errno.EROFS
-        assert events[0].id in caplog.text
-    assert sequence == ["rollback", "insert_event"]
-    assert "/private/library" not in caplog.text
+        assert events[0].message in caplog.text
+    assert sequence == ["rollback", "append_file"]
+    assert "/private/library" in caplog.text
 
 
 def test_metadata_maintenance_retains_cause_with_real_diagnostic_session(
@@ -86,11 +94,11 @@ def test_metadata_maintenance_retains_cause_with_real_diagnostic_session(
     assert calls == [True]
     assert worker._writeback_recovery.ready
     assert "RuntimeError: acceptance maintenance fault" in caplog.text
-    with recorder() as session:
-        events = session.scalars(select(SystemEvent)).all()
+    with recorder() as _session:
+        events = log_records()
         assert len(events) == 1
         assert events[0].message == "acceptance maintenance fault"
-        assert events[0].id in caplog.text
+        assert events[0].message in caplog.text
 
 
 def test_rollback_failure_keeps_original_and_secondary(database, monkeypatch, caplog):
@@ -112,12 +120,13 @@ def test_rollback_failure_keeps_original_and_secondary(database, monkeypatch, ca
     finally:
         monkeypatch.setattr(Session, "rollback", original_rollback)
         session.close()
-    with recorder() as check:
-        events = check.scalars(select(SystemEvent)).all()
+    with recorder() as _check:
+        events = log_records()
     assert len(events) == 2
     first = next(row for row in events if row.message == "original task failure")
     secondary = next(row for row in events if "rollback channel failed" in row.message)
-    assert secondary.metadata_json["parentDiagnosticId"] == first.id
+    assert "parentDiagnosticId" not in secondary.metadata_json
+    assert first.id != secondary.id
     assert "original task failure" in caplog.text
     assert "rollback channel failed" in caplog.text
 
@@ -145,7 +154,7 @@ def test_broken_diagnostics_cannot_prevent_cleanup(database, monkeypatch, capsys
 def test_each_busy_attempt_has_runtime_and_event(database, caplog):
     engine, recorder = database
     with diagnostics.exception_diagnostic_boundary(
-        logging.getLogger(__name__), "test.task", context={"task_id": "retry-1"}
+        logging.getLogger(__name__), "test.task"
     ):
         for attempt in (1, 2):
             with DiagnosticSession(engine) as session:
@@ -156,15 +165,15 @@ def test_each_busy_attempt_has_runtime_and_event(database, caplog):
                         logging.getLogger(__name__),
                         "retry",
                         error,
-                        context={"attempt": attempt},
+
                     )
                     session.rollback()
-    with recorder() as check:
-        events = check.scalars(select(SystemEvent)).all()
+    with recorder() as _check:
+        events = log_records()
     assert len(events) == 2
-    assert {row.metadata_json["attempt"] for row in events} == {1, 2}
-    assert all(row.metadata_json["taskId"] == "retry-1" for row in events)
-    assert all(row.id in caplog.text for row in events)
+    assert len({row.id for row in events}) == 2
+    assert all("taskId" not in row.metadata_json for row in events)
+    assert all(row.message in caplog.text for row in events)
 
 
 def test_metadata_cache_busy_fallback_retains_actual_database_reason(
@@ -190,13 +199,13 @@ def test_metadata_cache_busy_fallback_retains_actual_database_reason(
             cache_ready=True,
         )
     with recorder() as db:
-        rows = db.scalars(select(SystemEvent)).all()
+        rows = log_records()
     assert len(rows) == 1
     assert (
         rows[0].metadata_json["diagnostics"]["rootCause"]["databaseCode"]
         == sqlite3.SQLITE_BUSY
     )
-    assert rows[0].id in caplog.text
+    assert rows[0].message in caplog.text
     assert "database is locked" in caplog.text
     assert "private query" in caplog.text
     operation = rows[0].metadata_json["diagnostics"]["databaseOperations"][0]
@@ -232,10 +241,11 @@ def test_short_writer_rollback_error_preserves_original_cache_failure(
                 cache_ready=True,
             )
     with recorder() as db:
-        rows = db.scalars(select(SystemEvent)).all()
+        rows = log_records()
     first = next(row for row in rows if row.message == "original cache adapter defect")
     secondary = next(
         row for row in rows if "short writer rollback failed" in row.message
     )
-    assert secondary.metadata_json["parentDiagnosticId"] == first.id
-    assert first.id in caplog.text and secondary.id in caplog.text
+    assert "parentDiagnosticId" not in secondary.metadata_json
+    assert first.id != secondary.id
+    assert first.message in caplog.text and secondary.message in caplog.text

@@ -24,7 +24,7 @@ from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_AUDIO_PROFILE,
     READER_SAFETY_COMIC_PROFILE,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
@@ -1265,15 +1265,22 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         )
         return DirectoryMemberPage(members, rows[-1][0].id if rows else None, len(rows) == limit)
 
-    def has_failed_directory_assets(self, resource_id: str) -> bool:
-        return self._session.scalar(
-            select(LibraryResourceAsset.id)
+    def directory_failure_summary(self, resource_id: str) -> str | None:
+        failures = self._session.execute(
+            select(LibraryResourceAsset.id, LibraryResourceAsset.failure_reason)
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == AssetImportState.FAILED.value,
             )
-            .limit(1)
-        ) is not None
+            .order_by(LibraryResourceAsset.id)
+        )
+        summaries: list[str] = []
+        for asset_id, reason in failures:
+            if reason is None:
+                raise ValueError(f"Failed directory asset {asset_id} has no recorded failure reason")
+            if reason not in summaries:
+                summaries.append(reason)
+        return "\n".join(summaries) if summaries else None
 
     def page_ready_directory_cover_candidates(
         self, resource_id: str, *, after_asset_id: str | None, limit: int,
@@ -1906,6 +1913,6 @@ def _parse_publication_datetime(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.persistence.source_tree_repository._parse_publication_datetime.failed", error,
-                         context={"step": "_parse_publication_datetime"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.library.infrastructure.persistence.source_tree_repository._parse_publication_datetime.failed", error)
         return None

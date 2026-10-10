@@ -17,7 +17,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
     normalize_archive_path,
@@ -126,15 +126,19 @@ def _xml_root(content: bytes) -> ElementTree.Element:
         )
         return root
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
+        capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XML is invalid") from error
     except XmlPolicyExpansionLimitError as error:
+        capture_exception(error, persist=False)
         raise publication_parser_limit(
             ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
             "publication XML entity expansion exceeds the size limit",
         ) from error
     except XmlPolicyDecodeError as error:
+        capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XML encoding is invalid") from error
     except XmlPolicyPreparationError as error:
+        capture_exception(error, persist=False)
         raise publication_native_parser_implementation_failure(
             ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML,
             parser="reader-xml-policy",
@@ -184,6 +188,7 @@ def _entry_key(href: str) -> str:
     try:
         return normalize_archive_path(path)
     except UnsafeArchivePathError as error:
+        capture_exception(error, persist=False)
         raise PublicationResourceNotFoundError from error
 
 
@@ -226,11 +231,12 @@ def _validated_entries(archive: zipfile.ZipFile) -> _ValidatedArchive:
         key: str | None
         try:
             key = normalize_archive_path(info.filename)
-        except UnsafeArchivePathError:
+        except UnsafeArchivePathError as _caught_error:
             # An unused escaped name cannot be extracted through this adapter.
             # Quarantine it while retaining the archive-wide bounds above; a
             # required package/manifest lookup will fail when it is addressed.
             # diagnostics-control-flow: Unused unsafe archive members are quarantined; required resources still fail.
+            capture_exception(_caught_error)
             key = None
         unix_mode = info.external_attr >> 16
         if stat.S_ISLNK(unix_mode):
@@ -307,6 +313,7 @@ def _read_archive_resource(
     try:
         return archive.read(info)
     except (NotImplementedError, RuntimeError) as error:
+        capture_exception(error, persist=False)
         raise publication_native_parser_implementation_failure(
             ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
             parser="python-zipfile",
@@ -314,6 +321,7 @@ def _read_archive_resource(
             reason="archive decoder cannot provide this resource",
         ) from error
     except (EOFError, zipfile.BadZipFile) as error:
+        capture_exception(error)
         if required:
             raise publication_integrity_failure(
                 ReaderSafetyRuleId.EPUB_RESOURCE_INTEGRITY,
@@ -325,8 +333,10 @@ def _read_archive_resource(
             optional=True,
         ) from error
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("EPUB resource cannot be read") from error
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("EPUB resource cannot be read") from error
 
 
@@ -352,6 +362,7 @@ def _container_opf_path(
             )
         )
     except PublicationMarkupError as error:
+        capture_exception(error, persist=False)
         raise PublicationStructureError("EPUB container is invalid") from error
     for element in root.iter():
         if _local_name(element.tag) == "rootfile":
@@ -359,6 +370,7 @@ def _container_opf_path(
             try:
                 key = _entry_key(value)
             except PublicationResourceNotFoundError as error:
+                capture_exception(error, persist=False)
                 raise publication_security_rejection(
                     ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE,
                     "EPUB package path escapes its archive",
@@ -437,8 +449,8 @@ def _chapter_xml_projection(
                 posixpath.basename(document_path) + raw if raw.startswith("#") else raw,
             )
         except (PublicationCorruptError, PublicationResourceNotFoundError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter.target.failed", error,
-                             context={"step": "target"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter.target.failed", error)
             return None
         return href if _entry_key(href) in known_hrefs else None
 
@@ -508,6 +520,7 @@ def _index_epub(
                     )
                 )
             except PublicationMarkupError as error:
+                capture_exception(error, persist=False)
                 raise PublicationStructureError(
                     "EPUB package document is invalid"
                 ) from error
@@ -534,8 +547,8 @@ def _index_epub(
                     # is omitted from the in-memory publication; an itemref
                     # that requires it is reported as a missing required item
                     # below.
-                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
-                                     context={"step": "_index_epub"})
+                    capture_exception(error, persist=False)
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error)
                     continue
                 if key not in entries:
                     continue
@@ -625,8 +638,8 @@ def _index_epub(
                 PublicationStructureError,
                 PublicationResourceBlockedError,
             ) as error:
-                record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
-                                 context={"step": "_index_epub"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error)
                 toc = ()
             if not toc:
                 try:
@@ -638,8 +651,8 @@ def _index_epub(
                     PublicationStructureError,
                     PublicationResourceBlockedError,
                 ) as error:
-                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error,
-                                     context={"step": "_index_epub"})
+                    capture_exception(error, persist=False)
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.epub_adapter._index_epub.failed", error)
                     toc = ()
             publication = NormalizedPublication(
                 identifier=f"urn:shuku:volume:{source_path.name}",
@@ -677,8 +690,10 @@ def _index_epub(
         ValueError,
         zipfile.BadZipFile,
     ) as error:
+        capture_exception(error, persist=False)
         raise PublicationStructureError("EPUB archive is invalid") from error
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("EPUB archive cannot be read") from error
 
 
@@ -699,6 +714,7 @@ class EpubPublicationAdapter(PublicationAdapter):
         try:
             key = _entry_key(href)
         except (PublicationResourceNotFoundError, ValueError) as error:
+            capture_exception(error, persist=False)
             raise PublicationResourceNotFoundError from error
         archive_name = indexed.entries_by_href.get(key)
         if archive_name is None or key not in indexed.media_types_by_href:
@@ -742,6 +758,7 @@ class EpubPublicationAdapter(PublicationAdapter):
             ValueError,
             zipfile.BadZipFile,
         ) as error:
+            capture_exception(error, persist=False)
             raise PublicationReadError("EPUB resource cannot be read") from error
         try:
             if is_markup:
@@ -749,6 +766,7 @@ class EpubPublicationAdapter(PublicationAdapter):
             elif media_type == "text/css":
                 content = sanitize_css_resource(content)
         except PublicationMarkupError as error:
+            capture_exception(error)
             if key in indexed.required_hrefs:
                 raise publication_integrity_failure(
                     ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,

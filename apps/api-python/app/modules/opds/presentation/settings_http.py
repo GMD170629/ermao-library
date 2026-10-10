@@ -15,6 +15,7 @@ from app.bootstrap.system import (
 )
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.db.session import get_db
 from app.modules.opds.application.settings import (
     OPDS_ENABLED_SETTING_KEY,
@@ -85,13 +86,15 @@ def update_opds_system_settings(
         normalized_public_base_url = validate_opds_activation(
             payload.enabled, payload.public_base_url
         )
-    except OpdsPublicBaseUrlRequired:
+    except OpdsPublicBaseUrlRequired as _caught_error:
+        capture_exception(_caught_error)
         return fail(
             "启用 OPDS 前必须填写公开 URL",
             status_code=409,
             code="OPDS_PUBLIC_BASE_URL_REQUIRED",
         )
-    except OpdsPublicBaseUrlInvalid:
+    except OpdsPublicBaseUrlInvalid as _caught_error:
+        capture_exception(_caught_error)
         return fail(
             "OPDS 公开 URL 必须是有效的 HTTP 或 HTTPS 地址，"
             "且不能包含凭据、查询参数或片段",
@@ -105,7 +108,6 @@ def update_opds_system_settings(
         actor_type="admin",
         actor_id=user.id,
         action="opds.settings.updated",
-        target_type="settings",
         message="已开启 OPDS" if payload.enabled else "已关闭 OPDS",
         metadata={"enabled": payload.enabled},
     )

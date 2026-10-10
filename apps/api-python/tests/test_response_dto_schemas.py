@@ -143,8 +143,6 @@ def test_datetime_serializes_as_utc_z() -> None:
             "actorType": "system",
             "actorId": None,
             "action": "checked",
-            "targetType": None,
-            "targetId": None,
             "message": "ok",
             "metadata": {},
             "createdAt": datetime(2026, 7, 28, 3, 4, 5, tzinfo=UTC),

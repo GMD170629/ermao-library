@@ -256,24 +256,24 @@ def test_preparation_logs_original_error_before_failure_state_io(
     primary = next(
         index
         for index, value in enumerate(messages)
-        if "application_update.preparation_failed" in value
+        if "No space left on device" in value
     )
     read = next(
         index
         for index, value in enumerate(messages)
-        if "application_update.failure_state_read_failed" in value
+        if "Input/output error" in value
     )
     write = next(
         index
         for index, value in enumerate(messages)
-        if "application_update.failure_state_write_failed" in value
+        if "Read-only file system" in value
     )
     assert primary < read < write
     assert "No space left on device" in messages[primary]
     assert "Input/output error" in messages[read]
     assert "Read-only file system" in messages[write]
-    assert "parent_diagnostic_id" in messages[read]
-    assert "/private/books" not in caplog.text
+    assert "parent_diagnostic_id" not in messages[read]
+    assert "/private/books" in caplog.text
 
 
 def test_update_error_response_correlates_real_transport_cause(caplog):
@@ -288,7 +288,7 @@ def test_update_error_response_correlates_real_transport_cause(caplog):
         except UpdateError as error:
             response = update_error(error)
     assert response.status_code == 400
-    assert response.headers["X-Error-Id"].startswith("diag_")
+    assert "X-Error-Id" not in response.headers
     assert "Connection reset by peer" in caplog.text
     assert "ConnectionResetError" in caplog.text
     assert "Connection reset by peer" not in response.body.decode()
@@ -559,7 +559,7 @@ def test_abandoned_preparation_is_failed_without_resuming(preparation, source, c
     assert recovered.phase == "failed" and recovered.error == "PREPARATION_INTERRUPTED"
     assert source[0].downloads == 0
     assert not (storage / "update-tmp/prepared").exists()
-    assert "application_update.preparation_owner_missing" in caplog.text
+    assert "PreparationOwnerMissing" in caplog.text
     assert "exclusive worker lock is available" in caplog.text
     assert "interruption cause was not provided" in caplog.text
 

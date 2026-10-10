@@ -12,6 +12,8 @@ import urllib.request
 from collections.abc import Iterator
 from typing import IO
 
+from app.core.exception_diagnostics import capture_exception
+
 from ..application.models import UpdateError
 
 REGISTRY = "https://ghcr.io/v2/gmd170629/ermao-library-updates"
@@ -90,6 +92,8 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
                     raise UpdateError("SIZE_LIMIT")
                 yield chunk
     except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+        capture_exception(error, persist=False)
         raise UpdateError("DOWNLOAD_FAILED") from error
     except (ValueError, KeyError, TypeError) as error:
+        capture_exception(error, persist=False)
         raise UpdateError("INVALID_MANIFEST") from error

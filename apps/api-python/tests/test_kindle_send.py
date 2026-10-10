@@ -24,7 +24,6 @@ from app.models import (
 )
 from app.models.auth import User
 from app.models.import_pipeline import KindleSendTask
-from app.models.settings import SystemEvent
 from app.modules.kindle.presentation import http as kindle_http
 from app.modules.system.infrastructure.settings import upsert_setting
 from app.services import kindle_queue
@@ -32,6 +31,7 @@ from app.services.kindle_queue import (
     process_next_kindle_send_task,
     recover_interrupted_tasks,
 )
+from tests.support.log_events import log_records
 
 
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
@@ -355,6 +355,8 @@ def test_worker_rechecks_actual_size_and_current_limit(
 def test_worker_submits_resource_asset_and_masks_recipient_in_events(
     client, db_session, test_settings, monkeypatch
 ) -> None:
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     _prepare(client, db_session, test_settings)
     task = _enqueue(client)
 
@@ -386,9 +388,7 @@ def test_worker_submits_resource_asset_and_masks_recipient_in_events(
     assert fake.messages[0].get_payload()[-1].get_filename() == "book.epub"
     event_metadata = "\n".join(
         str(row.metadata_json)
-        for row in db_session.scalars(
-            select(SystemEvent).where(SystemEvent.source == "kindle")
-        ).all()
+        for row in [row for row in log_records() if row.source == 'kindle']
     )
     assert "reader_123@kindle.com" not in event_metadata
     assert "r***3@kindle.com" in event_metadata
@@ -456,8 +456,8 @@ def test_worker_retries_transient_failure_and_recovers_interrupted_send(
     stored.status = "sending"
     db_session.commit()
     assert recover_interrupted_tasks(db_session) == 1
-    record = next(record for record in caplog.records if "kindle.send_result_unknown" in record.message)
-    assert record.task_id == task["id"]
+    record = next(record for record in caplog.records if "without a terminal SMTP result" in record.message)
+    assert not hasattr(record, "task_id")
     assert "without a terminal SMTP result" in record.message
     assert "interruption cause were not provided" in record.message
     # Recovery deliberately closes/opens the unit-of-work boundary; reload
@@ -506,10 +506,11 @@ def test_enqueue_records_actual_constraint_and_only_reuses_matching_conflict(
         expected = "SQLITE_CONSTRAINT_UNIQUE"
     else:
         assert response.status_code == 500, response.text
-        assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+        assert response.json()["error"]["code"] == "IntegrityError"
         expected = "SQLITE_CONSTRAINT_NOTNULL"
-    events = db_session.scalars(select(SystemEvent)).all()
+    events = log_records()
     failures = [row for row in events if row.metadata_json and row.metadata_json.get("diagnostics", {}).get("rootCause", {}).get("databaseErrorName") == expected]
     assert len(failures) == 1
-    assert failures[0].id in caplog.text
-    assert failures[0].metadata_json["requestId"] == response.headers["X-Request-Id"]
+    assert failures[0].message in caplog.text
+    assert "requestId" not in failures[0].metadata_json
+    assert "X-Request-Id" not in response.headers

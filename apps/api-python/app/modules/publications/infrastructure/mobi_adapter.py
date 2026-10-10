@@ -19,7 +19,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
@@ -177,9 +177,11 @@ class _MobiCore:
                 # Optional default locations are discovery probes. An explicitly
                 # configured, discoverable or existing library that cannot load
                 # is a real adapter failure and retains the loader exception.
+                capture_exception(error, persist=False)
                 if candidate == configured or not candidate.startswith("/") or Path(candidate).exists():
-                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.mobi_adapter.load.failed", error,
-                                     context={"step": "load"})
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.mobi_adapter.load.failed", error)
+                else:
+                    record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.mobi_adapter.load.probe", error, level="debug")
                 continue
         return None
 
@@ -546,7 +548,8 @@ def _snapshot(
             resources_by_href=by_href,
             reading_order_hrefs=frozenset(link.href for link in reading_order),
         )
-    except BaseException:
+    except BaseException as _caught_error:
+        capture_exception(_caught_error)
         core.close(book)
         raise
 
@@ -609,6 +612,7 @@ class MobiPublicationAdapter(PublicationAdapter):
                         else "xml",
                     )
                 except PublicationMarkupError as error:
+                    capture_exception(error)
                     if safe_href in snapshot.reading_order_hrefs:
                         raise publication_integrity_failure(
                             ReaderSafetyRuleId.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP,

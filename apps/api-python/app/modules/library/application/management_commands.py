@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
+
 
 class LibraryManagementUnitOfWork(Protocol):
     def commit(self) -> None: ...
@@ -61,7 +63,8 @@ class MergeLibraryFacets:
         try:
             result = self._gateway.merge_facets(kind, source_ids, target_id, user_id)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return result
@@ -80,7 +83,8 @@ class RenameLibraryFacet:
         try:
             result = self._gateway.rename_facet(facet_id, name, user_id)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return result
@@ -97,7 +101,8 @@ class DeleteLibraryFacet:
         try:
             result = self._gateway.delete_facet(facet_id, user_id)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return result
@@ -126,7 +131,8 @@ class UndoLibraryOperation:
                 can_manage_system=can_manage_system,
             )
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return result
@@ -155,7 +161,8 @@ class SyncBookFacets:
         try:
             self._gateway.sync_book(book_id)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -172,6 +179,7 @@ class SyncBooksFacets:
         try:
             self._gateway.sync_books(prepared_ids)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise

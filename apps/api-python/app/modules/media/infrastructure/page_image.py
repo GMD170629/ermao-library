@@ -13,6 +13,7 @@ from typing import Protocol, cast
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
 from app.modules.media.application.resource_preview import (
     ResourcePreviewNotFoundError,
@@ -122,7 +123,8 @@ class PageImageRenderer:
                     method=4,
                 )
                 return output.getvalue()
-        except ResourcePreviewNotFoundError:
+        except ResourcePreviewNotFoundError as _caught_error:
+            capture_exception(_caught_error, persist=False)
             raise
         except (
             Image.DecompressionBombError,
@@ -133,4 +135,5 @@ class PageImageRenderer:
             ValueError,
             UnidentifiedImageError,
         ) as exc:
+            capture_exception(exc, persist=False)
             raise ResourcePreviewUnavailableError from exc

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from app.contracts.mutation_receipt import MutationReceipt
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.domain.metadata_patch import (
     METADATA_FIELDS,
     MetadataChange,
@@ -178,6 +179,7 @@ class ApplyMetadataPatches:
                 receipt.complete(result)
             self.uow.commit()
             return result
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise

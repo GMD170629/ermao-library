@@ -302,10 +302,10 @@ def test_observed_lookup_rejection_logs_facts_before_failed_state(db_session, te
     assert result == ("NO_PROVIDER" if reason == "no_provider" else "FAILED")
     row = db_session.get(MetadataLookupTask, task_id)
     assert row.status == result
-    record = next(record for record in caplog.records if "metadata.lookup_rule_failed" in record.message)
-    assert record.task_id == task_id
-    assert record.book_id == book_id
-    assert record.resource_id == resource_id
+    record = next(record for record in caplog.records if "MetadataLookupRuleFailure" in record.message)
+    assert not hasattr(record, "task_id")
+    assert not hasattr(record, "book_id")
+    assert not hasattr(record, "resource_id")
     assert row.error_summary in record.message
     assert "MetadataLookupRuleFailure" in record.message
 
@@ -322,9 +322,9 @@ def test_import_wait_exhaustion_logs_observed_upstream_state_and_returns_failed(
     })
     assert result == "FAILED"
     assert db_session.get(MetadataLookupTask, task_id).status == "FAILED"
-    record = next(record for record in caplog.records if "metadata.lookup_retry_limit_reached" in record.message)
-    assert record.task_id == task_id
-    assert record.import_task_id == "import-task-1"
+    record = next(record for record in caplog.records if "upstream import state=QUEUED" in record.message)
+    assert not hasattr(record, "task_id")
+    assert not hasattr(record, "import_task_id")
     assert "upstream import state=QUEUED" in record.message
     assert "Attempt 4 exhausted 3" in record.message
 
@@ -424,7 +424,7 @@ def test_identity_failure_is_diagnosed_and_retried_without_old_identity(
         queue.process_metadata_lookup_task(db_session, test_settings, values)
         == "PENDING"
     )
-    assert "metadata.identity_failed" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "ConnectionError" in caplog.text
 
 
@@ -485,9 +485,9 @@ def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_ses
     saved = db_session.get(LibraryBookMetadata, book_id)
     if scenario == "invalid-id":
         assert status == "PENDING"
-        assert "AI_MATCH_UNKNOWN_CANDIDATE" in caplog.text and "metadata.match_failed" in caplog.text
+        assert "AI_MATCH_UNKNOWN_CANDIDATE" in caplog.text and "Traceback (most recent call last):" in caplog.text
     if scenario == "source-failure":
-        assert "controlled site outage" in caplog.text and "metadata.source_search_failed" in caplog.text
+        assert "controlled site outage" in caplog.text and "Traceback (most recent call last):" in caplog.text
     if scenario in {"review", "cancelled", "concurrent", "invalid-id"}:
         assert status != "COMPLETED"
         assert saved.title == ("用户并发修改" if scenario == "concurrent" else "本地错误书名")
@@ -597,7 +597,7 @@ def test_queue_generated_fields_reach_storage_without_manual_locks(db_session, t
     elif scenario in {"review", "protected", "invalid"}:
         assert saved.description is None and saved.generated_fields == '[]'
         if scenario == "protected": assert not any("missingFields" in prompt for prompt in calls)
-        if scenario == "invalid": assert "metadata.generate_failed" in caplog.text
+        if scenario == "invalid": assert "Traceback (most recent call last):" in caplog.text
     else:
         assert status == "COMPLETED"
         assert saved.description == ("真实来源介绍" if scenario in {"resolved-B", "replace-generated"} else "生成的介绍")

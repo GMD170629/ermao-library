@@ -19,6 +19,7 @@ from app.contracts.automation_upload import (
     UploadTarget,
 )
 from app.core.config import Settings
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.file_identity import file_identity
 from app.models import (
     Library,
@@ -132,6 +133,7 @@ class ImportAttachmentUploads:
                 if not os.access(".", os.W_OK, dir_fd=descriptor):
                     raise UploadError("UPLOAD_TARGET_READ_ONLY")
         except (OSError, ValueError) as error:
+            capture_exception(error)
             if isinstance(error, UploadError):
                 raise
             raise UploadError("UPLOAD_TARGET_UNAVAILABLE") from error
@@ -190,10 +192,11 @@ class ImportAttachmentUploads:
                     raise UploadError("UPLOAD_TARGET_CHANGED")
                 try:
                     os.unlink(f".upload-{upload_id}.part", dir_fd=directory)
-                except FileNotFoundError:
+                except FileNotFoundError as _caught_error:
                     # diagnostics-control-flow: staging cleanup is idempotent after publication or earlier cleanup.
-                    pass
+                    capture_exception(_caught_error, level="debug")
         except ValueError as error:
+            capture_exception(error)
             if isinstance(error, UploadError):
                 raise
             raise UploadError("UPLOAD_TARGET_UNAVAILABLE") from error

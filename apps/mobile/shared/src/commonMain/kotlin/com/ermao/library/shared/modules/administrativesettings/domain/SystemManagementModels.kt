@@ -118,7 +118,6 @@ data class ManagementEventFilter(
     val pageSize: Int = 20,
     val level: String? = null,
     val source: String? = null,
-    val targetType: String? = null,
     val search: String? = null,
     /** Inclusive RFC 3339 lower boundary, normally the local day's start converted to an offset timestamp. */
     val dateFrom: String? = null,
@@ -133,8 +132,6 @@ data class ManagementEvent(
     val actorType: String,
     val actorId: String?,
     val action: String,
-    val targetType: String?,
-    val targetId: String?,
     val message: String,
     val metadata: Map<String, EventMetadataValue>,
     val createdAt: String?,
@@ -152,8 +149,8 @@ sealed interface EventMetadataValue {
 
 data class EventStorage(
     val sizeBytes: Long,
-    val maximumBytes: Long,
-    val lastPrunedAt: String?,
+    val retentionDays: Int,
+    val minimumLevel: String,
 )
 
 data class EventFacet(
@@ -176,6 +173,6 @@ data class ClearedManagementEvents(
 
 data class LogSettings(
     val storage: EventStorage,
-    val minimumBytes: Long?,
-    val maximumBytes: Long?,
+    val minimumDays: Int?,
+    val maximumDays: Int?,
 )

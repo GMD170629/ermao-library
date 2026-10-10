@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 
 from app.contracts.diagnostics import FailureDiagnostics
 from app.contracts.local_metadata import LocalMetadataSource
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.bulk_operations import (
     BulkCoverCommand,
     BulkCoverResult,
@@ -279,10 +280,10 @@ class RegenerateLocalMetadataCovers:
                 content=extraction,
             )
         except ValueError as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="local_cover.prepare_failed",
-                context={"resource_id": resource_id, "step": "prepare_resource_cover"},
             )
             self._diagnostics.persist(diagnostic)
             return LocalCoverSkipped(
@@ -300,25 +301,19 @@ class RegenerateLocalMetadataCovers:
             )
             self._unit_of_work.commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="local_cover.resource_state_failed",
-                context={"resource_id": resource_id, "step": "save_resource_cover"},
             )
-            recovery_step = "rollback"
             try:
                 self._unit_of_work.rollback()
-                recovery_step = "revert_resource_cover"
                 self._resource_covers.revert(published)
             except Exception as recovery_error:
+                capture_exception(recovery_error, persist=False)
                 secondary = self._diagnostics.prepare(
                     recovery_error,
                     event="local_cover.resource_recovery_failed",
-                    context={
-                        "resource_id": resource_id,
-                        "step": recovery_step,
-                        "parent_diagnostic_id": diagnostic.diagnostic_id,
-                    },
                 )
                 self._diagnostics.persist(secondary)
                 raise
@@ -359,29 +354,20 @@ class RegenerateLocalMetadataCovers:
             )
             self._unit_of_work.commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="local_cover.source_state_failed",
-                context={
-                    "source_node_id": scope.source_node_id,
-                    "step": "save_source_cover",
-                },
             )
-            recovery_step = "rollback"
             try:
                 self._unit_of_work.rollback()
                 if published is not None:
-                    recovery_step = "revert_source_cover"
                     self._source_covers.revert(published)
             except Exception as recovery_error:
+                capture_exception(recovery_error, persist=False)
                 secondary = self._diagnostics.prepare(
                     recovery_error,
                     event="local_cover.source_recovery_failed",
-                    context={
-                        "source_node_id": scope.source_node_id,
-                        "step": recovery_step,
-                        "parent_diagnostic_id": diagnostic.diagnostic_id,
-                    },
                 )
                 self._diagnostics.persist(secondary)
                 raise
@@ -438,10 +424,10 @@ class RegenerateBulkBookCovers:
                     book_id=book_id,
                 )
             except LocalCoverUnavailableError as exc:
+                capture_exception(exc, persist=False)
                 diagnostic = self._diagnostics.prepare(
                     exc,
                     event="local_cover.bulk_target_unavailable",
-                    context={"resource_id": book_id, "step": "regenerate_book_cover"},
                 )
                 self._unit_of_work.rollback()
                 self._diagnostics.persist(diagnostic)
@@ -459,21 +445,18 @@ class RegenerateBulkBookCovers:
             )
             self._unit_of_work.commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             diagnostic = self._diagnostics.prepare(
                 error,
                 event="local_cover.bulk_state_failed",
-                context={"step": "record_bulk_cover_result"},
             )
             try:
                 self._unit_of_work.rollback()
             except Exception as recovery_error:
+                capture_exception(recovery_error, persist=False)
                 secondary = self._diagnostics.prepare(
                     recovery_error,
                     event="local_cover.bulk_rollback_failed",
-                    context={
-                        "step": "rollback",
-                        "parent_diagnostic_id": diagnostic.diagnostic_id,
-                    },
                 )
                 self._diagnostics.persist(secondary)
                 raise

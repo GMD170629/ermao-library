@@ -3,6 +3,7 @@
 from lxml import etree  # type: ignore[import-untyped]
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import capture_exception
 from app.modules.metadata.application.opf import MAX_OPF_BYTES
 from app.modules.metadata.application.standard_files import StandardMetadataError
 
@@ -47,6 +48,7 @@ def patch_comicinfo(
                 ),
             )
         except etree.XMLSyntaxError as error:
+            capture_exception(error, persist=False)
             raise StandardMetadataError("INVALID_COMICINFO") from error
         if root.tag != "ComicInfo":
             raise StandardMetadataError("INVALID_COMICINFO")

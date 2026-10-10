@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.domain.access import (
     AutomationAccessError,
@@ -58,6 +59,7 @@ class RecheckDeleteAccess:
                 self.access, Scope.FILES_MODIFY
             ).permissions.library_ids
         except AutomationAccessError as error:
+            capture_exception(error, persist=False)
             raise FileMoveError("AUTHORIZATION_REVOKED") from error
 
 

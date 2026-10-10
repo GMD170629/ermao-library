@@ -103,3 +103,9 @@ def client(
     app.dependency_overrides[get_db] = override_db
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(autouse=True)
+def isolated_daily_logs(tmp_path_factory, monkeypatch):
+    from app.modules.system.infrastructure import log_files
+    monkeypatch.setattr(log_files, "_root", tmp_path_factory.mktemp("daily-log-output") / "logs")

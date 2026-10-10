@@ -52,7 +52,8 @@ def test_missing_kind_probes_reach_the_owning_operation(kind, method, caplog):
         "kind": kind,
     }
     assert calls == list(KINDS[: KINDS.index(kind) + 1])
-    assert not caplog.records
+    assert len(caplog.records) == KINDS.index(kind)
+    assert all("RESOURCE_NOT_FOUND" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.parametrize("method", ["progress", "cancel"])

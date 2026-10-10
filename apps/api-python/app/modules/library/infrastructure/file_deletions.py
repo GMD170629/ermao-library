@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.exception_diagnostics import capture_exception
 from app.db.file_lock import try_file_lock, unlock_file
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import Library, LibraryImportTask
@@ -131,4 +132,5 @@ class StandardDeleteFiles:
                 else SourceNodePhysicalKind.REGULAR_FILE,
             )
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise FileMoveError("SOURCE_CHANGED") from error

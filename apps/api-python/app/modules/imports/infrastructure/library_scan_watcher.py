@@ -17,6 +17,7 @@ from watchdog.events import (
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.imports.domain.scan_policy import ScanScope, merge_scan_scopes
 
 LibraryEventType = Literal["created", "modified", "deleted", "moved"]
@@ -121,8 +122,9 @@ class _LibraryEventHandler(FileSystemEventHandler):
         path = Path(os.path.abspath(os.fsdecode(raw_path)))
         try:
             relative = path.relative_to(self._library.root_path)
-        except ValueError:
+        except ValueError as _caught_error:
             # diagnostics-control-flow: An event outside the watched root is intentionally ignored.
+            capture_exception(_caught_error)
             return
         parent = relative.parent.as_posix()
         scopes = [ScanScope("" if parent == "." else parent)]

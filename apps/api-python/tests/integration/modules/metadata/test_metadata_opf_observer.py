@@ -334,4 +334,4 @@ def test_sidecar_failure_is_recorded_without_rolling_back_committed_asset(
     assert queue.succeeded is True
     assert resources.asset_ready == 1
     assert uow.commits == 3
-    assert "readable_resource.sidecar.failed" in caplog.text
+    assert "OSError: sidecar unavailable" in caplog.text

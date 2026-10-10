@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models.auth import Session as UserSession
 from app.models.auth import User, cuid
 
@@ -75,7 +75,8 @@ def verify_password(password: str, stored: str) -> bool:
             dklen=64,
         ).hex()
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "authentication.password_hash_failed", error, context={"step": "password_verification"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "authentication.password_hash_failed", error)
         return False
     return compare_digest(candidate, expected)
 

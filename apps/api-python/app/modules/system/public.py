@@ -3,10 +3,10 @@
 from app.core.database_errors import is_database_busy_error
 from app.modules.system.application.commands import SystemUnitOfWork
 from app.modules.system.domain.events import (
-    DEFAULT_MAX_EVENT_BYTES,
-    LOG_MAX_BYTES_SETTING,
-    MAX_MAX_EVENT_BYTES,
-    MIN_MAX_EVENT_BYTES,
+    DEFAULT_RETENTION_DAYS,
+    LOG_RETENTION_DAYS_SETTING,
+    MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS,
     PreparedSystemEvent,
 )
 from app.modules.system.domain.health import (
@@ -24,10 +24,10 @@ from app.modules.system.domain.settings_policy import (
 )
 
 __all__ = [
-    "DEFAULT_MAX_EVENT_BYTES",
-    "LOG_MAX_BYTES_SETTING",
-    "MAX_MAX_EVENT_BYTES",
-    "MIN_MAX_EVENT_BYTES",
+    "DEFAULT_RETENTION_DAYS",
+    "LOG_RETENTION_DAYS_SETTING",
+    "MAX_RETENTION_DAYS",
+    "MIN_RETENTION_DAYS",
     "RETIRED_SYSTEM_SETTING_KEYS",
     "SENSITIVE_SYSTEM_SETTING_KEYS",
     "HealthRunItem",

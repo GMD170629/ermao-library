@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import NotRequired, Protocol, TypedDict
 
+from app.core.exception_diagnostics import capture_exception
+
 
 @dataclass(frozen=True, slots=True)
 class LibraryActor:
@@ -105,7 +107,8 @@ def update_resource(
     try:
         port.update_resource(resource_id=resource_id, changes=changes, now=now)
         unit_of_work.commit()
-    except Exception:
+    except Exception as _caught_error:
+        capture_exception(_caught_error)
         unit_of_work.rollback()
         raise
 

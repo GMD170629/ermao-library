@@ -27,7 +27,7 @@ from app.bootstrap.download import (
 )
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db
 from app.modules.download.presentation.schemas import (
     CreateDownloadTaskRequest,
@@ -60,22 +60,22 @@ def _enabled_library_for_path(
     try:
         real_target = target.expanduser().resolve()
     except OSError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.download.presentation.http._enabled_library_for_path.failed",
             error,
-            context={"stage": "_enabled_library_for_path"},
         )
         return None
     for folder in folders:
         try:
             root = Path(str(folder.get("rootPath") or "")).expanduser().resolve()
         except OSError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.download.presentation.http._enabled_library_for_path.failed",
                 error,
-                context={"stage": "_enabled_library_for_path"},
             )
             continue
         if root == real_target or is_inside_path(root, real_target):
@@ -99,11 +99,11 @@ def _parse_json(value: Any, fallback: Any) -> Any:
     try:
         return json.loads(str(value))
     except ValueError as error:
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.download.presentation.http._parse_json.failed",
             error,
-            context={"stage": "_parse_json"},
         )
         return fallback
 
@@ -163,11 +163,11 @@ async def create_download_task(
     try:
         target_dir = _target_directory_from_path(values.get("targetPath"), "下载")
     except InvalidTargetDirectory as exc:
+        capture_exception(exc, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "modules.download.presentation.http.create_download_task.failed",
             exc,
-            context={"stage": "create_download_task"},
         )
         return fail(str(exc), status_code=400)
     save_path = str(target_dir)
@@ -203,8 +203,6 @@ async def create_download_task(
         actor_type="admin",
         actor_id=actor_id,
         action="created",
-        target_type="downloadTask",
-        target_id=command.id,
         message=f"创建下载任务：{command.display_name}",
         metadata={"status": command.status, "type": command.task_type},
     )
@@ -262,8 +260,6 @@ def delete_download_task(
         actor_type="admin",
         actor_id=actor_id,
         action="deleted",
-        target_type="downloadTask",
-        target_id=task_id,
         message=f"删除下载任务：{(task or {}).get('displayName') or task_id}",
         metadata={"status": (task or {}).get("status")},
     )
@@ -339,8 +335,6 @@ async def update_download_task(
         actor_type="admin",
         actor_id=actor_id,
         action="updated",
-        target_type="downloadTask",
-        target_id=task_id,
         message=f"更新下载任务：{next_display_name}",
         metadata={
             "changes": values,
@@ -400,8 +394,6 @@ def mutate_download_task(
                 actor_type="admin",
                 actor_id=actor_id,
                 action="retry",
-                target_type="downloadTask",
-                target_id=task_id,
                 message=f"重新排队下载任务：{task.get('displayName')}",
                 metadata={"status": "queued"},
             )
@@ -425,8 +417,6 @@ def mutate_download_task(
             actor_type="admin",
             actor_id=actor_id,
             action="cancelled",
-            target_type="downloadTask",
-            target_id=task_id,
             message=f"取消下载任务：{task.get('displayName')}",
             metadata={"status": "cancelled"},
         )

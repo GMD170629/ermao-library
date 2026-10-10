@@ -19,6 +19,7 @@ from app.contracts.http_errors import (
 )
 from app.core.authorization import can_access_book
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.db.session import get_db
 from app.modules.metadata.presentation.schemas import (
     MetadataOpfQueueStatusPayload,
@@ -131,6 +132,7 @@ async def update_registered_metadata_provider_order(
     try:
         prepared = prepare_metadata_provider_order_update(db, items)
     except MetadataProviderRequestError as exc:
+        capture_exception(exc, persist=False)
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     event = prepare_system_event(
         level="warning",
@@ -138,8 +140,6 @@ async def update_registered_metadata_provider_order(
         actor_type="admin",
         actor_id=user.id,
         action="metadata_provider_order.updated",
-        target_type="metadataProviderOrder",
-        target_id="global",
         message="更新全局元数据来源顺序",
         metadata={"providerIds": list(prepared.provider_ids)},
     )
@@ -197,6 +197,7 @@ async def update_registered_metadata_provider(
     try:
         prepared = prepare_metadata_provider_update(db, provider_id, values)
     except MetadataProviderRequestError as exc:
+        capture_exception(exc)
         error_type = (
             BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
         )
@@ -207,8 +208,6 @@ async def update_registered_metadata_provider(
         actor_type="admin",
         actor_id=user.id,
         action="metadata_provider.updated",
-        target_type="metadataProvider",
-        target_id=provider_id,
         message=f"更新元数据插件：{prepared.provider_name}",
         metadata={"providerId": provider_id},
     )
@@ -236,6 +235,7 @@ def test_registered_metadata_provider(
     try:
         result, provider = test_metadata_provider(db, provider_id)
     except MetadataProviderRequestError as exc:
+        capture_exception(exc)
         error_type = (
             BasicNotFoundError if "不存在" in str(exc) else BasicBadRequestError
         )

@@ -124,7 +124,7 @@ def _read_stream(port: int) -> bytes:
 
 
 @pytest.mark.parametrize("log_level", ["info", "error"])
-def test_real_uvicorn_logs_are_safe_and_access_formatted(
+def test_real_uvicorn_logs_are_raw_and_access_formatted(
     tmp_path: Path, log_level: str
 ) -> None:
     (tmp_path / "diagnostic_uvicorn_app.py").write_text(APP_SOURCE, encoding="utf-8")
@@ -137,6 +137,10 @@ def test_real_uvicorn_logs_are_safe_and_access_formatted(
         ).rstrip(os.pathsep),
         "PYTHONUNBUFFERED": "1",
     }
+    stdout_path = tmp_path / "stdout.log"
+    stderr_path = tmp_path / "stderr.log"
+    stdout_file = stdout_path.open("w", encoding="utf-8")
+    stderr_file = stderr_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         [
             sys.executable,
@@ -152,8 +156,8 @@ def test_real_uvicorn_logs_are_safe_and_access_formatted(
         ],
         cwd=str(API_ROOT),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout_file,
+        stderr=stderr_file,
         text=True,
     )
     try:
@@ -168,8 +172,8 @@ def test_real_uvicorn_logs_are_safe_and_access_formatted(
 
         route = _get(port, "/route")
         assert route.status_code == 500
-        assert route.headers["X-Error-Id"].startswith("diag_")
-        assert "uvicorn-route-secret" not in route.text
+        assert "X-Error-Id" not in route.headers
+        assert "uvicorn-route-secret" in route.text
 
         boundary = _get(port, "/boundary")
         assert boundary.status_code == 500
@@ -178,26 +182,31 @@ def test_real_uvicorn_logs_are_safe_and_access_formatted(
     finally:
         process.terminate()
         try:
-            stdout, stderr = process.communicate(timeout=10)
+            process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
-            stdout, stderr = process.communicate()
+            process.communicate()
 
+        stdout_file.close()
+        stderr_file.close()
+
+    stdout = stdout_path.read_text(encoding="utf-8")
+    stderr = stderr_path.read_text(encoding="utf-8")
     combined = f"{stdout}\n{stderr}"
     assert combined.strip(), "uvicorn produced no output"
     for secret in SECRETS:
-        assert secret not in stdout, f"stdout leaked {secret}"
-        assert secret not in stderr, f"stderr leaked {secret}"
+        if secret != "uvicorn-query-secret" or log_level == "info":
+            assert secret in combined
     assert "Logging error" not in combined
     assert "cannot unpack" not in combined
     assert "TypeError" not in combined
 
-    # Error visibility and correlation must survive sanitization.
+    # Full original errors survive while diagnostic correlation is absent.
     assert "Exception in ASGI application" in stderr
-    assert "diagnostic_id=diag_" in stderr
+    assert "diagnostic_id=" not in stderr
 
     if log_level == "info":
-        assert '"GET /ok?token=[redacted] HTTP/1.1"' in stdout
+        assert '"GET /ok?token=uvicorn-query-secret HTTP/1.1"' in stdout
         assert "200" in stdout
         assert '"GET /missing HTTP/1.1"' in stdout
         assert "404" in stdout

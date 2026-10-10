@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from app.contracts.automation_upload import UploadError
 from app.core.exception_diagnostics import (
     DiagnosticSnapshot,
+    capture_exception,
     deferred_exception_persistence,
     persist_exception_diagnostic,
     record_exception,
@@ -35,15 +36,6 @@ _REJECTED = (
     SourceAccessError,
     StandardMetadataError,
 )
-_CORRELATION_KEYS = (
-    "request_id",
-    "operation_id",
-    "plan_id",
-    "upload_id",
-    "library_id",
-    "source_node_id",
-    "node_id",
-)
 
 
 def record_mcp_failure(error: BaseException, *, stage: str) -> str:
@@ -56,7 +48,6 @@ def record_mcp_failure(error: BaseException, *, stage: str) -> str:
         or isinstance(error, ToolError)
         and not isinstance(error, UnexpectedToolError)
         else "error",
-        context={"stage": stage},
         source="automation",
     )
 
@@ -70,19 +61,12 @@ class DiagnosticMcpServer(MCPServer):
         pending: list[DiagnosticSnapshot] = []
         try:
             with deferred_exception_persistence(
-                context={
-                    "step": name,
-                    **{
-                        key: value
-                        for key in _CORRELATION_KEYS
-                        if isinstance(value := arguments.get(key), str)
-                    },
-                }
             ) as pending:
                 try:
                     return await super().call_tool(name, arguments, context)
                 except Exception as error:
-                    diagnostic_id = record_mcp_failure(error, stage="mcp_tool")
+                    capture_exception(error)
+                    record_mcp_failure(error, stage="mcp_tool")
                     cause = error
                     while isinstance(cause, ToolError) and cause.__cause__ is not None:
                         cause = cause.__cause__
@@ -99,7 +83,7 @@ class DiagnosticMcpServer(MCPServer):
                     # The SDK renders only this safe text, while retaining the
                     # original exception for diagnostics and in-process callers.
                     raise ToolError(
-                        f"{code}: 操作失败 / Operation failed (diagnostic_id={diagnostic_id})"
+                        f"{code}: 操作失败 / Operation failed"
                     ) from error
         finally:
             for snapshot in pending:

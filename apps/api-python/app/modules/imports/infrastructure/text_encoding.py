@@ -5,6 +5,8 @@ from __future__ import annotations
 import codecs
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
+
 TXT_ENCODING_SAMPLE_BYTES = 4 * 1024 * 1024
 TXT_ENCODING_MAX_SEQUENCE_BYTES = 4
 
@@ -75,12 +77,13 @@ def detect_sample_encoding(prefix: bytes) -> str:
     try:
         _decode_sample(sample, continuation, encoding="utf-8")
         return "utf-8"
-    except UnicodeDecodeError:
+    except UnicodeDecodeError as _caught_error:
         # diagnostics-control-flow: UTF-8 is the first encoding probe; the configured encoding is tried next.
-        pass
+        capture_exception(_caught_error)
     try:
         decoded = _decode_sample(sample, continuation, encoding="gb18030")
     except UnicodeDecodeError as error:
+        capture_exception(error, persist=False)
         raise TextEncodingError("无法可靠识别 TXT 编码") from error
     if decoded.count("�") / max(1, len(decoded)) > 0.001:
         raise TextEncodingError("无法可靠识别 TXT 编码")

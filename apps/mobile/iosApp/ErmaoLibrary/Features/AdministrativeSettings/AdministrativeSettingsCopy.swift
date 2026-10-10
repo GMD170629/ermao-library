@@ -62,9 +62,9 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case healthTitle, lastChecked, runHealthCheck
     case directoryDatabase, backgroundQueues
     case featureConfiguration, healthy, warning, checking
-    case logsTitle, searchLogs, allLevels, allSources, recentSevenDays, logCapacity
-    case manageLogs, exportFiltered, clearInformationWarning, saveCapacity, capacityMegabytes
-    case clearLogsTitle, clearLogsMessage, clearAllLogs, information, correlationID
+    case debugLog, logsTitle, searchLogs, allLevels, allSources, recentSevenDays, logRetention
+    case manageLogs, exportFiltered, clearInformationWarning, saveRetention, retentionDays
+    case clearLogsTitle, clearLogsMessage, clearAllLogs, information
     case aboutTitle, appVersion, serverVersion, compatibility, compatible, supportedFormats
     case openSourceLicense, operationMode, selfHosted, releaseHistory, projectAddress, share, plainText
     case authorizationRequired, permissionDenied, conflict, temporarilyUnavailable
@@ -238,11 +238,11 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .directoryDatabase: "Directories & Database", .backgroundQueues: "Background Queues",
         .featureConfiguration: "Feature Configuration", .healthy: "Healthy", .warning: "Warning", .checking: "Checking",
         .logsTitle: "System Logs", .searchLogs: "Search summary, action, or related object", .allLevels: "All Levels",
-        .allSources: "All Sources", .recentSevenDays: "Last 7 Days", .logCapacity: "Log Capacity",
+        .allSources: "All Sources", .recentSevenDays: "Last 7 Days", .debugLog: "Debug", .logRetention: "Log Retention",
         .manageLogs: "Manage Logs", .exportFiltered: "Export Filtered Results",
-        .clearInformationWarning: "Clear Information & Warnings", .saveCapacity: "Save Capacity",
-        .capacityMegabytes: "Capacity Limit (MB)", .clearLogsTitle: "Clear all management logs?",
-        .clearLogsMessage: "All management event records will be permanently removed.", .clearAllLogs: "Clear All Logs", .information: "Information", .correlationID: "Correlation ID",
+        .clearInformationWarning: "Clear Information & Warnings", .saveRetention: "Save Retention",
+        .retentionDays: "Days to Retain (Including Today)", .clearLogsTitle: "Clear all management logs?",
+        .clearLogsMessage: "All management event records will be permanently removed.", .clearAllLogs: "Clear All Logs", .information: "Information",
         .aboutTitle: "About Ermao Library", .appVersion: "App Version", .serverVersion: "Server Version",
         .compatibility: "Compatibility", .compatible: "Compatible", .supportedFormats: "Supported Formats",
         .openSourceLicense: "Open-source License", .operationMode: "Operation Mode", .selfHosted: "Self-hosted Reading & Library Management",
@@ -371,11 +371,11 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .healthTitle: "系统健康", .lastChecked: "上次检查", .runHealthCheck: "运行健康检查",
         .directoryDatabase: "目录与数据库",
         .backgroundQueues: "后台队列", .featureConfiguration: "功能配置", .healthy: "正常", .warning: "警告",
-        .checking: "检查中", .logsTitle: "系统日志", .searchLogs: "搜索摘要、动作或关联对象", .allLevels: "全部级别",
-        .allSources: "全部来源", .recentSevenDays: "近 7 天", .logCapacity: "日志容量", .manageLogs: "管理日志",
-        .exportFiltered: "导出筛选结果", .clearInformationWarning: "清理信息与警告", .saveCapacity: "保存容量",
-        .capacityMegabytes: "日志容量上限（MB）", .clearLogsTitle: "清空全部管理日志？",
-        .clearLogsMessage: "全部管理事件记录将被永久移除。", .clearAllLogs: "清空全部日志", .information: "信息", .correlationID: "关联 ID", .aboutTitle: "关于二毛图书",
+        .checking: "检查中", .logsTitle: "系统日志", .searchLogs: "搜索错误信息", .allLevels: "全部级别",
+        .allSources: "全部来源", .recentSevenDays: "近 7 天", .debugLog: "调试", .logRetention: "日志保留天数", .manageLogs: "管理日志",
+        .exportFiltered: "导出筛选结果", .clearInformationWarning: "清理信息与警告", .saveRetention: "保存保留天数",
+        .retentionDays: "保留天数（包含今天）", .clearLogsTitle: "清空全部管理日志？",
+        .clearLogsMessage: "全部管理事件记录将被永久移除。", .clearAllLogs: "清空全部日志", .information: "信息", .aboutTitle: "关于二毛图书",
         .appVersion: "App 版本", .serverVersion: "服务器版本", .compatibility: "兼容性", .compatible: "兼容",
         .supportedFormats: "支持格式", .openSourceLicense: "开源许可", .operationMode: "运行方式",
         .selfHosted: "自托管阅读与书库管理", .releaseHistory: "版本历史", .projectAddress: "项目地址", .share: "分享", .plainText: "文本",

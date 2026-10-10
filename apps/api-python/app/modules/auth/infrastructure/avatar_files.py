@@ -11,7 +11,7 @@ from secrets import token_hex
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.auth.application.avatar_delivery import InvalidAvatarContent
 
 MAX_AVATAR_PIXELS = 25_000_000
@@ -57,6 +57,7 @@ def _normalized_avatar(data: bytes) -> Image.Image:
                 centering=(0.5, 0.5),
             )
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        capture_exception(exc, persist=False)
         raise InvalidAvatarContent("头像文件不是有效的图片") from exc
 
 
@@ -87,16 +88,16 @@ def prepare_avatar_publication(
             ):
                 raise RuntimeError("Generated avatar failed WEBP format or dimension verification")
     except Exception as error:
-        diagnostic_id = record_exception(
+        capture_exception(error, persist=False)
+        record_exception(
             logging.getLogger(__name__), "auth.avatar_stage_failed", error,
-            context={"step": "stage_avatar"},
         )
         try:
             publication.discard()
         except OSError as cleanup_error:
+            capture_exception(cleanup_error, persist=False)
             record_exception(
                 logging.getLogger(__name__), "auth.avatar_cleanup_failed", cleanup_error,
-                context={"step": "discard_avatar", "parent_diagnostic_id": diagnostic_id},
             )
         raise
     finally:

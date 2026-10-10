@@ -224,17 +224,18 @@ def test_health_external_checks_run_without_a_checked_out_read_session(
     engine.dispose()
 
 
-def test_log_capacity_can_be_updated_from_system_settings(client):
+def test_log_retention_can_be_updated_from_system_settings(client):
     _setup_admin(client)
     response = client.put(
-        "/api/system/log-settings", json={"maxBytes": 2 * 1024 * 1024}
+        "/api/system/log-settings", json={"retentionDays": 2}
     )
     assert response.status_code == 200
-    assert response.json()["data"]["storage"]["maxBytes"] == 2 * 1024 * 1024
+    assert response.json()["data"]["storage"]["retentionDays"] == 2
+    assert response.json()["data"]["storage"]["minimumLevel"] == "error"
 
-    invalid = client.put("/api/system/log-settings", json={"maxBytes": 100})
+    invalid = client.put("/api/system/log-settings", json={"retentionDays": 0})
     assert invalid.status_code == 400
-    assert invalid.json()["error"]["code"] == "INVALID_LOG_MAX_BYTES"
+    assert invalid.json()["error"]["code"] == "INVALID_LOG_RETENTION_DAYS"
 
 
 def test_queue_heartbeat_reports_staleness(db_session):

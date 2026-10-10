@@ -1,36 +1,32 @@
 """Stable service facade for system event storage (owned by modules.system)."""
 
 from app.bootstrap.system import (
-    configured_max_event_bytes,
+    configured_retention_days,
     prepare_system_event,
     prune_system_events,
     record_system_event,
-    set_max_event_bytes,
+    set_retention_days,
     system_event_size_bytes,
     system_event_storage_view,
     write_prepared_system_events,
 )
 from app.modules.system.domain.events import (
-    DEFAULT_MAX_EVENT_BYTES,
-    LOG_MAX_BYTES_SETTING,
-    MAX_EVENT_MESSAGE_CHARS,
-    MAX_EVENT_METADATA_CHARS,
-    MAX_MAX_EVENT_BYTES,
-    MIN_MAX_EVENT_BYTES,
+    DEFAULT_RETENTION_DAYS,
+    LOG_RETENTION_DAYS_SETTING,
+    MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS,
 )
 
 __all__ = [
-    "DEFAULT_MAX_EVENT_BYTES",
-    "LOG_MAX_BYTES_SETTING",
-    "MAX_EVENT_MESSAGE_CHARS",
-    "MAX_EVENT_METADATA_CHARS",
-    "MAX_MAX_EVENT_BYTES",
-    "MIN_MAX_EVENT_BYTES",
-    "configured_max_event_bytes",
+    "DEFAULT_RETENTION_DAYS",
+    "LOG_RETENTION_DAYS_SETTING",
+    "MAX_RETENTION_DAYS",
+    "MIN_RETENTION_DAYS",
+    "configured_retention_days",
     "prepare_system_event",
     "prune_system_events",
     "record_system_event",
-    "set_max_event_bytes",
+    "set_retention_days",
     "system_event_size_bytes",
     "system_event_storage_view",
     "write_prepared_system_events",

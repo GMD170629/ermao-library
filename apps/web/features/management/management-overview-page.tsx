@@ -61,7 +61,6 @@ export function ManagementOverviewPage() {
   }, []);
 
   const cards = payload?.cards ?? {};
-  const logPercent = cards.eventLogMaxBytes ? Math.min(100, Math.round((cards.eventLogSizeBytes / cards.eventLogMaxBytes) * 100)) : 0;
 
   return (
     <div className="space-y-6">
@@ -99,11 +98,9 @@ export function ManagementOverviewPage() {
           <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3">
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2 font-medium text-slate-900"><HardDrive size={16} /><I18nText>结构化日志</I18nText></span>
-              <span className="text-slate-500">{formatBytes(cards.eventLogSizeBytes ?? 0)} / {formatBytes(cards.eventLogMaxBytes ?? 5 * 1024 * 1024)}</span>
+              <span className="text-slate-500">{formatBytes(cards.eventLogSizeBytes ?? 0)}</span>
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full rounded-full bg-blue-600" style={{ width: `${logPercent}%` }} />
-            </div>
+            <p className="mt-2 text-sm text-slate-500">{i18nAttribute('每天一个文件，保留最近 {days} 天（包含今天）。', { days: cards.eventLogRetentionDays ?? 3 })}</p>
           </div>
         </section>
         <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">

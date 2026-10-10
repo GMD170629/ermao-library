@@ -405,12 +405,12 @@ def test_semantic_match_selects_real_record_and_persists(client, db_session, mon
     if scenario == "invalid-id":
         assert response.status_code == 502
         assert "AI_MATCH_UNKNOWN_CANDIDATE" in caplog.text
-        assert "metadata_search.provider_failed" in caplog.text
+        assert "Traceback (most recent call last):" in caplog.text
         assert db_session.get(LibraryBookMetadata, "semantic").author == "错误作者"
         return
     if scenario == "source-failure":
         assert "controlled source unavailable" in caplog.text
-        assert "metadata.source_search_failed" in caplog.text
+        assert "Traceback (most recent call last):" in caplog.text
     assert response.status_code == 200, response.text
     result = response.json()["data"]
     assert all(query == ("人工关键词" if scenario == "manual" else initial_title) for _, query in queries)
@@ -530,7 +530,7 @@ def test_selected_douban_detail_failure_preserves_search(client, db_session, mon
     assert response.status_code == 200, response.text
     assert response.json()["data"]["selectedMetadata"]["description"] == "搜索已有简介"
     assert requests[-1] == "http://douban.test/subject/12345/"
-    assert "metadata.subject_detail_failed" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "controlled detail connection failure" in caplog.text
 
 
@@ -624,7 +624,7 @@ def test_generation_optional_http_preserves_current_and_source(client, db_sessio
     if scenario == "ai-off": assert calls == []
     if scenario in {"invalid", "failure"}:
         assert candidate["description"] == "网站原文" and candidate["generatedFields"] == []
-        assert "metadata.generate_failed" in caplog.text
+        assert "Traceback (most recent call last):" in caplog.text
     if scenario == "review": assert candidate["generationNeedsReview"] is True
     if scenario == "site-failure":
         assert candidate["sourceIssues"] == ["bangumi:search_failed"]

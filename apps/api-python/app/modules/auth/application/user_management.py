@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 
+from app.core.exception_diagnostics import capture_exception
+
 UserRole = Literal["admin", "member"]
 UserStatus = Literal["active", "disabled"]
 Locale = Literal["zh-CN", "en-US"]
@@ -202,6 +204,7 @@ class CreateUser:
                 else self._gateway.validate_library_ids(command.library_ids)
             )
         except ValueError as exc:
+            capture_exception(exc, persist=False)
             raise UserAdministrationError("INVALID_FOLDER_ACCESS", str(exc)) from exc
         self._gateway.finish_read()
         return self._gateway.create_user(
@@ -297,6 +300,7 @@ class UpdateUser:
                         command.library_ids
                     )
                 except ValueError as exc:
+                    capture_exception(exc, persist=False)
                     raise UserAdministrationError(
                         "INVALID_FOLDER_ACCESS", str(exc)
                     ) from exc

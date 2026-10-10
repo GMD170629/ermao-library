@@ -521,7 +521,6 @@ internal class KtorAdministrativeSettingsRepository(
                 "pageSize" to filter.pageSize.toString(),
                 "level" to filter.level,
                 "source" to filter.source,
-                "targetType" to filter.targetType,
                 "search" to filter.search?.trim()?.takeIf(String::isNotEmpty),
                 "dateFrom" to filter.dateFrom,
                 "dateTo" to filter.dateTo,
@@ -556,18 +555,18 @@ internal class KtorAdministrativeSettingsRepository(
     override suspend fun loadLogSettings(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/system/log-settings", transform = JsonElement::toLogSettings)
 
-    override suspend fun updateLogCapacity(
+    override suspend fun updateLogRetention(
         context: AdministrativeSettingsContext,
-        maximumBytes: Long,
+        retentionDays: Int,
     ): AdministrativeSettingsResult<EventStorage> {
-        if (!AdministrativeSettingsValidation.isValidLogBytes(maximumBytes)) {
-            return invalid("INVALID_LOG_CAPACITY", "maximumBytes")
+        if (!AdministrativeSettingsValidation.isValidLogRetentionDays(retentionDays)) {
+            return invalid("INVALID_LOG_RETENTION_DAYS", "retentionDays")
         }
         return call(
             context,
             ApiMethod.Put,
             "/api/system/log-settings",
-            body = buildJsonObject { put("maxBytes", maximumBytes) },
+            body = buildJsonObject { put("retentionDays", retentionDays) },
             transform = { it.toLogSettings().storage },
         )
     }

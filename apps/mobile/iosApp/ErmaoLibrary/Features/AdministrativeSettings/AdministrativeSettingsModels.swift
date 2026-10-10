@@ -12,10 +12,10 @@ enum AdministrativeInputValidation {
     static let maximumPasswordLength = Int(
         AdministrativeSettingsValidationPublicKt.administrativeMaximumPasswordLength()
     )
-    static let logMegabytesRange = Int(
-        AdministrativeSettingsValidationPublicKt.administrativeMinimumLogMegabytes()
+    static let logRetentionDaysRange = Int(
+        AdministrativeSettingsValidationPublicKt.administrativeMinimumLogRetentionDays()
     )...Int(
-        AdministrativeSettingsValidationPublicKt.administrativeMaximumLogMegabytes()
+        AdministrativeSettingsValidationPublicKt.administrativeMaximumLogRetentionDays()
     )
 
     static func isValidDisplayName(_ value: String) -> Bool {
@@ -642,6 +642,7 @@ struct SystemHealthSnapshot: Equatable, Sendable {
 }
 
 enum LogLevel: String, CaseIterable, Hashable, Sendable {
+    case debug
     case information
     case warning
     case error
@@ -653,8 +654,6 @@ struct ManagementLogEvent: Identifiable, Equatable, Sendable {
     let level: LogLevel
     let source: String
     let summary: String
-    let correlationID: String?
-    let target: String?
 }
 
 struct LogFilter: Equatable, Sendable {
@@ -667,11 +666,11 @@ struct LogFilter: Equatable, Sendable {
 struct LogPage: Equatable, Sendable {
     let events: [ManagementLogEvent]
     let usedBytes: Int64
-    let limitBytes: Int64
+    let retentionDays: Int64
 }
 
 struct LogSettings: Equatable, Sendable {
-    var limitMegabytes: Int
+    var retentionDays: Int
 }
 
 struct AdministrativeExportFile: Equatable, Sendable {

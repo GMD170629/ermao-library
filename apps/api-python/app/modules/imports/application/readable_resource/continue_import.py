@@ -103,8 +103,6 @@ class ContinueImport:
             )
         self._log.emit(
             "continue_import.source",
-            library_id=library_id,
-            task_id=task.id,
             stage="continue",
             outcome="enqueued" if enqueued else "coalesced",
         )
@@ -148,8 +146,6 @@ class ContinueImport:
             book_task, _ = book_result
             self._log.emit(
                 "continue_import.task",
-                library_id=book_task.library_id,
-                task_id=book_task.id,
                 stage="continue",
                 outcome="enqueued",
             )
@@ -161,8 +157,6 @@ class ContinueImport:
             )
         self._log.emit(
             "continue_import.task",
-            library_id=task.library_id,
-            task_id=task.id,
             stage="continue",
             outcome="enqueued",
         )

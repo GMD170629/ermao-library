@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
+from app.core.exception_diagnostics import capture_exception
+
 
 def validated_publication_date(value: str | None) -> str | None:
     """Accept the existing reduced or full ISO publication-date forms."""
@@ -17,7 +19,8 @@ def validated_publication_date(value: str | None) -> str | None:
             date.fromisoformat(f"{value}-01")
         else:
             datetime.fromisoformat(value)
-    except ValueError:
+    except ValueError as _caught_error:
         # diagnostics-control-flow: Unsupported optional publication dates are omitted.
+        capture_exception(_caught_error)
         return None
     return value

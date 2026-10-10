@@ -6,8 +6,10 @@ import logging
 
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.core.exception_diagnostics import (
+    capture_exception,
     deferred_exception_persistence,
     exception_diagnostic_boundary,
+    exception_message,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
 )
@@ -64,7 +66,6 @@ class ReadableResourceWorkerProcessor:
     def startup(self) -> int:
         with exception_diagnostic_boundary(
             logger, "readable_resource.startup_failed",
-            context={"step": "startup_finalization"},
         ), self._uow.transaction():
             return self._queue.fail_interrupted_tasks_on_startup(
                 finished_at=self._clock.now()
@@ -75,7 +76,7 @@ class ReadableResourceWorkerProcessor:
 
     def process_once(self) -> str:
         with exception_diagnostic_boundary(
-            logger, "readable_resource.worker.failed", context={}
+            logger, "readable_resource.worker.failed"
         ):
             try:
                 with self._uow.transaction():
@@ -92,8 +93,9 @@ class ReadableResourceWorkerProcessor:
                             self._queue.mark_running(
                                 task.id, started_at=self._clock.now()
                             )
-            except LibraryFileActivityBusy:
+            except LibraryFileActivityBusy as _caught_error:
                 # diagnostics-control-flow: the file operation still owns the target.
+                capture_exception(_caught_error)
                 return "idle"
             if task is None:
                 self._process_import.reset_inspection_cache()
@@ -112,34 +114,22 @@ class ReadableResourceWorkerProcessor:
             if scan_error is not None
             else "readable_resource.worker.containment_failure",
             error,
-            context={
-                "stage": "scan" if scan_error is not None else "worker",
-                "outcome": scan_error.code if scan_error is not None else "error",
-                "task_id": task.id,
-                "task_kind": "IMPORT_BOOK" if isinstance(task, BookImportTaskRecord)
-                else task.kind,
-                "library_id": task.library_id,
-                "source_node_id": task.source_node_id,
-                "book_id": task.book_id if isinstance(task, BookImportTaskRecord) else None,
-                "attempt": 1,
-                "next_action": "mark_failed",
-            },
             source="import",
             action="readable_resource.task_failed",
-            target_type="importTask",
-            target_id=task.id,
+
         )
         try:
             self._uow.rollback()
         finally:
             persist_exception_diagnostic(logger, snapshot)
-        return scan_error.code if scan_error is not None else "WORKER_ERROR"
+        return exception_message(error)
 
     def _process_discovery(self, task: LibraryImportTaskRecord) -> str:
         try:
             outcome = self._execute_task(task)
             error_summary = "UNKNOWN_KIND" if outcome == "unknown_kind" else None
         except Exception as error:  # noqa: BLE001 - one task containment boundary
+            capture_exception(error, persist=False)
             error_summary = self._record_execution_failure(error, task)
             outcome = "error"
         return self._finish(
@@ -152,6 +142,7 @@ class ReadableResourceWorkerProcessor:
         try:
             outcome, error_summary = self._execute_book(book)
         except Exception as error:  # noqa: BLE001 - one Book containment boundary
+            capture_exception(error, persist=False)
             error_summary = self._record_execution_failure(error, book)
             outcome = "error"
         if outcome == "cancelled" and error_summary is None:
@@ -197,22 +188,13 @@ class ReadableResourceWorkerProcessor:
                     )
             return outcome if succeeded else "failed"
         except Exception as terminal_error:  # noqa: BLE001 - clean-context failure close
+            capture_exception(terminal_error, persist=False)
             snapshot = prepare_exception_diagnostic(
                 logger, "readable_resource.worker.completion_write_failed",
                 terminal_error,
-                context={
-                    "stage": "completion", "outcome": "failed_close",
-                    "task_id": task.id, "library_id": task.library_id,
-                    "task_kind": "IMPORT_BOOK" if isinstance(task, BookImportTaskRecord)
-                    else task.kind,
-                    "book_id": task.book_id if isinstance(task, BookImportTaskRecord) else None,
-                    "attempt": 1,
-                    "next_action": "mark_failed_once",
-                },
                 source="import",
                 action="readable_resource.completion_write_failed",
-                target_type="importTask",
-                target_id=task.id,
+
             )
             try:
                 self._uow.recover_after_failure()
@@ -229,11 +211,9 @@ class ReadableResourceWorkerProcessor:
                         return "failed"
                     if current.state != "RUNNING":
                         raise ValueError("IMPORT_TERMINAL_STATE_CONFLICT")
-                    summary = error_summary or (
-                        "BOOK_COMPLETION_WRITE_FAILED"
-                        if isinstance(task, BookImportTaskRecord)
-                        else "TASK_COMPLETION_WRITE_FAILED"
-                    )
+                    summary = exception_message(terminal_error)
+                    if error_summary is not None:
+                        summary = f"{error_summary}\n{summary}"
                     if isinstance(task, BookImportTaskRecord):
                         assert self._book_queue is not None
                         assert task.execution_version is not None
@@ -249,20 +229,13 @@ class ReadableResourceWorkerProcessor:
                         )
                 return "failed"
             except Exception as close_error:  # noqa: BLE001 - one failure-close boundary
+                capture_exception(close_error, persist=False)
                 secondary = prepare_exception_diagnostic(
                     logger, "readable_resource.worker.failure_close_failed",
                     close_error,
-                    context={
-                        "stage": "failure_close", "task_id": task.id,
-                        "library_id": task.library_id,
-                        "book_id": task.book_id if isinstance(task, BookImportTaskRecord) else None,
-                        "attempt": 1,
-                        "next_action": "startup_marks_interrupted",
-                    },
                     source="import",
                     action="readable_resource.failure_close_failed",
-                    target_type="importTask",
-                    target_id=task.id,
+
                 )
                 try:
                     self._uow.recover_after_failure()
@@ -276,10 +249,6 @@ class ReadableResourceWorkerProcessor:
             raise RuntimeError("Book worker is not configured")
         assert book.execution_version is not None
         with deferred_exception_persistence(
-            context={
-                "task_id": book.id, "library_id": book.library_id,
-                "task_kind": "IMPORT_BOOK", "book_id": book.book_id,
-            }
         ):
             work = book.work
             phase = book.phase
@@ -358,11 +327,7 @@ class ReadableResourceWorkerProcessor:
             return "book", None
 
     def _execute_task(self, task: LibraryImportTaskRecord) -> str:
-        with deferred_exception_persistence(context={
-            "task_id": task.id, "library_id": task.library_id,
-            "task_kind": task.kind, "resource_id": task.resource_id,
-            "source_node_id": task.source_node_id,
-        }):
+        with deferred_exception_persistence():
             if task.kind in {"SCAN_LIBRARY", "CONTINUE_SOURCE"}:
                 self._process_import.reset_inspection_cache()
             if task.kind == "SCAN_LIBRARY":

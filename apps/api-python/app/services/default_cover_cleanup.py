@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.system import get_setting, upsert_setting
 from app.core.config import Settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import release_read_transaction
 from app.modules.system.application.commands import SystemWriteTransaction
 
@@ -58,7 +58,8 @@ def _remove_legacy_default_covers(storage_root: Path) -> int:
                 path.unlink()
                 removed += 1
         except OSError as error:
-            record_exception(LOGGER, "default_cover_cleanup.failed", error, context={"step": "remove_cover_residue"})
+            capture_exception(error, persist=False)
+            record_exception(LOGGER, "default_cover_cleanup.failed", error)
     return removed
 
 

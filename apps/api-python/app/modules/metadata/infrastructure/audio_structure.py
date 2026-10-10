@@ -6,6 +6,7 @@ from typing import BinaryIO
 from mutagen import MutagenError
 from mutagen.mp3 import MP3
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.metadata.application.standard_files import StandardMetadataError
 
 MAX_AUDIO_METADATA = 8 * 1024**2
@@ -93,6 +94,7 @@ def mp3_structure(
         stream.seek(0)
         MP3(stream)  # Validate MPEG audio headers; never decode or transcode frames.
     except MutagenError as error:
+        capture_exception(error, persist=False)
         raise StandardMetadataError("INVALID_AUDIO_STRUCTURE") from error
     return (
         header[3],

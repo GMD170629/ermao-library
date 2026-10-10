@@ -211,8 +211,8 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.Health()
     }
 
-    data class SaveLogCapacity(val megabytes: Int) : AdministrativeCommand {
-        override val operation = AdministrativeOperation.SaveLogCapacity
+    data class SaveLogRetention(val days: Int) : AdministrativeCommand {
+        override val operation = AdministrativeOperation.SaveLogRetention
         override val ownerRoute = AdministrativeSettingsRoute.Logs
     }
 
@@ -372,7 +372,7 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     is AdministrativeCommand.SaveDetailOrder,
     AdministrativeCommand.RunHealthCheck,
     -> AdministrativeCapability.ManageSystem
-    is AdministrativeCommand.SaveLogCapacity,
+    is AdministrativeCommand.SaveLogRetention,
     is AdministrativeCommand.ExportLogs,
     AdministrativeCommand.ClearInformationalLogs,
     -> AdministrativeCapability.ManageLogs

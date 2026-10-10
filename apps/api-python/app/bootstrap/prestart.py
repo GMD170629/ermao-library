@@ -8,6 +8,7 @@ from alembic.migration import MigrationContext
 from sqlalchemy.engine import Engine
 
 from app.core.config import get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.db.bootstrap import bootstrap_database
 from app.db.runner import head_revision
 from app.db.session import engine
@@ -43,7 +44,8 @@ def main() -> None:
         settings = get_settings()
         bootstrap_database(engine, settings)
         verify_current_schema(engine)
-    except Exception:
+    except Exception as _caught_error:
+        capture_exception(_caught_error)
         print("prestart outcome=failed", file=sys.stderr, flush=True)
         raise
     print("prestart outcome=success", file=sys.stdout, flush=True)

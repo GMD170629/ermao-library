@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.library_navigation import navigation_entry_id
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import (
     Library,
     LibraryReadableResource,
@@ -272,8 +272,8 @@ class SqlAlchemyResourceDetailQueries:
             document = pdfium.PdfDocument(str(path))
             return max(0, len(document))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.resource_details.resolve_pdf_page_count.failed", error,
-                             context={"step": "resolve_pdf_page_count", "resource_id": resource_id})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.resource_details.resolve_pdf_page_count.failed", error)
             return None
         finally:
             if document is not None:

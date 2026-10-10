@@ -633,22 +633,17 @@ def test_book_worker_containment_logs_without_worker_id(
     )
     with caplog.at_level(logging.ERROR, logger="ermao.readable_resource_pipeline"):
         assert worker.process_once() == "failed"
-    assert book_queue.failures == [("task-1", "WORKER_ERROR")]
+    assert book_queue.failures == [("task-1", "RuntimeError: boom")]
     assert all(summary != "UNHANDLED_ERROR" for _, summary in book_queue.failures)
     records = [
         record
         for record in caplog.records
-        if record.getMessage().startswith(
-            "readable_resource.worker.containment_failure"
-        )
+        if "RuntimeError: boom" in record.getMessage()
     ]
     assert len(records) == 1
-    assert getattr(records[0], "task_id", None) == "task-1"
-    assert getattr(records[0], "task_kind", None) == "IMPORT_BOOK"
-    assert getattr(records[0], "book_id", None) == "book-1"
-    assert getattr(records[0], "stage", None) == "worker"
-    assert getattr(records[0], "outcome", None) == "error"
-    assert not hasattr(records[0], "worker_id")
+    assert "Traceback (most recent call last)" in records[0].getMessage()
+    for key in ("task_id", "task_kind", "book_id", "worker_id"):
+        assert not hasattr(records[0], key)
 
 
 def test_modeled_book_resource_failure_is_not_rewritten_as_worker_error() -> None:

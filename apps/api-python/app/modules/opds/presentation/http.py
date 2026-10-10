@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.opds.application.dto import (
     OpdsAuthenticationRequestDto,
     OpdsCatalogQueryDto,
@@ -64,7 +64,7 @@ class OpdsHttpDependencies:
 def authentication_required_response(
     document: OpdsAuthenticationDocument,
 ) -> JSONResponse:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger(__name__),
         "opds.authentication_rejected",
         sys.exception()
@@ -72,14 +72,12 @@ def authentication_required_response(
             "Password authentication did not establish an actor"
         ),
         level="warning",
-        context={"stage": "opds_authentication", "outcome": "authentication_required"},
     )
     return JSONResponse(
         status_code=401,
         content=document.model_dump(mode="json", exclude_none=True),
         media_type="application/opds-authentication+json",
         headers={
-            "X-Error-Id": diagnostic_id,
             "WWW-Authenticate": 'Basic realm="Shuku OPDS"',
             "Link": '</opds/authentication.json>; rel="http://opds-spec.org/auth/document"; type="application/opds-authentication+json"',
             "Cache-Control": "no-store",
@@ -89,12 +87,11 @@ def authentication_required_response(
 
 
 def authentication_throttled_response(retry_after_seconds: int) -> JSONResponse:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger(__name__),
         "opds.authentication_throttled",
         sys.exception() or OpdsAuthenticationThrottled(retry_after_seconds),
         level="warning",
-        context={"stage": "opds_authentication", "outcome": "throttled"},
     )
     return JSONResponse(
         status_code=429,
@@ -104,7 +101,6 @@ def authentication_throttled_response(retry_after_seconds: int) -> JSONResponse:
         },
         media_type="application/problem+json",
         headers={
-            "X-Error-Id": diagnostic_id,
             "Retry-After": str(max(1, retry_after_seconds)),
             "Cache-Control": "no-store",
             "Vary": "Authorization",
@@ -114,19 +110,17 @@ def authentication_throttled_response(retry_after_seconds: int) -> JSONResponse:
 
 def problem_response(status_code: int, problem_type: str, title: str) -> JSONResponse:
     problem = OpdsProblemDetails(type=problem_type, title=title)
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger(__name__),
         "opds.request_rejected",
         sys.exception() or OpdsRequestRejected(f"HTTP {status_code}: {title}"),
         level="warning" if status_code < 500 else "error",
-        context={"stage": "opds_response", "outcome": str(status_code)},
     )
     return JSONResponse(
         status_code=status_code,
         content=problem.model_dump(mode="json"),
         media_type="application/problem+json",
         headers={
-            "X-Error-Id": diagnostic_id,
             "Cache-Control": "no-store",
             "Vary": "Authorization",
         },
@@ -154,11 +148,11 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         try:
             credentials = parse_basic_authorization(authorization)
         except OpdsAuthenticationRequired as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.opds.presentation.http.actor_id.failed",
                 error,
-                context={"stage": "actor_id"},
             )
             return authentication_required_response(
                 _authentication_document(snapshot.public_base_url)
@@ -175,11 +169,11 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
                 )
             )
         except OpdsAuthenticationThrottled as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.opds.presentation.http.actor_id.failed",
                 error,
-                context={"stage": "actor_id"},
             )
             return authentication_throttled_response(error.retry_after_seconds)
         return (
@@ -254,11 +248,11 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
                 )
             )
         except OpdsPublicationNotFound as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.opds.presentation.http.feed_response.failed",
                 error,
-                context={"stage": "feed_response"},
             )
             return _problem_for(error)
         return Response(
@@ -506,11 +500,11 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
                 max_width=max_width,
             )
         except ValueError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.opds.presentation.http.resource_page.failed",
                 error,
-                context={"stage": "resource_page"},
             )
             return problem_response(404, "about:blank", "Page not found.")
         response = dependencies.resource_page(actor, page_request, request)

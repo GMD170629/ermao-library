@@ -13,6 +13,7 @@ from zipfile import ZipFile
 from app.contracts.controlled_file_slots import is_controlled_file_slot
 from app.contracts.file_operation import FileIdentity, FileOperationError
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.copied_file_attributes import (
     apply_copy_attributes,
     read_copy_attributes,
@@ -69,8 +70,9 @@ def _same_identity(
 def _identity(directory: int, name: str) -> FileIdentity | None:
     try:
         return file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False))
-    except FileNotFoundError:
+    except FileNotFoundError as _caught_error:
         # diagnostics-control-flow: absent optional staging/backup slots are an explicit identity observation.
+        capture_exception(_caught_error, level="debug")
         return None
 
 
@@ -330,6 +332,7 @@ class StandardMetadataPublication:
                 os.fsync(directory)
                 return PreparedStandardFile(identity, digest, original_sha256)
             except Exception as error:
+                capture_exception(error)
                 code = (
                     str(error)
                     if isinstance(error, (StandardMetadataError, FileOperationError))

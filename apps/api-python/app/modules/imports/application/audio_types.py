@@ -15,6 +15,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyMorphology,
     reader_safety_budget,
 )
+from app.core.exception_diagnostics import capture_exception
 
 SUPPORTED_AUDIO_EXTS = frozenset(READER_SAFETY_AUDIO_PROFILE.container_mime_types)
 LEGACY_AUDIO_EXTS = frozenset(
@@ -120,6 +121,7 @@ def audio_mime_type(path: str | Path) -> str:
     try:
         return READER_SAFETY_AUDIO_PROFILE.container_mime_types[extension]
     except KeyError as error:
+        capture_exception(error, persist=False)
         raise ValueError(
             f"unsupported admitted audio extension: {extension}"
         ) from error

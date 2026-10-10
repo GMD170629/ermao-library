@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 
 from app.contracts.file_operation import FileOperationError
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 MAX_ATTRIBUTE_BYTES = 2 * 1024 * 1024
 
@@ -169,7 +169,7 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
         finally:
             if library.acl_free(acl) != 0:
                 number = ctypes.get_errno()
-                record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number), context={"step": "free_acl"})
+                record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number))
     acl = library.acl_get_fd_np(descriptor, 0x100)
     if not acl and ctypes.get_errno() == errno.ENOENT:
         # Darwin reports absent extended ACLs as ENOENT for an otherwise valid FD.
@@ -198,7 +198,7 @@ def _darwin_acl(descriptor: int, replacement: bytes | None = None) -> bytes:
     finally:
         if library.acl_free(acl) != 0:
             number = ctypes.get_errno()
-            record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number), context={"step": "free_acl"})
+            record_exception(logging.getLogger(__name__), "file_attributes.acl_free_failed", _system_call_failure(number))
 
 
 def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
@@ -206,8 +206,8 @@ def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
     try:
         value = os.fstat(descriptor)
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "infrastructure.copied_file_attributes.read_copy_attributes.failed", error,
-                         context={"step": "read_copy_attributes"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "infrastructure.copied_file_attributes.read_copy_attributes.failed", error)
         return None
     attributes: list[tuple[str, bytes]] = []
     total = 0
@@ -215,7 +215,8 @@ def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
     try:
         names = _list_attributes(descriptor)
     except (OSError, FileOperationError) as error:
-        record_exception(logging.getLogger(__name__), "file_attributes.list_xattrs_failed", error, context={"step": "list_xattrs"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "file_attributes.list_xattrs_failed", error)
     for name in names:
         # A protected or disappearing attribute must not prevent other copies.
         try:
@@ -224,13 +225,15 @@ def read_copy_attributes(descriptor: int) -> CopiedFileAttributes | None:
                 total += len(data)
                 attributes.append((name, data))
         except (OSError, FileOperationError) as error:
-            record_exception(logging.getLogger(__name__), "file_attributes.get_xattr_failed", error, context={"step": "get_xattr"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "file_attributes.get_xattr_failed", error)
     acl = None
     if sys.platform == "darwin":
         try:
             acl = _darwin_acl(descriptor)
         except (OSError, FileOperationError) as error:
-            record_exception(logging.getLogger(__name__), "file_attributes.read_acl_failed", error, context={"step": "read_acl"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "file_attributes.read_acl_failed", error)
     return CopiedFileAttributes(
         value.st_uid,
         value.st_gid,
@@ -258,27 +261,32 @@ def apply_copy_attributes(
         if (observed.st_uid, observed.st_gid) != (expected.uid, expected.gid):
             os.fchown(descriptor, expected.uid, expected.gid)
     except (OSError) as error:
-        record_exception(logging.getLogger(__name__), "file_attributes.set_owner_failed", error, context={"step": "set_owner"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "file_attributes.set_owner_failed", error)
     try:
         os.fchmod(descriptor, expected.mode)
     except (OSError) as error:
-        record_exception(logging.getLogger(__name__), "file_attributes.set_mode_failed", error, context={"step": "set_mode"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "file_attributes.set_mode_failed", error)
     for name, value in expected.attributes:
         try:
             _set_attribute(descriptor, name, value)
         except (OSError, FileOperationError) as error:
-            record_exception(logging.getLogger(__name__), "file_attributes.set_xattr_failed", error, context={"step": "set_xattr"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "file_attributes.set_xattr_failed", error)
     if expected.acl is not None:
         try:
             _darwin_acl(descriptor, expected.acl)
         except (OSError, FileOperationError) as error:
-            record_exception(logging.getLogger(__name__), "file_attributes.set_acl_failed", error, context={"step": "set_acl"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "file_attributes.set_acl_failed", error)
     # Set time before flags, which can make a file immutable on Darwin.
     try:
         observed = os.fstat(descriptor)
         os.utime(descriptor, ns=(observed.st_atime_ns, expected.mtime_ns))
     except (OSError) as error:
-        record_exception(logging.getLogger(__name__), "file_attributes.set_timestamps_failed", error, context={"step": "set_timestamps"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "file_attributes.set_timestamps_failed", error)
     if sys.platform == "darwin":
         try:
             library = ctypes.CDLL(None, use_errno=True)
@@ -288,4 +296,5 @@ def apply_copy_attributes(
                 number = ctypes.get_errno()
                 raise _system_call_failure(number)
         except (OSError) as error:
-            record_exception(logging.getLogger(__name__), "file_attributes.set_flags_failed", error, context={"step": "set_flags"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "file_attributes.set_flags_failed", error)

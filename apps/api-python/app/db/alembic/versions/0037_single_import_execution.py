@@ -9,6 +9,8 @@ from uuid import uuid4
 import sqlalchemy as sa
 from alembic import op
 
+from app.core.exception_diagnostics import capture_exception
+
 revision = "0037_single_import_execution"
 down_revision = "0036_import_execution_identity"
 branch_labels = None
@@ -70,7 +72,8 @@ def upgrade() -> None:
         if old["kind"] == "IMPORT_BOOK" and old["bookWork"]:
             try:
                 work = json.loads(old["bookWork"])
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as error:
+                capture_exception(error)
                 work = None
             if isinstance(work, dict) and set(work) == {"active", "pending"}:
                 active, pending = work["active"], work["pending"]

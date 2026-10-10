@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.publications.domain.model import (
     PublicationReadError,
     PublicationStructureError,
@@ -205,9 +205,11 @@ class ChapterCore:
                     return cls(candidate)
                 except OSError as error:
                     # diagnostics-control-flow: Probe native-library candidates; the final loader cause is raised if all candidates fail.
+                    capture_exception(error, persist=False)
                     if candidate == configured or not candidate.startswith("/") or Path(candidate).exists():
-                        record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.chapter_core.load.failed", error,
-                                         context={"step": "load"})
+                        record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.chapter_core.load.failed", error)
+                    else:
+                        record_exception(logging.getLogger(__name__), "modules.publications.infrastructure.chapter_core.load.probe", error, level="debug")
                     last_error = error
         raise PublicationReadError("Chapter engine is unavailable") from last_error
 

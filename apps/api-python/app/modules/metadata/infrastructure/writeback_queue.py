@@ -20,7 +20,7 @@ from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.source_relocation import SourceRelocation
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.infrastructure.file_operation_conflicts import (
     file_operation_blocks_library,
@@ -805,11 +805,11 @@ def prepare_targets_from_snapshot(
             try:
                 target_stat = target_path.stat() if target_path.is_file() else None
             except OSError as error:
+                capture_exception(error, persist=False)
                 record_exception(
                     logging.getLogger(__name__),
                     "modules.metadata.infrastructure.writeback_queue.prepare_targets_from_snapshot.failed",
                     error,
-                    context={"step": "prepare_targets_from_snapshot"},
                 )
                 target_stat = None
             payload = {

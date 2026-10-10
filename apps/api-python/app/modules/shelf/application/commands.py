@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from app.contracts.mutation_receipt import MutationReceipt
+from app.core.exception_diagnostics import capture_exception
 from app.modules.shelf.domain.policies import ShelfKind
 
 
@@ -159,7 +160,8 @@ class CreateShelf:
             if receipt is not None:
                 receipt.complete(shelf)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return shelf
@@ -251,7 +253,8 @@ class UpdateShelf:
             if receipt is not None:
                 receipt.complete(shelf)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return shelf
@@ -285,7 +288,8 @@ class DeleteShelf:
             if receipt is not None:
                 receipt.complete(deleted)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return deleted

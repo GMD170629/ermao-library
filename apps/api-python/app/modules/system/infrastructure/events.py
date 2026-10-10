@@ -1,53 +1,31 @@
-"""ORM persistence for SystemEvent storage and pruning."""
-
+"""System event file persistence, committed audit events, and streaming queries."""
 from __future__ import annotations
 
-import json
-import logging
+from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
-from typing import cast as typing_cast
 from uuid import uuid4
 
-from sqlalchemy import (
-    BigInteger,
-    String,
-    case,
-    cast,
-    column,
-    delete,
-    func,
-    select,
-    table,
-)
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import event as orm_event
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
-from app.core.sql_batches import sqlite_parameter_chunks
+from app.core.time import timestamp_ms_to_iso, to_timestamp_ms
 from app.models.common import db_timestamp
-from app.models.settings import SystemEvent
 from app.modules.system.domain.events import (
-    DEFAULT_MAX_EVENT_BYTES,
-    LAST_PRUNED_AT_SETTING,
-    LOG_MAX_BYTES_SETTING,
     PreparedSystemEvent,
     normalize_event_level,
-    parse_max_event_bytes,
+    prepare_event_message,
     prepare_event_metadata,
-    truncate_event_message,
-    validate_log_max_bytes,
 )
-from app.modules.system.infrastructure import settings as setting_store
-
-EVENT_PRUNE_DELETE_BATCH_SIZE = 1_000
-_DBSTAT = table(
-    "dbstat",
-    column("name", String),
-    column("pgsize", BigInteger),
-    column("aggregate", BigInteger),
+from app.modules.system.infrastructure.log_files import (
+    append_log_event,
+    clear_log_files,
+    log_settings,
+    log_size_bytes,
+    prune_log_files,
+    read_log_events,
+    save_log_settings,
 )
 
 
@@ -61,152 +39,29 @@ class SystemEventPageSnapshot:
     size_bytes: int
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedSystemEventPrune:
-    event_ids: tuple[str, ...]
-    max_bytes: int
-    current_size_bytes: int
-    last_pruned_setting: setting_store.PreparedSettingsWrite | None
-
-
-def _event_created_at_ms_expression() -> Any:
-    """Normalize legacy textual timestamps inside the database date filter."""
-
-    return case(
-        (
-            func.typeof(SystemEvent.created_at) == "text",
-            cast(func.strftime("%s", SystemEvent.created_at), BigInteger) * 1000,
-        ),
-        else_=cast(SystemEvent.created_at, BigInteger),
-    )
-
-
 def system_event_size_bytes(db: Session) -> int:
-    """Return SQLite pages allocated to SystemEvent's table B-tree, excluding indexes."""
-    value = db.scalar(
-        select(_DBSTAT.c.pgsize).where(
-            _DBSTAT.c.name == SystemEvent.__tablename__,
-            _DBSTAT.c.aggregate == 1,
-        )
-    )
-    return int(value or 0)
+    return log_size_bytes()
 
 
-def configured_max_event_bytes(db: Session) -> int:
-    try:
-        return parse_max_event_bytes(
-            setting_store.get_setting_raw(db, LOG_MAX_BYTES_SETTING)
-        )
-    except (TypeError, ValueError) as error:
-        record_exception(
-            logging.getLogger(__name__),
-            "system.log_capacity_parse_failed",
-            error,
-            context={
-                "stage": "parse_log_capacity",
-                "resource_id": LOG_MAX_BYTES_SETTING,
-            },
-        )
-        return DEFAULT_MAX_EVENT_BYTES
+def configured_retention_days(db: Session) -> int:
+    return int(log_settings()["retentionDays"])
 
 
 def system_event_storage_view(db: Session) -> dict[str, Any]:
-    max_bytes = configured_max_event_bytes(db)
-    last_pruned = setting_store.get_setting(db, LAST_PRUNED_AT_SETTING)
-    return {
-        "sizeBytes": system_event_size_bytes(db),
-        "maxBytes": max_bytes,
-        "lastPrunedAt": last_pruned,
-    }
+    return {"sizeBytes": log_size_bytes(), **log_settings()}
 
 
-def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
-    size = validate_log_max_bytes(max_bytes)
-    setting_store.upsert_setting(db, LOG_MAX_BYTES_SETTING, size)
+def set_retention_days(db: Session, days: int) -> dict[str, Any]:
+    save_log_settings(days, log_settings()["minimumLevel"])
     return system_event_storage_view(db)
 
 
-def prune_system_events(
-    db: Session,
-    max_bytes: int | None = None,
-) -> dict[str, int]:
-    prepared = prepare_system_event_prune(db, max_bytes)
-    return write_prepared_system_event_prune(db, prepared)
-
-
-def prepare_system_event_prune(
-    db: Session,
-    max_bytes: int | None = None,
-) -> PreparedSystemEventPrune:
-    max_bytes = configured_max_event_bytes(db) if max_bytes is None else int(max_bytes)
-    current_size_bytes = system_event_size_bytes(db)
-    if current_size_bytes < max_bytes:
-        return PreparedSystemEventPrune(
-            event_ids=(),
-            max_bytes=max_bytes,
-            current_size_bytes=current_size_bytes,
-            last_pruned_setting=None,
-        )
-
-    event_count = int(db.scalar(select(func.count()).select_from(SystemEvent)) or 0)
-    if event_count == 0:
-        return PreparedSystemEventPrune(
-            event_ids=(),
-            max_bytes=max_bytes,
-            current_size_bytes=current_size_bytes,
-            last_pruned_setting=None,
-        )
-
-    ids_to_delete = db.scalars(
-        select(SystemEvent.id).order_by(
-            SystemEvent.created_at.asc(),
-            SystemEvent.id.asc(),
-        ).limit((event_count + 1) // 2)
-    ).all()
-
-    last_pruned_setting = setting_store.prepare_settings_write(
-        {LAST_PRUNED_AT_SETTING: datetime.now(UTC).isoformat()}
-    )
-    return PreparedSystemEventPrune(
-        event_ids=tuple(ids_to_delete),
-        max_bytes=max_bytes,
-        current_size_bytes=current_size_bytes,
-        last_pruned_setting=last_pruned_setting,
-    )
-
-
-def write_prepared_system_event_prune(
-    db: Session,
-    prepared: PreparedSystemEventPrune,
-) -> dict[str, int]:
-    if not prepared.event_ids:
-        return {
-            "deleted": 0,
-            "sizeBytes": prepared.current_size_bytes,
-            "maxBytes": prepared.max_bytes,
-        }
-
-    deleted = 0
-    for start in range(
-        0,
-        len(prepared.event_ids),
-        EVENT_PRUNE_DELETE_BATCH_SIZE,
-    ):
-        batch_ids = prepared.event_ids[start : start + EVENT_PRUNE_DELETE_BATCH_SIZE]
-        result = typing_cast(
-            CursorResult[Any],
-            db.execute(delete(SystemEvent).where(SystemEvent.id.in_(batch_ids))),
-        )
-        deleted += int(result.rowcount or 0)
-
-    size_bytes = system_event_size_bytes(db)
-    if deleted and prepared.last_pruned_setting is not None:
-        setting_store.write_prepared_settings(db, prepared.last_pruned_setting)
-    return {
-        "deleted": deleted,
-        "sizeBytes": size_bytes,
-        "maxBytes": prepared.max_bytes,
-    }
+def prune_system_events(db: Session, retention_days: int | None = None) -> dict[str, int]:
+    if retention_days is not None:
+        deleted = save_log_settings(retention_days, log_settings()["minimumLevel"])
+    else:
+        deleted = prune_log_files()
+    return {"deleted": deleted, "sizeBytes": log_size_bytes(), "retentionDays": configured_retention_days(db)}
 
 
 def prepare_system_event(
@@ -219,8 +74,6 @@ def prepare_system_event(
     level: str = "info",
     actor_type: str = "system",
     actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> PreparedSystemEvent:
     return PreparedSystemEvent(
@@ -230,39 +83,45 @@ def prepare_system_event(
         actor_type=actor_type,
         actor_id=actor_id,
         action=action,
-        target_type=target_type,
-        target_id=target_id,
-        message=truncate_event_message(message),
+        message=prepare_event_message(message),
         metadata=prepare_event_metadata(metadata),
         created_at=created_at or db_timestamp(),
     )
 
 
-def write_prepared_system_events(
-    db: Session,
-    events: list[PreparedSystemEvent] | tuple[PreparedSystemEvent, ...],
-) -> list[str]:
+def event_record(event: PreparedSystemEvent) -> dict[str, Any]:
+    return {
+        "id": event.id, "level": event.level, "source": event.source,
+        "actorType": event.actor_type, "actorId": event.actor_id,
+        "action": event.action, "message": event.message,
+        "metadata": event.metadata, "createdAt": timestamp_ms_to_iso(event.created_at),
+    }
+
+
+def write_prepared_system_events(db: Session, events: list[PreparedSystemEvent] | tuple[PreparedSystemEvent, ...]) -> list[str]:
+    # Keep audit success tied to the owning transaction. Never INSERT log rows.
     if not events:
         return []
-    rows = [
-        {
-            "id": event.id,
-            "level": event.level,
-            "source": event.source,
-            "actor_type": event.actor_type,
-            "actor_id": event.actor_id,
-            "action": event.action,
-            "target_type": event.target_type,
-            "target_id": event.target_id,
-            "message": event.message,
-            "metadata_json": event.metadata,
-            "created_at": event.created_at,
-        }
-        for event in events
-    ]
-    for chunk in sqlite_parameter_chunks(rows, parameters_per_row=11):
-        db.execute(sqlite_insert(SystemEvent), list(chunk))
+    transaction = db.get_nested_transaction() or db.get_transaction() or db.begin()
+    db.info.setdefault("file_log_events", {}).setdefault(transaction, []).extend(events)
     return [event.id for event in events]
+
+
+@orm_event.listens_for(Session, "after_commit")
+def _publish_committed_events(db: Session) -> None:
+    transaction = db.get_nested_transaction() or db.get_transaction()
+    queues = db.info.get("file_log_events", {})
+    events = queues.pop(transaction, [])
+    if transaction is not None and transaction.parent is not None:
+        queues.setdefault(transaction.parent, []).extend(events)
+    else:
+        for event in events:
+            append_log_event(event_record(event))
+
+
+@orm_event.listens_for(Session, "after_transaction_end")
+def _discard_uncommitted_events(db: Session, transaction: Any) -> None:
+    db.info.get("file_log_events", {}).pop(transaction, None)
 
 
 def record_system_event(
@@ -274,8 +133,6 @@ def record_system_event(
     level: str = "info",
     actor_type: str = "system",
     actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> str:
     prepared = prepare_system_event(
@@ -285,236 +142,67 @@ def record_system_event(
         level=level,
         actor_type=actor_type,
         actor_id=actor_id,
-        target_type=target_type,
-        target_id=target_id,
         metadata=metadata,
     )
     write_prepared_system_events(db, [prepared])
     return prepared.id
 
 
-def normalize_stored_event_metadata(value: object, *, event_id: str) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return value
-    try:
-        parsed = json.loads(str(value))
-        if not isinstance(parsed, dict):
-            raise TypeError("SystemEvent metadata must be a JSON object")
-        return parsed
-    except (TypeError, ValueError) as error:
-        diagnostic_id = record_exception(
-            logging.getLogger(__name__),
-            "system.event_metadata_parse_failed",
-            error,
-            context={"stage": "parse_event_metadata", "resource_id": event_id},
-        )
-        return {
-            "diagnosticStatus": "HISTORICAL_INFORMATION_UNAVAILABLE",
-            "metadataReadDiagnosticId": diagnostic_id,
-        }
-
-
 def get_system_event(db: Session, event_id: str) -> dict[str, Any] | None:
-    row = db.get(SystemEvent, event_id)
-    if row is None:
-        return None
-    return _event_dict(row)
-
-
-def _event_dict(row: SystemEvent) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "level": row.level,
-        "source": row.source,
-        "actorType": row.actor_type,
-        "actorId": row.actor_id,
-        "action": row.action,
-        "targetType": row.target_type,
-        "targetId": row.target_id,
-        "message": row.message,
-        "metadata": normalize_stored_event_metadata(row.metadata_json, event_id=row.id),
-        "createdAt": row.created_at,
-    }
+    return next((event for event in read_log_events() if event.get("id") == event_id), None)
 
 
 def feedback_event_bundle(db: Session, event_id: str) -> list[dict[str, Any]]:
-    """Return one event and a bounded set sharing its strongest correlation ID."""
-
     selected = get_system_event(db, event_id)
-    if selected is None:
-        return []
-    metadata = selected["metadata"]
-    correlation = next(
-        (
-            (key, value)
-            for key in ("taskId", "operationId", "requestId")
-            if isinstance(metadata.get(key), str)
-            and 0 < len(value := metadata[key]) <= 191
-        ),
-        None,
-    )
-    if correlation is None:
-        return [selected]
-    key, value = correlation
-    rows = db.scalars(
-        select(SystemEvent)
-        .where(SystemEvent.metadata_json[key].as_string() == value)
-        .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc())
-        .limit(20)
-    ).all()
-    found = [_event_dict(row) for row in rows]
-    if all(event["id"] != event_id for event in found):
-        found.insert(0, selected)
-    return found[:20]
+    return [selected] if selected is not None else []
 
 
 def list_event_source_facets(db: Session) -> list[dict[str, Any]]:
-    return [
-        {"source": row._mapping["source"], "count": int(row._mapping["count"] or 0)}
-        for row in db.execute(
-            select(SystemEvent.source, func.count().label("count"))
-            .group_by(SystemEvent.source)
-            .order_by(SystemEvent.source.asc())
-        ).all()
-    ]
+    return [{"source": key, "count": count} for key, count in sorted(Counter(event["source"] for event in read_log_events()).items())]
 
 
 def list_event_level_facets(db: Session) -> list[dict[str, Any]]:
-    return [
-        {"level": row._mapping["level"], "count": int(row._mapping["count"] or 0)}
-        for row in db.execute(
-            select(SystemEvent.level, func.count().label("count"))
-            .group_by(SystemEvent.level)
-            .order_by(SystemEvent.level.asc())
-        ).all()
-    ]
+    return [{"level": key, "count": count} for key, count in sorted(Counter(event["level"] for event in read_log_events()).items())]
 
 
-def system_event_search_filter(search: str) -> Any:
-    """Search facts and explicit correlation IDs, never arbitrary stored payloads."""
-    term = f"%{search.strip()}%"
-    expression = (
-        SystemEvent.id.like(term)
-        | SystemEvent.message.like(term)
-        | SystemEvent.action.like(term)
-        | func.coalesce(SystemEvent.target_id, "").like(term)
-    )
-    for key in (
-        "requestId",
-        "taskId",
-        "operationId",
-        "planId",
-        "uploadId",
-        "nodeId",
-        "parentDiagnosticId",
-    ):
-        expression |= func.coalesce(
-            SystemEvent.metadata_json[key].as_string(), ""
-        ).like(term)
-    expression |= func.coalesce(
-        SystemEvent.metadata_json["diagnostics"]["id"].as_string(), ""
-    ).like(term)
-    return expression
-
-
-def list_system_events_page(
-    db: Session,
-    *,
-    page: int,
-    page_size: int,
-    level: str | None = None,
-    source: str | None = None,
-    target_type: str | None = None,
-    search: str | None = None,
-    date_from_ms: int | None = None,
-    date_to_ms: int | None = None,
+def list_system_events_page(db: Session, *, page: int, page_size: int,
+    level: str | None = None, source: str | None = None, search: str | None = None,
+    date_from_ms: int | None = None, date_to_ms: int | None = None,
 ) -> SystemEventPageSnapshot:
-    aggregate_rows = db.execute(
-        select(
-            SystemEvent.source,
-            SystemEvent.level,
-            func.count().label("event_count"),
-        )
-        .group_by(SystemEvent.source, SystemEvent.level)
-        .order_by(SystemEvent.source.asc(), SystemEvent.level.asc())
-    ).all()
-    source_counts: dict[str, int] = {}
-    level_counts: dict[str, int] = {}
-    for row in aggregate_rows:
-        count = int(row.event_count or 0)
-        source_counts[str(row.source)] = source_counts.get(str(row.source), 0) + count
-        level_counts[str(row.level)] = level_counts.get(str(row.level), 0) + count
-
-    filters: list[Any] = []
-    if level:
-        filters.append(SystemEvent.level == ("warning" if level == "warn" else level))
-    if source:
-        filters.append(SystemEvent.source == source)
-    if target_type:
-        filters.append(SystemEvent.target_type == target_type)
-    if search:
-        filters.append(system_event_search_filter(search))
-    created_at_ms = _event_created_at_ms_expression()
-    if date_from_ms is not None:
-        filters.append(created_at_ms >= date_from_ms)
-    if date_to_ms is not None:
-        filters.append(created_at_ms < date_to_ms)
-
-    total = (
-        int(
-            db.scalar(select(func.count()).select_from(SystemEvent).where(*filters))
-            or 0
-        )
-        if filters
-        else sum(source_counts.values())
-    )
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+    sources: Counter[str] = Counter()
+    levels: Counter[str] = Counter()
+    total = 0
+    selected = []
+    last_page = []
+    for event in read_log_events():
+        sources[event["source"]] += 1
+        levels[event["level"]] += 1
+        if level and event["level"] != normalize_event_level(level):
+            continue
+        if source and event["source"] != source:
+            continue
+        if search and search.strip().casefold() not in " ".join(str(event.get(key, "")) for key in ("id", "message", "action")).casefold():
+            continue
+        created = to_timestamp_ms(event.get("createdAt")) or 0
+        if date_from_ms is not None and created < date_from_ms:
+            continue
+        if date_to_ms is not None and created >= date_to_ms:
+            continue
+        if total % page_size == 0:
+            last_page = []
+        last_page.append(event)
+        if (page - 1) * page_size <= total < page * page_size:
+            selected.append(event)
+        total += 1
     total_pages = max(1, (total + page_size - 1) // page_size)
-    clamped_page = min(max(1, page), total_pages)
-    rows = db.scalars(
-        select(SystemEvent)
-        .where(*filters)
-        .order_by(SystemEvent.created_at.desc(), SystemEvent.id.desc())
-        .limit(page_size)
-        .offset((clamped_page - 1) * page_size)
-    ).all()
-    return SystemEventPageSnapshot(
-        events=[
-            {
-                "id": row.id,
-                "level": row.level,
-                "source": row.source,
-                "actorType": row.actor_type,
-                "actorId": row.actor_id,
-                "action": row.action,
-                "targetType": row.target_type,
-                "targetId": row.target_id,
-                "message": row.message,
-                "metadata": normalize_stored_event_metadata(
-                    row.metadata_json, event_id=row.id
-                ),
-                "createdAt": row.created_at,
-            }
-            for row in rows
-        ],
-        total=total,
-        page=clamped_page,
-        sources=[
-            {"source": source_name, "count": count}
-            for source_name, count in source_counts.items()
-        ],
-        levels=[
-            {"level": level_name, "count": count}
-            for level_name, count in sorted(level_counts.items())
-        ],
-        size_bytes=system_event_size_bytes(db),
-    )
+    if page > total_pages:
+        selected = last_page
+    return SystemEventPageSnapshot(selected, total, min(page, total_pages),
+        [{"source": key, "count": count} for key, count in sorted(sources.items())],
+        [{"level": key, "count": count} for key, count in sorted(levels.items())], log_size_bytes())
 
 
 def clear_all_system_events(db: Session) -> int:
-    result = typing_cast(
-        CursorResult[Any],
-        db.execute(delete(SystemEvent)),
-    )
-    return int(result.rowcount or 0)
+    return clear_log_files()

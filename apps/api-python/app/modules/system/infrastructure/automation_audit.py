@@ -37,10 +37,6 @@ class SqlAlchemyAutomationAudit:
             message=message,
             actor_type="user",
             actor_id=actor_id,
-            target_type="settings"
-            if action == "settings.updated"
-            else "automationGrant",
-            target_id=target_id,
         )
 
     def write(self, event: PreparedSystemEvent) -> None:

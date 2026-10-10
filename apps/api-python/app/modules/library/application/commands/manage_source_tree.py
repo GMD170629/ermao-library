@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.authorization import AuthorizationContext
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.commands.manage_ports import (
     ManageBookResourcePort,
     ManageFilesystemPort,
@@ -84,7 +85,6 @@ class DeleteSourceNode:
                 node = self._source_nodes.get(source_node_id)
                 if node is None:
                     return ManagementResult(ok=False, code="SOURCE_NODE_NOT_FOUND")
-                library_id = node.library_id
                 subtree = self._source_nodes.list_subtree_ids(source_node_id)
 
             for offset in range(0, len(subtree), self._asset_cleanup_batch_size):
@@ -114,12 +114,12 @@ class DeleteSourceNode:
                 self._source_nodes.delete_nodes((source_node_id,))
             self._log.emit(
                 "source_tree.delete.completed",
-                library_id=library_id,
                 stage="delete",
                 outcome="ok",
             )
             return ManagementResult(ok=True)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -165,6 +165,7 @@ class DeleteBookSources:
                         physical_kind=target.physical_kind,
                     )
                 except (OSError, ValueError) as error:
+                    capture_exception(error, persist=False)
                     raise SourceFileDeletionError(target.book_id) from error
 
             with self._uow.transaction():
@@ -184,7 +185,6 @@ class DeleteBookSources:
             for target in targets:
                 self._log.emit(
                     "book_source.delete.completed",
-                    library_id=target.library_id,
                     stage="delete_source",
                     outcome="ok",
                 )
@@ -192,7 +192,8 @@ class DeleteBookSources:
                 ok=True,
                 deleted_book_ids=unique_book_ids,
             )
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -225,12 +226,12 @@ class ChangeLibraryOrganizationMode:
                 self._import_tasks.replace_with_fresh_library_scan(library_id)
             self._log.emit(
                 "source_tree.organization_mode.changed",
-                library_id=library_id,
                 stage="mode_switch",
                 outcome="ok",
             )
             return ManagementResult(ok=True)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -263,12 +264,12 @@ class RelocateLibraryRoot:
                 self._libraries.update_root_path(library_id, resolved)
             self._log.emit(
                 "source_tree.root.relocated",
-                library_id=library_id,
                 stage="relocate",
                 outcome="ok",
             )
             return ManagementResult(ok=True)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -291,19 +292,17 @@ class EnableReadableResource:
                 resource = self._books_resources.get_resource(resource_id)
                 if resource is None:
                     return ManagementResult(ok=False, code="RESOURCE_NOT_FOUND")
-                library_id = resource.library_id
                 self._books_resources.set_enablement(
                     resource_id, ResourceEnablementState.ENABLED
                 )
             self._log.emit(
                 "readable_resource.enablement.enabled",
-                library_id=library_id,
-                resource_id=resource_id,
                 stage="enablement",
                 outcome="ok",
             )
             return ManagementResult(ok=True)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
 
@@ -326,18 +325,16 @@ class DisableReadableResource:
                 resource = self._books_resources.get_resource(resource_id)
                 if resource is None:
                     return ManagementResult(ok=False, code="RESOURCE_NOT_FOUND")
-                library_id = resource.library_id
                 self._books_resources.set_enablement(
                     resource_id, ResourceEnablementState.DISABLED
                 )
             self._log.emit(
                 "readable_resource.enablement.disabled",
-                library_id=library_id,
-                resource_id=resource_id,
                 stage="enablement",
                 outcome="ok",
             )
             return ManagementResult(ok=True)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise

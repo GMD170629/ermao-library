@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records
+
 """Real file-operation failures retain their observed cause through task state changes."""
 
 import errno
@@ -7,10 +9,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
 
 from app.infrastructure.exclusive_rename import exclusive_rename
-from app.models import SystemEvent
 from app.modules.library.application.file_move_worker import FileMoveWorker
 from app.modules.library.infrastructure.file_move_io import SystemMovePublication
 from app.modules.metadata.application.standard_writeback_maintenance import (
@@ -25,7 +25,7 @@ from tests.integration.modules.automation.test_move_execution import (
 
 def diagnostic_events(db, action):
     db.rollback()
-    return list(db.scalars(select(SystemEvent).where(SystemEvent.action == action)))
+    return [row for row in log_records() if row.action == action]
 
 
 def test_recovery_snapshot_rollback_failure_keeps_observation_and_secondary_cause(
@@ -60,8 +60,8 @@ def test_recovery_snapshot_rollback_failure_keeps_observation_and_secondary_caus
     secondary = diagnostic_events(db_session, "file_move.worker_failed")
     assert len(observed) == len(secondary) == 1
     details = secondary[0].metadata_json
-    assert details["parentDiagnosticId"] == observed[0].id
-    assert details["step"] == "release_recovery_snapshot"
+    assert "parentDiagnosticId" not in details
+    assert secondary[0].action == "file_move.worker_failed"
     assert details["diagnostics"]["rootCause"]["errno"] == errno.EIO
     assert "injected recovery rollback failure" in caplog.text
     assert store.execution("operation").stages == ("PREPARING",)
@@ -107,9 +107,9 @@ def test_exclusive_rename_failure_survives_conversion_and_is_queryable(
     assert len(events) == 1
     event = events[0]
     details = event.metadata_json
-    assert details["operationId"] == "operation"
-    assert details["targetOrdinal"] == 0
-    assert details["step"] == "publish_files"
+    assert "operationId" not in details
+    assert "targetOrdinal" not in details
+    assert "step" not in details
     assert details["diagnostics"]["rootCause"]["errno"] == error_number
     assert (
         details["diagnostics"]["rootCause"]["errorName"]
@@ -118,13 +118,13 @@ def test_exclusive_rename_failure_survives_conversion_and_is_queryable(
     assert details["diagnostics"]["directCause"]["message"] == str(
         OSError(error_number, os.strerror(error_number))
     )
-    assert event.id in caplog.text
+    assert event.message in caplog.text
     assert os.strerror(error_number) in caplog.text
     assert str(root) not in json.dumps(event.metadata_json)
     assert store.execution("operation").stages == ("RECOVERY_REQUIRED",)
 
 
-def test_reused_exception_for_two_targets_has_distinct_correlated_records(
+def test_reused_exception_for_two_targets_is_deduplicated_and_retains_task_outcomes(
     db_session, tmp_path, caplog
 ):
     actor, _, store = prepare(db_session, tmp_path, batch=True)
@@ -141,13 +141,10 @@ def test_reused_exception_for_two_targets_has_distinct_correlated_records(
 
     executor(db_session, store, Files(), lambda _: actor).execute("operation")
     events = diagnostic_events(db_session, "file_move.target_failed")
-    assert len(events) == 2
-    assert len({event.id for event in events}) == 2
-    assert {event.metadata_json["targetOrdinal"] for event in events} == {
-        0,
-        1,
-    }
-    assert all(event.id in caplog.text for event in events)
+    assert len(events) == 1
+    assert events[0].id
+    assert all("targetOrdinal" not in event.metadata_json for event in events)
+    assert all(event.message in caplog.text for event in events)
     assert store.execution("operation").stages == (
         "RECOVERY_REQUIRED",
         "RECOVERY_REQUIRED",
@@ -184,14 +181,14 @@ def test_rollback_failure_does_not_erase_original_publication_diagnostic(
     original = diagnostic_events(db_session, "file_move.target_failed")
     secondary = diagnostic_events(db_session, "file_move.rollback_failed")
     assert len(original) == len(secondary) == 1
-    assert secondary[0].metadata_json["parentDiagnosticId"] == original[0].id
+    assert "parentDiagnosticId" not in secondary[0].metadata_json
     assert (
         original[0].metadata_json["diagnostics"]["rootCause"]["errno"] == errno.ENOSPC
     )
     assert "injected rollback connection failure" in json.dumps(
         secondary[0].metadata_json
     )
-    assert original[0].id in caplog.text and secondary[0].id in caplog.text
+    assert original[0].message in caplog.text and secondary[0].message in caplog.text
 
 
 def test_writeback_backup_cleanup_failure_is_logged_before_retry_state(
@@ -224,7 +221,7 @@ def test_writeback_backup_cleanup_failure_is_logged_before_retry_state(
     events = diagnostic_events(db_session, "standard_write.backup_cleanup_failed")
     assert store.failed is True and len(events) == 1
     details = events[0].metadata_json
-    assert details["operationId"] == "write-operation"
-    assert details["step"] == "clear_backup"
+    assert "operationId" not in details
+    assert "step" not in details
     assert details["diagnostics"]["rootCause"]["errno"] == errno.EACCES
-    assert events[0].id in caplog.text
+    assert events[0].message in caplog.text

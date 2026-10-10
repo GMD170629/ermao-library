@@ -11,12 +11,7 @@ from app.models import (
     LibraryResourceAsset,
     LibrarySourceNode,
     OrganizeJob,
-    SystemEvent,
 )
-from app.modules.system.application.projections import (
-    summarize_diagnostic_metadata,
-)
-from app.modules.system.infrastructure.events import normalize_stored_event_metadata
 
 
 def management_card_counts(db: Session) -> dict[str, int]:
@@ -77,24 +72,5 @@ def management_card_counts(db: Session) -> dict[str, int]:
 
 
 def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]:
-    rows = db.scalars(
-        select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)
-    ).all()
-    return [
-        {
-            "id": row.id,
-            "level": row.level,
-            "source": row.source,
-            "actorType": row.actor_type,
-            "actorId": row.actor_id,
-            "action": row.action,
-            "targetType": row.target_type,
-            "targetId": row.target_id,
-            "message": row.message,
-            "metadata": summarize_diagnostic_metadata(
-                normalize_stored_event_metadata(row.metadata_json, event_id=row.id)
-            ),
-            "createdAt": row.created_at,
-        }
-        for row in rows
-    ]
+    from app.modules.system.infrastructure.events import list_system_events_page
+    return list_system_events_page(db, page=1, page_size=limit).events

@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.exception_diagnostics import capture_exception
 from app.models import (
     LibraryBookFacet,
     LibraryFacet,
@@ -211,6 +212,7 @@ class SqlAlchemyLibraryOperationManagement(LibraryOperationManagementGateway):
         try:
             inverse = json.loads(operation.inverse_json)
         except (json.JSONDecodeError, TypeError) as error:
+            capture_exception(error, persist=False)
             raise InvalidLibraryOperationError("撤销快照格式无效") from error
         if not isinstance(inverse, dict):
             raise InvalidLibraryOperationError("撤销快照格式无效")

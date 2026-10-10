@@ -1,4 +1,9 @@
-from datetime import UTC, datetime, timedelta
+import json
+import logging
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from datetime import datetime, timedelta
+from multiprocessing import get_context
+from pathlib import Path
 
 import pytest
 from sqlalchemy import event as sqlalchemy_event
@@ -12,215 +17,200 @@ from app.bootstrap.system import (
     persist_system_settings_update,
     prepare_system_event,
     record_system_event,
-    set_max_event_bytes,
     system_event_size_bytes,
     upsert_setting,
     upsert_settings,
-    write_prepared_system_events,
+)
+from app.core.exception_diagnostics import (
+    capture_exception,
+    exception_diagnostic_boundary,
+    record_exception,
 )
 from app.models.settings import SystemEvent
+from app.modules.system.infrastructure import log_files
+from app.modules.system.infrastructure.events import (
+    get_system_event,
+    list_system_events_page,
+)
 
 
-def test_record_system_event_normalizes_level_and_serializes_metadata(db_session):
-    event_id = record_system_event(
-        db_session,
-        source="import",
-        action="scan.completed",
-        level="warn",
-        message="扫描完成",
-        metadata={"filesScanned": 3, "path": "/books"},
-    )
-
-    event = db_session.get(SystemEvent, event_id)
-    assert event is not None
-    assert event.level == "warning"
-    assert event.source == "import"
-    assert event.metadata_json == {"filesScanned": 3, "path": "/books"}
-
-
-def test_clear_system_events_removes_all_levels_and_audit_events(db_session):
-    for level, action in (
-        ("info", "scan.completed"),
-        ("warning", "scan.skipped"),
-        ("error", "scan.failed"),
-        ("info", "library.deleted"),
-    ):
-        record_system_event(
-            db_session,
-            source="system",
-            action=action,
-            level=level,
-            message=action,
-        )
+def test_default_records_only_error_without_database_statements(db_session):
+    statements = []
+    sqlalchemy_event.listen(db_session.bind, "before_cursor_execute", lambda *args: statements.append(args[2]))
+    for level in ("debug", "info", "warning", "error"):
+        record_system_event(db_session, level=level, source="system", action=level, message=level)
+    assert not list(log_files.read_log_events())
     db_session.commit()
+    assert [event["level"] for event in log_files.read_log_events()] == ["error"]
+    assert statements == []
+    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert log_files.log_settings() == {"retentionDays": 3, "minimumLevel": "error"}
 
+
+def test_configured_levels_and_full_unicode_messages(db_session):
+    log_files.save_log_settings(3, "debug")
+    message = "秘密-test-token=/private/path\n" * 30_000
+    ids = [record_system_event(db_session, level=level, source="system", action=level,
+        message=message, metadata={"payload": message}) for level in ("debug", "info", "warn", "error")]
+    db_session.commit()
+    assert len(list(log_files.log_directory().glob("api/*.jsonl"))) == 1
+    assert [get_system_event(db_session, item)["level"] for item in ids] == ["debug", "info", "warning", "error"]
+    for item in ids:
+        assert get_system_event(db_session, item)["message"] == message
+        assert get_system_event(db_session, item)["metadata"]["payload"] == message
+    assert system_event_size_bytes(db_session) > len(message)
     assert clear_system_events(db_session) == 4
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
-    assert clear_system_events(db_session) == 0
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert list(log_files.read_log_events()) == []
 
 
-def test_system_event_size_reads_allocated_table_pages(db_session):
-    initial_size = system_event_size_bytes(db_session)
-    record_system_event(
-        db_session,
-        source="system",
-        action="large",
-        message="large event",
-        metadata={"payload": "x" * 60_000},
-    )
-    expanded_size = system_event_size_bytes(db_session)
-    assert expanded_size > initial_size
-    assert expanded_size == db_session.connection().exec_driver_sql(
-        "SELECT pgsize FROM dbstat WHERE name = 'SystemEvent' AND aggregate = 1"
-    ).scalar_one()
+def test_audit_commit_rollback_and_savepoint_semantics(db_session):
+    log_files.save_log_settings(3, "info")
+    def write(message):
+        return record_system_event(db_session, source="system", action="audit", message=message)
+    root_id = write("root")
+    nested = db_session.begin_nested()
+    rolled_back_id = write("nested rollback")
+    nested.rollback()
+    nested = db_session.begin_nested()
+    committed_id = write("nested commit")
+    nested.commit()
+    assert list(log_files.read_log_events()) == []
+    db_session.commit()
+    assert {row["id"] for row in log_files.read_log_events()} == {root_id, committed_id}
+    assert get_system_event(db_session, rolled_back_id) is None
+    write("rollback")
     db_session.rollback()
-    assert system_event_size_bytes(db_session) == initial_size
+    assert {row["id"] for row in log_files.read_log_events()} == {root_id, committed_id}
+    write("close")
+    db_session.close()
+    assert {row["id"] for row in log_files.read_log_events()} == {root_id, committed_id}
 
 
-def test_prepared_system_events_use_one_write_and_do_not_commit(db_session):
-    prepared = [
-        prepare_system_event(
-            source="system",
-            action=f"batch.{index}",
-            message=f"Batch {index}",
-            metadata={"index": index},
-        )
-        for index in range(25)
-    ]
-    statements: list[str] = []
-
-    def capture_statement(conn, cursor, statement, parameters, context, executemany):
-        statements.append(statement.strip().upper())
-
-    sqlalchemy_event.listen(db_session.bind, "before_cursor_execute", capture_statement)
-    try:
-        event_ids = write_prepared_system_events(db_session, prepared)
-    finally:
-        sqlalchemy_event.remove(
-            db_session.bind, "before_cursor_execute", capture_statement
-        )
-
-    assert event_ids == [item.id for item in prepared]
-    assert sum(statement.startswith("INSERT") for statement in statements) == 1
-    assert db_session.in_transaction()
-    db_session.rollback()
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+def test_retention_counts_calendar_days_including_today(db_session):
+    today = datetime.now().astimezone().date()
+    for runtime in ("api", "web"):
+        directory = log_files.log_directory() / runtime
+        directory.mkdir(parents=True)
+        for age in range(5):
+            (directory / f"{today - timedelta(days=age)}.jsonl").write_text("", encoding="utf-8")
+        (directory / "unrelated.txt").write_text("keep", encoding="utf-8")
+    result = maintain_system_events(db_session)
+    assert result["deleted"] == 4
+    assert len(list(log_files.log_directory().glob("*/*.jsonl"))) == 6
+    assert maintain_system_events(db_session, 1)["deleted"] == 4
+    assert len(list(log_files.log_directory().glob("*/*.jsonl"))) == 2
+    assert len(list(log_files.log_directory().glob("*/unrelated.txt"))) == 2
 
 
-def test_prune_system_events_deletes_oldest_without_level_priority(db_session):
-    started_at = datetime(2026, 1, 1, tzinfo=UTC)
-    prepared = [
-        prepare_system_event(
-            event_id=f"event-{index}",
-            created_at=started_at + timedelta(minutes=index),
-            source="library",
-            action="deleted" if index in (0, 3) else "scan.file.detected",
-            level="error" if index in (0, 3) else "info",
-            message="日志事件",
-            metadata={"payload": "x" * 60_000},
-        )
-        for index in range(4)
-    ]
-    write_prepared_system_events(db_session, prepared)
+@pytest.mark.parametrize("days", [0, -1, 366, True, 2.5])
+def test_invalid_retention_does_not_replace_settings(days):
+    with pytest.raises(ValueError):
+        log_files.save_log_settings(days, "error")
+    assert log_files.log_settings()["retentionDays"] == 3
+
+
+def test_errors_persist_without_opening_database_and_deduplicate():
+    def forbidden_factory():
+        raise AssertionError("A log must not open a database session")
+    message = "raw-secret-test" * 20_000
+    logger = logging.getLogger("test.daily")
+    with exception_diagnostic_boundary(logger, "test.failed", session_factory=forbidden_factory):
+        try:
+            raise ValueError(message)
+        except ValueError as error:
+            capture_exception(error)
+            record_exception(logger, "test.failed", error, session_factory=forbidden_factory)
+            record_exception(logger, "test.failed", error, session_factory=forbidden_factory)
+        assert list(log_files.read_log_events()) == []
+    rows = list(log_files.read_log_events())
+    assert len(rows) == 1
+    assert rows[0]["message"] == message
+    assert message in rows[0]["metadata"]["diagnostics"]["traceback"]
+
+
+def test_required_missing_file_is_an_error_and_optional_probe_is_explicit_debug():
+    capture_exception(FileNotFoundError("required source missing"))
+    capture_exception(FileNotFoundError("optional sidecar missing"), level="debug")
+    assert [row["message"] for row in log_files.read_log_events()] == ["required source missing"]
+    log_files.save_log_settings(3, "debug")
+    capture_exception(FileNotFoundError("optional sidecar missing"), level="debug")
+    assert {row["level"] for row in log_files.read_log_events()} == {"debug", "error"}
+
+
+def test_file_outlet_failure_cannot_change_business_commit(db_session, monkeypatch, capsys):
+    def broken_lock():
+        raise OSError("test disk full")
+    monkeypatch.setattr(log_files, "log_file_lock", broken_lock)
+    prepared = prepare_system_event(source="system", action="audit", message="original raw error", level="error")
+    persist_system_settings_update(db_session, setting_values={"committed": True}, clear_keys=(), event=prepared)
+    assert get_setting(db_session, "committed") is True
+    stderr = capsys.readouterr().err
+    assert "test disk full" in stderr and "original raw error" in stderr
+
+
+def test_parallel_append_preserves_complete_records(db_session):
+    from app.modules.system.infrastructure.events import event_record
+    def write(index):
+        return log_files.append_log_event(event_record(prepare_system_event(
+            source="system", action="parallel", level="error", message=f"{index}:" + "长堆栈\n" * 20_000)))
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        assert all(workers.map(write, range(12)))
+    rows = list(log_files.read_log_events())
+    assert len(rows) == 12
+    assert len({row["id"] for row in rows}) == 12
+    assert all(row["message"].endswith("长堆栈\n" * 20_000) for row in rows)
+
+
+def _append_from_process(storage_root: str, index: int) -> bool:
+    from app.modules.system.infrastructure.events import event_record
+
+    log_files.configure_log_directory(Path(storage_root))
+    return log_files.append_log_event(event_record(prepare_system_event(
+        source="worker" if index % 2 else "api", action="process", level="error",
+        message=f"{index}:" + "完整堆栈\n" * 20_000,
+    )))
+
+
+def test_api_worker_processes_share_one_complete_daily_file():
+    root = str(log_files.log_directory().parent)
+    with ProcessPoolExecutor(max_workers=3, mp_context=get_context("spawn")) as pool:
+        assert all(pool.map(_append_from_process, [root] * 9, range(9)))
+    rows = list(log_files.read_log_events())
+    assert len(rows) == len({row["id"] for row in rows}) == 9
+    assert {row["source"] for row in rows} == {"api", "worker"}
+    assert all(row["message"].endswith("完整堆栈\n" * 20_000) for row in rows)
+    assert len(list(log_files.log_directory().glob("api/*.jsonl"))) == 1
+
+
+def test_midnight_switches_file_and_first_write_prunes_expired_days(monkeypatch):
+    current = datetime(2026, 10, 10, 23, 59, 59).astimezone()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return current
+
+    monkeypatch.setattr(log_files, "datetime", Clock)
+    for index in range(4):
+        assert log_files.append_log_event({"id": str(index), "level": "error", "message": "full"})
+        current += timedelta(days=1)
+    files = sorted(path.name for path in log_files.log_directory().glob("api/*.jsonl"))
+    assert files == ["2026-10-11.jsonl", "2026-10-12.jsonl", "2026-10-13.jsonl"]
+
+
+def test_file_query_filters_paginates_and_reads_web_records(db_session):
+    log_files.save_log_settings(3, "debug")
+    for number in range(7):
+        record_system_event(db_session, source="system", action="test", level="error", message=f"failure {number}")
     db_session.commit()
-
-    result = maintain_system_events(db_session, max_bytes=100_000)
-
-    assert result["deleted"] == 2
-    assert db_session.get(SystemEvent, "event-0") is None
-    assert db_session.get(SystemEvent, "event-1") is None
-    assert db_session.get(SystemEvent, "event-2") is not None
-    assert db_session.get(SystemEvent, "event-3") is not None
-
-
-def test_prune_system_events_rounds_up_odd_row_count(db_session):
-    for index in range(3):
-        record_system_event(
-            db_session,
-            source="library",
-            action="deleted",
-            level="error",
-            message=f"关键审计事件 {index}",
-            metadata={"payload": "x" * 60_000},
-        )
-    db_session.commit()
-
-    result = maintain_system_events(db_session, max_bytes=64_000)
-
-    assert result["deleted"] == 2
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 1
-
-
-def test_prune_system_events_removes_half_the_rows(db_session):
-    for index in range(12):
-        record_system_event(
-            db_session,
-            source="import",
-            action=f"scan.file.detected.{index}",
-            message="普通扫描事件",
-            metadata={"payload": "x" * 60_000},
-        )
-    db_session.commit()
-
-    max_bytes = 500_000
-    result = maintain_system_events(db_session, max_bytes=max_bytes)
-
-    assert result["deleted"] == 6
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 6
-    assert get_setting(db_session, "events.lastPrunedAt") is not None
-
-
-def test_prune_system_events_at_exact_limit_rounds_up_without_length_queries(
-    db_session,
-):
-    for index in range(5):
-        record_system_event(
-            db_session,
-            source="system",
-            action=f"test.{index}",
-            message="event",
-            metadata={"payload": "x" * 60_000},
-        )
-    db_session.commit()
-    current_size = system_event_size_bytes(db_session)
-    assert maintain_system_events(db_session, max_bytes=current_size + 1)["deleted"] == 0
-
-    statements: list[str] = []
-
-    def capture_statement(conn, cursor, statement, parameters, context, executemany):
-        statements.append(statement.lower())
-
-    sqlalchemy_event.listen(db_session.bind, "before_cursor_execute", capture_statement)
-    try:
-        result = maintain_system_events(db_session, max_bytes=current_size)
-    finally:
-        sqlalchemy_event.remove(
-            db_session.bind, "before_cursor_execute", capture_statement
-        )
-
-    assert result["deleted"] == 3
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 2
-    assert not any("length(" in statement for statement in statements)
-
-
-def test_updating_capacity_defers_pruning_to_maintenance_worker(db_session):
-    for index in range(20):
-        record_system_event(
-            db_session,
-            source="import",
-            action=f"scan.payload.{index}",
-            message="大体积日志",
-            metadata={"payload": "x" * 64_000},
-        )
-    db_session.commit()
-
-    set_max_event_bytes(db_session, 1 * 1024 * 1024)
-    db_session.commit()
-
-    assert system_event_size_bytes(db_session) > 1 * 1024 * 1024
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 20
-    assert get_setting(db_session, "events.lastPrunedAt") is None
+    page = list_system_events_page(db_session, page=2, page_size=3, search="failure", level="error")
+    assert page.total == 7 and len(page.events) == 3 and page.page == 2
+    assert len(list_system_events_page(db_session, page=99, page_size=3).events) == 1
+    latest = page.events[0] | {"id": "web-only", "source": "web", "createdAt": datetime.now().astimezone().isoformat()}
+    web = log_files.log_directory() / "web"
+    web.mkdir()
+    (web / f"{datetime.now().astimezone().date()}.jsonl").write_text(json.dumps(latest) + "\n", encoding="utf-8")
+    assert get_system_event(db_session, "web-only")["source"] == "web"
 
 
 def test_system_setting_kv_round_trip(db_session):
@@ -275,7 +265,7 @@ def test_system_settings_and_audit_event_commit_atomically(db_session, monkeypat
     assert get_setting(db_session, "atomic.setting") is None
 
 
-def test_system_settings_and_event_use_two_bounded_set_writes(db_session):
+def test_system_settings_only_write_business_settings_to_database(db_session):
     prepared_event = prepare_system_event(
         source="system",
         action="settings.updated",
@@ -306,10 +296,10 @@ def test_system_settings_and_event_use_two_bounded_set_writes(db_session):
             capture_statement,
         )
 
-    assert len(statements) == 2
+    assert len(statements) == 1
 
 
-def test_diagnostic_metadata_retains_causes_and_all_correlation_when_clipped():
+def test_diagnostic_metadata_retains_complete_causes_without_correlation():
     import errno
 
     from app.modules.system.domain.events import prepare_event_metadata
@@ -344,115 +334,18 @@ def test_diagnostic_metadata_retains_causes_and_all_correlation_when_clipped():
         },
     }
     clipped = prepare_event_metadata(metadata)
-    assert clipped["truncated"] is True
+    assert "truncated" not in clipped
+    assert clipped["diagnostics"]["traceback"] == metadata["diagnostics"]["traceback"]
     for key in (
         "requestId",
         "taskId",
         "operationId",
-        "targetOrdinal",
-        "attempt",
         "parentDiagnosticId",
+        "targetOrdinal",
     ):
-        assert clipped[key] == metadata[key]
+        assert key not in clipped
     assert clipped["diagnostics"]["directCause"] == cause
     assert clipped["diagnostics"]["rootCause"] == cause
     assert clipped["diagnostics"]["contextProvided"] is True
     assert clipped["diagnostics"]["contextsTruncated"] is False
     assert clipped["diagnostics"]["contexts"] == metadata["diagnostics"]["contexts"]
-
-
-def test_corrupt_historical_metadata_and_capacity_are_diagnosed(db_session, caplog):
-    import logging
-
-    from sqlalchemy.orm import sessionmaker
-
-    from app.core.exception_diagnostics import (
-        deferred_exception_persistence,
-        persist_exception_diagnostic,
-    )
-    from app.models.settings import SystemSetting
-    from app.modules.system.domain.events import (
-        DEFAULT_MAX_EVENT_BYTES,
-        LOG_MAX_BYTES_SETTING,
-    )
-    from app.modules.system.infrastructure.events import (
-        configured_max_event_bytes,
-        get_system_event,
-    )
-
-    db_session.add(
-        SystemEvent(
-            id="historic-broken",
-            source="system",
-            action="legacy",
-            message="legacy",
-            metadata_json="not valid JSON",
-        )
-    )
-    db_session.add(SystemSetting(key=LOG_MAX_BYTES_SETTING, value="invalid JSON"))
-    db_session.commit()
-    factory = sessionmaker(bind=db_session.get_bind())
-    with deferred_exception_persistence() as pending:
-        event = get_system_event(db_session, "historic-broken")
-        assert (
-            event["metadata"]["diagnosticStatus"]
-            == "HISTORICAL_INFORMATION_UNAVAILABLE"
-        )
-        assert configured_max_event_bytes(db_session) == DEFAULT_MAX_EVENT_BYTES
-    db_session.rollback()
-    for snapshot in pending:
-        persist_exception_diagnostic(logging.getLogger(__name__), snapshot, factory)
-    assert len(pending) == 2
-    for snapshot in pending:
-        event = db_session.get(SystemEvent, snapshot.diagnostic_id)
-        assert event is not None
-        assert (
-            event.metadata_json["diagnostics"]["directException"]["type"]
-            == "json.decoder.JSONDecodeError"
-        )
-    assert "JSONDecodeError" in caplog.text
-
-
-def test_global_diagnostic_writer_with_malformed_retention_is_finite(
-    db_session, monkeypatch
-):
-    import logging
-
-    from sqlalchemy.orm import sessionmaker
-
-    from app.core import exception_diagnostics
-    from app.models.settings import SystemSetting
-    from app.modules.system.domain.events import (
-        DEFAULT_MAX_EVENT_BYTES,
-        LOG_MAX_BYTES_SETTING,
-    )
-    from app.modules.system.infrastructure.events import configured_max_event_bytes
-
-    db_session.add(SystemSetting(key=LOG_MAX_BYTES_SETTING, value="not a JSON number"))
-    db_session.commit()
-    factory = sessionmaker(bind=db_session.get_bind())
-    monkeypatch.setattr(exception_diagnostics, "_session_factory", factory)
-    diagnostic_id = exception_diagnostics.record_exception(
-        logging.getLogger(__name__),
-        "retention.original_failure",
-        ValueError("observed independent failure"),
-    )
-    with factory() as db:
-        assert configured_max_event_bytes(db) == DEFAULT_MAX_EVENT_BYTES
-    with factory() as db:
-        events = db.scalars(select(SystemEvent)).all()
-        assert len(events) == 2
-        original = next(event for event in events if event.id == diagnostic_id)
-        assert (
-            original.metadata_json["diagnostics"]["message"]
-            == "observed independent failure"
-        )
-        capacity = next(
-            event
-            for event in events
-            if event.action == "system.log_capacity_parse_failed"
-        )
-        assert (
-            capacity.metadata_json["diagnostics"]["directException"]["type"]
-            == "json.decoder.JSONDecodeError"
-        )

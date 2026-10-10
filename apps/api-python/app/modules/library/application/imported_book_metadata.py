@@ -9,6 +9,7 @@ from app.contracts.library_layout import LibraryOrganizationMode
 from app.contracts.local_metadata import LocalMetadataSource
 from app.contracts.local_metadata_snapshot import LocalMetadataObservation
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.resource_cover import ResourceCoverUnitOfWork
 from app.modules.library.application.source_node_commands import (
     PreparedSourceNodeCover,
@@ -102,7 +103,8 @@ class IdentifyImportedBook:
                 if book_run_current is not None
                 else self._repository.still_current(snapshot)
             )
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._discard_stale(prepared)
             raise
         if not current:
@@ -159,13 +161,15 @@ class IdentifyImportedBook:
                 snapshot, result, prepared.stored_path if prepared else None
             )
             self._uow.commit()
-        except _StaleIdentificationError:
+        except _StaleIdentificationError as _caught_error:
             # diagnostics-control-flow: A changed import snapshot is an expected CAS rejection, not an operation failure.
+            capture_exception(_caught_error)
             self._uow.rollback()
             if published is not None:
                 self._covers.revert(published)
             return "stale"
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             if published is not None:
                 self._covers.revert(published)

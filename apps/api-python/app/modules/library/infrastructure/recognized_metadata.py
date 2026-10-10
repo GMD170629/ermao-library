@@ -20,6 +20,7 @@ from app.core.authorization import (
     book_visibility_predicate,
     resource_visibility_predicate,
 )
+from app.core.exception_diagnostics import capture_exception
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
@@ -343,6 +344,7 @@ class SafeRemoteCoverDownloader(RemoteCoverDownloadPort):
                     raise ValueError("remote cover is not an image")
                 content = response.read(_MAX_COVER_BYTES + 1)
         except (HTTPError, OSError, ValueError) as exc:
+            capture_exception(exc, persist=False)
             raise ValueError("remote cover could not be downloaded") from exc
         if not content or len(content) > _MAX_COVER_BYTES:
             raise ValueError("remote cover exceeds the supported size")
@@ -381,6 +383,7 @@ class FilesystemRecognizedCoverPublication(RecognizedCoverPublicationPort):
             ValueError,
             Image.DecompressionBombError,
         ) as exc:
+            capture_exception(exc)
             temporary_path.unlink(missing_ok=True)
             raise ValueError("remote cover could not be validated") from exc
         final_path = cover_root / f"{target_id}{suffix}"
@@ -392,7 +395,8 @@ class FilesystemRecognizedCoverPublication(RecognizedCoverPublicationPort):
             os.replace(final_path, backup_path)
         try:
             os.replace(temporary_path, final_path)
-        except OSError:
+        except OSError as _caught_error:
+            capture_exception(_caught_error)
             if backup_path is not None and backup_path.exists():
                 os.replace(backup_path, final_path)
             temporary_path.unlink(missing_ok=True)

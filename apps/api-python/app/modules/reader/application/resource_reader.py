@@ -11,6 +11,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyFormat,
     require_reader_safety_format_policy,
 )
+from app.core.exception_diagnostics import capture_exception
 from app.modules.reader.application.dto import (
     ExactReaderLocationKind,
     ReaderAccessScope,
@@ -266,7 +267,8 @@ class ResourceReaderService:
                     raise ReaderProgressBaseRevisionInvalid
                 raise ReaderProgressRevisionConflict(current=current)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return progress
@@ -291,7 +293,8 @@ class ResourceReaderService:
                 now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return progress
@@ -359,7 +362,8 @@ class ResourceReaderService:
                 now=now,
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return _external_progress_dto(progress)
@@ -401,7 +405,8 @@ class ResourceReaderService:
                 now=_aware_utc(self._clock.now()),
             )
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return result

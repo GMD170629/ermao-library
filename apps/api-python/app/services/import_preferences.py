@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models.settings import SystemSetting
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.domain.ignore_rules import (
@@ -61,8 +61,9 @@ def _json_value(value: Any) -> Any:
         return value
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as _caught_error:
         # diagnostics-control-flow: String preferences may be plain strings instead of JSON values.
+        capture_exception(_caught_error)
         return value
 
 
@@ -105,8 +106,8 @@ def load_raw_import_preferences_projection(
             (str(key), None if value is None else str(value)) for key, value in rows
         )
     except SQLAlchemyError as error:
-        record_exception(logging.getLogger(__name__), "services.import_preferences.load_raw_import_preferences_projection.failed", error,
-                         context={"step": "load_raw_import_preferences_projection"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.import_preferences.load_raw_import_preferences_projection.failed", error)
         return RawImportPreferencesProjection(available=False)
     return RawImportPreferencesProjection(available=True, rows=copied_rows)
 

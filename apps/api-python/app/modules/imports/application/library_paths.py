@@ -9,6 +9,7 @@ from pathlib import Path, PurePath
 from typing import Any
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 
 
 class InvalidTargetDirectory(ValueError):
@@ -35,8 +36,9 @@ def is_inside_path(root: Path, target: Path) -> bool:
     try:
         target.relative_to(root)
         return True
-    except ValueError:
+    except ValueError as _caught_error:
         # diagnostics-control-flow: relative_to is the containment predicate; outside paths return False.
+        capture_exception(_caught_error)
         return False
 
 
@@ -54,7 +56,6 @@ def library_directory_tree_node(
         diagnostic = diagnostics.prepare(
             failure,
             event="library.directory.rejected",
-            context={"step": "validate_directory"},
         )
         diagnostics.persist(diagnostic)
         return None, message, status
@@ -113,10 +114,10 @@ def library_directory_tree_node(
     try:
         real_target = target.resolve()
     except (OSError, RuntimeError) as error:
+        capture_exception(error, persist=False)
         diagnostic = diagnostics.prepare(
             error,
             event="library.directory.resolve_failed",
-            context={"step": "resolve_directory"},
         )
         diagnostics.persist(diagnostic)
         return None, "路径不存在或不可读", 404
@@ -146,10 +147,10 @@ def library_directory_tree_node(
                 try:
                     real_child = child.resolve()
                 except (OSError, RuntimeError) as resolution_error:
+                    capture_exception(resolution_error, persist=False)
                     diagnostic = diagnostics.prepare(
                         resolution_error,
                         event="library.directory.child_resolve_failed",
-                        context={"step": "resolve_child"},
                     )
                     diagnostics.persist(diagnostic)
                     continue
@@ -166,10 +167,10 @@ def library_directory_tree_node(
                     }
                 )
         except OSError as failure:
+            capture_exception(failure, persist=False)
             diagnostic = diagnostics.prepare(
                 failure,
                 event="library.directory.list_failed",
-                context={"step": "list_directory"},
             )
             diagnostics.persist(diagnostic)
             readable = False
@@ -183,7 +184,6 @@ def library_directory_tree_node(
         diagnostic = diagnostics.prepare(
             failure,
             event="library.directory.unreadable",
-            context={"step": "check_directory_read_access"},
         )
         diagnostics.persist(diagnostic)
         error = "目录不可读取"
@@ -213,6 +213,7 @@ def target_directory_from_path(target_path: Any, action_label: str) -> Path:
     try:
         real_target = target.resolve()
     except OSError as error:
+        capture_exception(error, persist=False)
         raise InvalidTargetDirectory(f"所选{action_label}目录不存在或不可读") from error
     if not real_target.exists() or not real_target.is_dir():
         raise InvalidTargetDirectory(f"所选{action_label}目录不存在或不可读")

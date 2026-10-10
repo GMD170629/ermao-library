@@ -6,6 +6,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Literal
 
+from app.core.exception_diagnostics import capture_exception
+
 MetadataTarget = Literal["book", "resource", "source_node"]
 MetadataValue = str | float | bool | None | tuple[str, ...]
 
@@ -94,6 +96,7 @@ def validate_value(field: MetadataField, value: MetadataValue) -> MetadataValue:
         try:
             parsed = datetime.fromisoformat(value)
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise MetadataPatchError("INVALID_FIELD_VALUE") from error
         if parsed.tzinfo is None:
             raise MetadataPatchError("DATE_TIMEZONE_REQUIRED")

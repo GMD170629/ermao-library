@@ -13,6 +13,7 @@ from pypdf.generic import (
 )
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.pdf_embedded_metadata import (
     XMP_BYTES_LIMIT,
     PdfXmpDecodeError,
@@ -34,6 +35,7 @@ def _xmp_bytes(value: object) -> bytes | None:
     try:
         return decode_pdf_xmp_stream(value)
     except PdfXmpDecodeError as error:
+        capture_exception(error, persist=False)
         raise StandardMetadataError(error.code) from error
 
 

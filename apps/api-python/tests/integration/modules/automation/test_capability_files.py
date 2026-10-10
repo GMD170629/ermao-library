@@ -1,3 +1,5 @@
+from tests.support.log_events import log_records
+
 """Standard source deletion and replacement preserve task ownership and outcomes."""
 
 import errno
@@ -15,7 +17,7 @@ from app.bootstrap.automation import (
 )
 from app.contracts.automation_upload import UploadSpec
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
-from app.models import FileDeletePlanRow, Library, LibraryImportTask, SystemEvent
+from app.models import FileDeletePlanRow, Library, LibraryImportTask
 from app.modules.automation.application.settings import AutomationServiceSettings
 from app.modules.automation.domain.access import AutomationAccessError, Scope
 from app.modules.library.domain.file_moves import FileMoveError
@@ -157,14 +159,9 @@ def test_delete_crash_after_unlink_does_not_replay_or_touch_new_source(
     assert result["targets"][0]["stage"] == "DELETING"
     assert (root / "allowed/book.cbz").read_bytes() == b"new same name"
     assert list(db_session.scalars(select(LibraryImportTask))) == []
-    event = db_session.scalar(
-        select(SystemEvent).where(
-            SystemEvent.action == "file_delete.previous_result_unavailable",
-            SystemEvent.target_id == plan["plan_id"],
-        )
-    )
-    assert event is not None and event.id in caplog.text
-    assert event.metadata_json["step"] == "inspect_recovery_state"
+    event = next(iter([row for row in log_records() if row.action == 'file_delete.previous_result_unavailable']), None)
+    assert event is not None and event.message in caplog.text
+    assert "step" not in event.metadata_json
     assert event.metadata_json["diagnostics"]["causeStatus"] == "NOT_PROVIDED"
     assert (
         "previous deletion result was not provided"
@@ -320,10 +317,8 @@ def test_delete_failure_retains_diagnostics_and_is_not_retried(
     monkeypatch.setattr(service.files.files.filesystem, "delete_source", denied)
     result = service.execute(access, plan["plan_id"])
     assert result["status"] == "RECOVERY_REQUIRED"
-    event = db_session.scalar(
-        select(SystemEvent).where(SystemEvent.action == "file_delete.target_failed")
-    )
-    assert event.metadata_json["step"] == "delete_files"
+    event = next(iter([row for row in log_records() if row.action == 'file_delete.target_failed']), None)
+    assert "step" not in event.metadata_json
     assert event.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EACCES
     service.execute(access, plan["plan_id"])
     assert calls == 1

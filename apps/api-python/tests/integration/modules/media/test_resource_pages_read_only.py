@@ -28,6 +28,8 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
 )
+from app.modules.system.infrastructure.log_files import save_log_settings
+from tests.support.log_events import log_records
 from tests.support.sqlalchemy import StatementRecorder
 
 
@@ -190,6 +192,7 @@ def test_missing_comic_page_index_reads_archive_without_writing_while_writer_is_
 
     try:
         with TestClient(app) as client:
+            save_log_settings(3, "warning")
             login = client.post(
                 "/api/auth/login",
                 json={
@@ -226,16 +229,14 @@ def test_missing_comic_page_index_reads_archive_without_writing_while_writer_is_
             assert page.status_code == 404
             assert list_elapsed < 0.75
             assert page_elapsed < 0.75
-            # A real 404 has a diagnostic write; archive indexing itself never
-            # mutates resource/navigation rows while the writer owns SQLite.
-            assert recorder.dml_count == len(writes) == 1
-            assert all(statement.startswith('INSERT INTO "SystemEvent"') for statement in writes)
-            diagnostic_id = page.headers["X-Error-Id"]
-            assert diagnostic_id in caplog.text
+            # A real 404 is written to a file while the SQLite writer stays held.
+            assert recorder.dml_count == len(writes) == 0
+            assert any("HTTP 404" in row.message for row in log_records())
+            assert "X-Error-Id" not in page.headers
             assert "HTTP 404" in caplog.text
             storage_fallback = capsys.readouterr().err
-            assert diagnostic_id in storage_fallback
-            assert "SQLITE_BUSY" in storage_fallback
+            assert "database is locked" not in storage_fallback
+            assert "SQLITE_BUSY" not in storage_fallback
 
             with Session(reader_engine) as verification:
                 page_rows = verification.scalar(

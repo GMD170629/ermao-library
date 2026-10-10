@@ -32,7 +32,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_rule,
 )
 from app.core.config import Settings, get_settings
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.atomic_files import write_atomic_bytes
 from app.infrastructure.comic_archives import (
     ComicArchiveBackendUnavailableError,
@@ -81,8 +81,8 @@ def _revalidate_regular_file(path: Path | None) -> Path | None:
         candidate = path.expanduser()
         resolved = candidate.resolve(strict=True)
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._revalidate_regular_file.failed", error,
-                         context={"step": "_revalidate_regular_file"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._revalidate_regular_file.failed", error)
         return None
     if resolved != candidate or not resolved.is_file():
         return None
@@ -110,8 +110,8 @@ def _read_regular_file(
             return None
         return resolved, stat_result, handle.read()
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._read_regular_file.failed", error,
-                         context={"step": "_read_regular_file"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._read_regular_file.failed", error)
         return None
     finally:
         if handle is not None:
@@ -134,8 +134,8 @@ def _stored_path(
             source_root.expanduser().resolve() for source_root in allowed_source_roots
         )
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error,
-                         context={"step": "_stored_path"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error)
         return None
 
     # Relative source-node paths belong to their owning Library root. Only
@@ -151,8 +151,8 @@ def _stored_path(
         try:
             resolved = candidate.expanduser().resolve()
         except OSError as error:
-            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error,
-                             context={"step": "_stored_path"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._stored_path.failed", error)
             continue
         roots = source_roots if source_roots else (storage,)
         if any(resolved == root or root in resolved.parents for root in roots):
@@ -177,8 +177,8 @@ def _parse_byte_range(
         try:
             suffix_length = int(raw_end)
         except ValueError as error:
-            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error,
-                             context={"step": "_parse_byte_range"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error)
             return "unsatisfiable", None
         if suffix_length <= 0:
             return "unsatisfiable", None
@@ -187,8 +187,8 @@ def _parse_byte_range(
         start = int(raw_start)
         end = int(raw_end) if raw_end else size - 1
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error,
-                         context={"step": "_parse_byte_range"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._parse_byte_range.failed", error)
         return "unsatisfiable", None
     if start < 0 or end < start or start >= size:
         return "unsatisfiable", None
@@ -217,8 +217,8 @@ def _not_modified(request: Request, etag: str, last_modified: str) -> bool:
             modified = parsedate_to_datetime(last_modified)
             return modified <= since
         except (TypeError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._not_modified.failed", error,
-                             context={"step": "_not_modified"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._not_modified.failed", error)
             return False
     return False
 
@@ -237,8 +237,8 @@ def _should_use_range(request: Request, etag: str, last_modified: str) -> bool:
         modified = parsedate_to_datetime(last_modified)
         return modified <= if_range_date
     except (TypeError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._should_use_range.failed", error,
-                         context={"step": "_should_use_range"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._should_use_range.failed", error)
         return False
 
 
@@ -440,9 +440,8 @@ def _pse_image_bytes(
             )
             return output.getvalue()
     except (OSError, ValueError, UnidentifiedImageError) as exc:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._pse_image_bytes.failed", exc,
-                         context={"step": "_pse_image_bytes"})
-        logger.debug("failed to create OPDS PSE JPEG page: %s", exc)
+        capture_exception(exc, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._pse_image_bytes.failed", exc)
         return None
 
 
@@ -581,9 +580,8 @@ def _small_cover_webp_bytes(path: Path) -> bytes | None:
                     return None
                 prepared = prepared.resize(next_size, Image.Resampling.LANCZOS)
     except (OSError, ValueError, UnidentifiedImageError) as exc:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._small_cover_webp_bytes.failed", exc,
-                         context={"step": "_small_cover_webp_bytes"})
-        logger.debug("failed to create small cover image path=%s error=%s", path, exc)
+        capture_exception(exc, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._small_cover_webp_bytes.failed", exc)
         return None
 
 
@@ -641,9 +639,8 @@ def _comic_page_webp_bytes(data: bytes) -> bytes | None:
             optimized = output.getvalue()
             return optimized if len(optimized) < len(data) else None
     except (OSError, ValueError, UnidentifiedImageError) as exc:
-        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._comic_page_webp_bytes.failed", exc,
-                         context={"step": "_comic_page_webp_bytes"})
-        logger.debug("skipping comic page data-saver image variant: %s", exc)
+        capture_exception(exc, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.media.infrastructure.http_streaming._comic_page_webp_bytes.failed", exc)
         return None
 
 
@@ -758,7 +755,8 @@ def _file_response(
     if request.method == "HEAD":
         try:
             stat = path.stat()
-        except OSError:
+        except OSError as _caught_error:
+            capture_exception(_caught_error)
             return fail(missing_message, status_code=404)
     else:
         # Resolve-and-check happens before this function. Open the already
@@ -771,7 +769,8 @@ def _file_response(
             descriptor = os.open(path, open_flags)
             handle = os.fdopen(descriptor, "rb")
             stat = os.fstat(handle.fileno())
-        except OSError:
+        except OSError as _caught_error:
+            capture_exception(_caught_error)
             if handle is not None:
                 handle.close()
             return fail(missing_message, status_code=404)
@@ -1003,12 +1002,9 @@ def _send_zip_entry(
         archive = open_comic_archive(archive_path)
         info = archive.getinfo(entry_name)
     except (KeyError, FileNotFoundError) as error:
+        capture_exception(error)
         if archive is not None:
             archive.close()
-        logger.info(
-            "comic_page_missing",
-            extra={"asset_id": asset_id, "reason": type(error).__name__},
-        )
         response = fail(
             "The requested comic page was not found.",
             status_code=404,
@@ -1017,6 +1013,7 @@ def _send_zip_entry(
         response.headers["X-Error-Code"] = "ARCHIVE_PAGE_MISSING"
         return response
     except (OSError, ComicArchiveError) as error:
+        capture_exception(error)
         if archive is not None:
             archive.close()
         policy_code = getattr(error, "code", None)
@@ -1049,10 +1046,6 @@ def _send_zip_entry(
                 "The archive reader could not open the requested page.",
             )
             status_code = 404
-        logger.warning(
-            "comic_page_open_failed",
-            extra={"asset_id": asset_id, "code": code, "reason": type(error).__name__},
-        )
         response = fail(
             message,
             status_code=status_code,
@@ -1379,7 +1372,8 @@ def _send_comic_page_zip_entry(
                     cache_key,
                 )
             source = archive.read(entry_name)
-    except (KeyError, OSError, ComicArchiveError):
+    except (KeyError, OSError, ComicArchiveError) as _caught_error:
+        capture_exception(_caught_error)
         return fail("页面不存在", status_code=404)
 
     optimized = _comic_page_webp_bytes(source)
@@ -1552,9 +1546,11 @@ def send_pse_page_zip_entry(
                 return policy_error
             source = archive.read(entry_name)
         stat = archive_path.stat()
-    except KeyError:
+    except KeyError as _caught_error:
+        capture_exception(_caught_error)
         return fail("页面不存在", status_code=404, code="PAGE_NOT_FOUND")
     except (OSError, ComicArchiveError) as error:
+        capture_exception(error)
         policy_code = getattr(error, "code", None)
         policy_rule_id = getattr(error, "rule_id", None)
         if isinstance(error, ComicArchiveEncryptedError):

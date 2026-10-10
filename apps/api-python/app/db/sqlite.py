@@ -1,3 +1,4 @@
+
 import hashlib
 import json
 import logging
@@ -10,11 +11,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic, thread_time
 from typing import Any, Protocol, Self, TypeVar, cast, overload
-from uuid import uuid4
+
+from app.core.exception_diagnostics import capture_exception
 
 try:
     import resource
-except ImportError:  # diagnostics-control-flow: Windows does not provide the optional resource module.
+except ImportError as _caught_error:  # diagnostics-control-flow: Windows does not provide the optional resource module.
+    capture_exception(_caught_error)
     resource = None
 
 from sqlalchemy import create_engine, event
@@ -91,7 +94,6 @@ def _statement_table(execution_context: Any) -> str | None:
 
 @dataclass(slots=True)
 class _TransactionTrace:
-    id: str
     started_at: float
     started_utc: str
     usage_started: tuple[float, int | None, int | None, int | None, int | None]
@@ -99,15 +101,12 @@ class _TransactionTrace:
     statement_count: int = 0
     dbapi_ms: float = 0.0
     lease_wait_ms: float = 0.0
-    slowest_statement_id: str | None = None
     slowest_statement_ms: float = 0.0
     statements: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class _StatementTrace:
-    id: str
-    transaction_id: str
     started_at: float
     started_utc: str
     usage_started: tuple[float, int | None, int | None, int | None, int | None]
@@ -122,14 +121,20 @@ class _StatementTrace:
 
 
 def _log_timing(event_name: str, *, level: int = logging.INFO, **fields: object) -> None:
-    logger.log(level, "%s %s", event_name, json.dumps(fields, ensure_ascii=False, default=str, separators=(",", ":")))
+    logger.log(
+        level, "%s %s", event_name,
+        json.dumps(fields, ensure_ascii=False, default=str, separators=(",", ":")),
+        # The exception entry includes failed-statement timing and its full
+        # transaction trace. Do not append a second file record for that error.
+        extra={"unified_diagnostic": event_name == "database_statement_failed"},
+    )
 
 
 def _attach_database_trace(error: BaseException, fields: dict[str, object]) -> None:
     try:
         error.database_trace = fields
-    except (AttributeError, TypeError):  # diagnostics-control-flow: Foreign DBAPI exceptions may reject diagnostic attributes.
-        pass
+    except (AttributeError, TypeError) as _caught_error:  # diagnostics-control-flow: Foreign DBAPI exceptions may reject diagnostic attributes.
+        capture_exception(_caught_error)
 
 
 def _finish_transaction(info: dict[str, Any], *, outcome: str, boundary_ms: float) -> None:
@@ -143,7 +148,6 @@ def _finish_transaction(info: dict[str, Any], *, outcome: str, boundary_ms: floa
         return
     elapsed_ms = (monotonic() - trace.started_at) * 1000
     fields = {
-        "transaction_id": trace.id,
         "outcome": outcome,
         "started_utc": trace.started_utc,
         "finished_utc": _utc_now(),
@@ -154,7 +158,6 @@ def _finish_transaction(info: dict[str, Any], *, outcome: str, boundary_ms: floa
         "dbapi_ms": round(trace.dbapi_ms, 2),
         "lease_wait_ms": round(trace.lease_wait_ms, 2),
         "outside_dbapi_ms": round(max(0.0, elapsed_ms - trace.dbapi_ms - boundary_ms), 2),
-        "slowest_statement_id": trace.slowest_statement_id,
         "slowest_statement_ms": round(trace.slowest_statement_ms, 2),
         **_usage_delta(trace.usage_started),
     }
@@ -247,6 +250,7 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             self._check_budget()
             return result
         except sqlite3.OperationalError as error:
+            capture_exception(error)
             if self._budget_exhausted:
                 error.time_budget_exceeded = True
             raise
@@ -304,13 +308,13 @@ class _StatementBudgetCursor(sqlite3.Cursor):
         started = monotonic()
         try:
             result = self._run(operation)
-        except StopIteration:
+        except StopIteration as _caught_error:
+            capture_exception(_caught_error, persist=False)
             raise
         except Exception as error:
+            capture_exception(error)
             if statement is not None:
                 fields = {
-                    "transaction_id": statement["transaction_id"],
-                    "statement_id": statement["statement_id"],
                     "phase": method,
                     "duration_ms": round((monotonic() - started) * 1000, 2),
                     "progress_calls": self._progress_calls,
@@ -323,8 +327,7 @@ class _StatementBudgetCursor(sqlite3.Cursor):
             raise
         if statement is not None:
             _log_timing(
-                "database_fetch_finished", transaction_id=statement["transaction_id"],
-                statement_id=statement["statement_id"], phase=method,
+                "database_fetch_finished", phase=method,
                 duration_ms=round((monotonic() - started) * 1000, 2),
                 row_count=len(result) if isinstance(result, list) else int(result is not None),
                 progress_calls=self._progress_calls,
@@ -341,15 +344,14 @@ class _StatementBudgetConnection(sqlite3.Connection):
         try:
             super().commit()
         except Exception as error:
+            capture_exception(error)
             trace = self.diagnostic_info.get("database_transaction_trace") if self.diagnostic_info else None
             if isinstance(trace, _TransactionTrace):
                 _attach_database_trace(error, {
-                    "transaction_id": trace.id,
                     "phase": "commit",
                     "transaction_statements": trace.statements,
                 })
             _log_timing("database_commit_failed", level=logging.ERROR,
-                        transaction_id=getattr(trace, "id", None),
                         duration_ms=round((monotonic() - started) * 1000, 2),
                         error_type=type(error).__name__, error_message=str(error),
                         sqlite_error_name=getattr(error, "sqlite_errorname", None))
@@ -362,15 +364,14 @@ class _StatementBudgetConnection(sqlite3.Connection):
         try:
             super().rollback()
         except Exception as error:
+            capture_exception(error)
             trace = self.diagnostic_info.get("database_transaction_trace") if self.diagnostic_info else None
             if isinstance(trace, _TransactionTrace):
                 _attach_database_trace(error, {
-                    "transaction_id": trace.id,
                     "phase": "rollback",
                     "transaction_statements": trace.statements,
                 })
             _log_timing("database_rollback_failed", level=logging.ERROR,
-                        transaction_id=getattr(trace, "id", None),
                         duration_ms=round((monotonic() - started) * 1000, 2),
                         error_type=type(error).__name__, error_message=str(error),
                         sqlite_error_name=getattr(error, "sqlite_errorname", None))
@@ -461,8 +462,6 @@ def create_sqlite_engine(
         )
         total_ms = (monotonic() - trace.started_at) * 1000
         fields: dict[str, object] = {
-            "transaction_id": trace.transaction_id,
-            "statement_id": trace.id,
             "outcome": "failed" if error is not None else "ok",
             "started_utc": trace.started_utc,
             "finished_utc": _utc_now(),
@@ -488,9 +487,8 @@ def create_sqlite_engine(
             transaction.statement_count += 1
             transaction.dbapi_ms += dbapi_ms
             transaction.lease_wait_ms += trace.lease_wait_ms
-            if transaction.slowest_statement_id is None or total_ms > transaction.slowest_statement_ms:
+            if transaction.statement_count == 1 or total_ms > transaction.slowest_statement_ms:
                 transaction.slowest_statement_ms = total_ms
-                transaction.slowest_statement_id = trace.id
             if trace.operation_record is not None:
                 trace.operation_record["timing"] = fields
         if isinstance(cursor, _StatementBudgetCursor) and trace.operation_record is not None:
@@ -517,13 +515,12 @@ def create_sqlite_engine(
         transaction = info.get("database_transaction_trace")
         if not isinstance(transaction, _TransactionTrace):
             transaction = _TransactionTrace(
-                id=f"dbtx_{uuid4().hex}", started_at=monotonic(),
+                started_at=monotonic(),
                 started_utc=_utc_now(), usage_started=_thread_usage(),
             )
             info["database_transaction_trace"] = transaction
         started_at = monotonic()
         trace = _StatementTrace(
-            id=f"dbstmt_{uuid4().hex}", transaction_id=transaction.id,
             started_at=started_at, started_utc=_utc_now(),
             usage_started=_thread_usage(), operation=_statement_kind(execution_context, statement),
             table=_statement_table(execution_context),
@@ -532,8 +529,6 @@ def create_sqlite_engine(
             preparation_started_at=info.pop("database_statement_preparation_started_at", None),
         )
         trace.operation_record = {
-            "transaction_id": trace.transaction_id,
-            "statement_id": trace.id,
             "started_utc": trace.started_utc,
             "operation": trace.operation,
             "table": trace.table,
@@ -544,8 +539,8 @@ def create_sqlite_engine(
         transaction.statements.append(trace.operation_record)
         info["database_statement_trace"] = trace
         logger.info(
-            "database_statement_started transaction_id=%s statement_id=%s started_utc=%s operation=%s table=%s sql_sha256=%s callsite=%s",
-            trace.transaction_id, trace.id, trace.started_utc, trace.operation,
+            "database_statement_started started_utc=%s operation=%s table=%s sql_sha256=%s callsite=%s",
+            trace.started_utc, trace.operation,
             trace.table, trace.sql_sha256, trace.callsite,
             extra={"database_operations": [{"statement": statement, "parameters": parameters}]},
         )
@@ -559,6 +554,7 @@ def create_sqlite_engine(
                         database_path, timeout_seconds=timeout_seconds,
                     )
                 except Exception as error:
+                    capture_exception(error)
                     trace.lease_wait_ms = (monotonic() - lease_started) * 1000
                     fields = complete_statement(connection, None, error)
                     if fields is not None:

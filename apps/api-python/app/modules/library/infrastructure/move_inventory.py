@@ -4,6 +4,7 @@ import os
 import stat
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.file_identity import file_identity
 from app.modules.library.application.file_move_plans import (
     DestinationInspection,
@@ -82,6 +83,7 @@ def inspect_move_source(root: Path, relative_path: str) -> MoveInventory:
         with open_library_directory(root, parent) as descriptor:
             visit(descriptor, name, relative_path, os.fstat(descriptor).st_dev, 0)
     except OSError as error:
+        capture_exception(error, persist=False)
         raise FileMoveError("SOURCE_UNAVAILABLE") from error
     return MoveInventory(tuple(entries), files, byte_count)
 
@@ -139,6 +141,7 @@ def inspect_move_destination(
                 directory = descriptor
                 parent_parts.append(name)
         except OSError as error:
+            capture_exception(error, persist=False)
             raise FileMoveError("DESTINATION_UNAVAILABLE") from error
         finally:
             for descriptor in reversed(descriptors):

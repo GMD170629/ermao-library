@@ -6,6 +6,7 @@ from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 from app.contracts.automation import AUTOMATION_SETTINGS_KEY
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.audit import AutomationAuditPort
 from app.modules.automation.application.grants import (
     AutomationIdentityPort,
@@ -48,6 +49,7 @@ def normalize_service_settings(
         url = urlsplit(value)
         _ = url.port
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise AutomationAccessError("INVALID_PUBLIC_URL") from error
     if (
         url.scheme not in {"http", "https"}
@@ -70,6 +72,7 @@ def normalize_service_settings(
             else url.hostname.encode("idna").decode("ascii").lower()
         )
     except (ValueError, UnicodeError) as error:
+        capture_exception(error, persist=False)
         raise AutomationAccessError("INVALID_PUBLIC_URL") from error
     port = url.port
     authority = hostname
@@ -118,7 +121,8 @@ class ConfigureAutomation:
             self._store.save(normalized)
             self._audit.write(event)
             self._uow.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._uow.rollback()
             raise
         return normalized

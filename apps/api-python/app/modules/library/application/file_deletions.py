@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from app.contracts.diagnostics import FailureDiagnostics
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.file_move_plans import MoveSource
 from app.modules.library.application.source_browser import SourceAccessError
 from app.modules.library.domain.file_moves import (
@@ -156,9 +157,7 @@ class FileDeletions:
             if not plan.executing and plan.expires_at_ms <= self.clock():
                 raise FileMoveError("PLAN_EXPIRED")
             plan = replace(plan, executing=True)
-            step = "save_state"
             self.store.save(plan)
-            step = "commit"
             self.uow.commit()
             for ordinal, original in enumerate(plan.targets):
                 if original.stage in {
@@ -170,7 +169,6 @@ class FileDeletions:
                 }:
                     continue
                 target = original
-                step = "load_target"
                 try:
                     fresh = self.store.load(plan_id, user_id, grant_id)
                     if target.stage == "DELETING":
@@ -179,12 +177,6 @@ class FileDeletions:
                                 "Target was already DELETING at attempt start; the previous deletion result was not provided"
                             ),
                             event="file_delete.previous_result_unavailable",
-                            context={
-                                "operation_id": plan_id,
-                                "target_ordinal": ordinal,
-                                "stage": target.stage,
-                                "step": "inspect_recovery_state",
-                            },
                         )
                         self.uow.rollback()
                         self.diagnostics.persist(diagnostic)
@@ -215,7 +207,6 @@ class FileDeletions:
                             ):
                                 raise FileMoveError("SOURCE_CHANGED")
                             self.uow.rollback()
-                            step = "validate_delete"
                             self.files.validate(target)
                             target = replace(target, stage="DELETING")
                             plan = replace(
@@ -224,9 +215,7 @@ class FileDeletions:
                                 + (target,)
                                 + plan.targets[ordinal + 1 :],
                             )
-                            step = "save_state"
                             self.store.save(plan)
-                            step = "commit"
                             self.uow.commit()
                         if target.stage == "DELETING":
                             if (
@@ -235,7 +224,6 @@ class FileDeletions:
                             ):
                                 raise FileMoveError("RESOURCE_NOT_FOUND")
                             self.uow.rollback()
-                            step = "delete_files"
                             self.files.delete(target)
                             target = replace(target, stage="FILES_DELETED")
                             plan = replace(
@@ -244,11 +232,8 @@ class FileDeletions:
                                 + (target,)
                                 + plan.targets[ordinal + 1 :],
                             )
-                            step = "save_state"
                             self.store.save(plan)
-                            step = "commit"
                             self.uow.commit()
-                        step = "reindex_deleted_source"
                         task_id = target.index_task_id or self.reindex(target.source)
                         target = replace(
                             target,
@@ -257,30 +242,18 @@ class FileDeletions:
                             error=None,
                         )
                 except Exception as error:
+                    capture_exception(error, persist=False)
                     diagnostic = self.diagnostics.prepare(
                         error,
                         event="file_delete.target_failed",
-                        context={
-                            "operation_id": plan_id,
-                            "target_ordinal": ordinal,
-                            "library_id": target.source.library_id,
-                            "source_node_id": target.source.node_id,
-                            "stage": target.stage,
-                            "step": step,
-                        },
                     )
                     try:
                         self.uow.rollback()
                     except Exception as rollback_error:
+                        capture_exception(rollback_error, persist=False)
                         secondary = self.diagnostics.prepare(
                             rollback_error,
                             event="file_delete.rollback_failed",
-                            context={
-                                "operation_id": plan_id,
-                                "target_ordinal": ordinal,
-                                "step": "rollback",
-                                "parent_diagnostic_id": diagnostic.diagnostic_id,
-                            },
                         )
                         self.diagnostics.persist(secondary)
                         raise
@@ -301,8 +274,6 @@ class FileDeletions:
                     + (target,)
                     + plan.targets[ordinal + 1 :],
                 )
-                step = "save_state"
                 self.store.save(plan)
-                step = "commit"
                 self.uow.commit()
             return self.observed(plan)

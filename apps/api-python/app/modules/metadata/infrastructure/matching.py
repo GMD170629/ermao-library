@@ -7,10 +7,10 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.contracts.metadata_identity import MetadataIdentity
-from app.core.exception_diagnostics import record_exception
-from app.core.i18n import configured_locale
 from app.contracts.bibliographic_identity import normalize_identity_part
+from app.contracts.metadata_identity import MetadataIdentity
+from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.i18n import configured_locale
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.infrastructure.ai_client import (
     match_metadata,
@@ -116,14 +116,14 @@ def prepare_matched_metadata(
             normalized = {key: value for key, value in normalized.items() if value not in (None, "", [])}
             normalized["_detailFetched"] = True
         except Exception as error:  # noqa: BLE001 - optional detail preserves the search record.
-            record_exception(logging.getLogger(__name__), "metadata.subject_detail_failed", error,
-                             context={"step": "subject_detail", "resource_id": str(item.get("id"))})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "metadata.subject_detail_failed", error)
             return {**item, "sourceIssues": ["douban:detail_failed"]}
         try:
             external_metadata_cache_put(db, "douban", cache_key, {"candidates": [normalized]})
         except Exception as error:  # noqa: BLE001 - cache failure must not lose fetched fields.
-            record_exception(logging.getLogger(__name__), "metadata.subject_detail_cache_failed", error,
-                             context={"step": "subject_detail_cache", "resource_id": identifier})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "metadata.subject_detail_cache_failed", error)
         return {**item, **normalized}
 
     indexed[match.primary_candidate_id or ""] = detail(primary)

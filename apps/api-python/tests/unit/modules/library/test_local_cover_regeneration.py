@@ -303,9 +303,9 @@ def test_resource_commit_failure_reverts_the_published_cover(caplog) -> None:
         )
 
     assert resource_covers.reverted == ["r1"]
-    assert "local_cover.resource_state_failed" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "commit failed" in caplog.text
-    assert "diagnostic_id=diag_" in caplog.text
+    assert "diagnostic_id=" not in caplog.text
     assert resource_covers.completed == []
     assert resource_covers.contents == {}
 

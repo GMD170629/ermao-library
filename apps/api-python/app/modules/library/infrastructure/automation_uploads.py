@@ -16,6 +16,7 @@ from app.contracts.automation_upload import (
     UploadSpec,
     UploadTarget,
 )
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.file_identity import file_identity
 from app.models import Library
 from app.modules.library.application.metadata_patches import (
@@ -71,6 +72,7 @@ class LibraryAttachmentCovers:
                 source_node_id="mcp-" + upload_id, content=content
             )
         except ValueError as error:
+            capture_exception(error, persist=False)
             raise UploadError("INVALID_COVER_IMAGE") from error
         fd = os.open(prepared.temporary_path, os.O_RDONLY | os.O_NOFOLLOW)
         try:
@@ -150,6 +152,7 @@ class LibraryAttachmentCovers:
         try:
             self.metadata.apply_uploaded_cover(before, path)
         except MetadataPatchError as error:
+            capture_exception(error, persist=False)
             raise UploadError("METADATA_CONFLICT") from error
         reference = "cover:" + hashlib.sha256(path.encode()).hexdigest()
         self.metadata.record(

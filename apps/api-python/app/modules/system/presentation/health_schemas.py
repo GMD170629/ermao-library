@@ -174,18 +174,19 @@ class HealthRunPayload(HttpContractModel):
 
 class EventStorage(HttpContractModel):
     size_bytes: int = Field(alias="sizeBytes")
-    max_bytes: int = Field(alias="maxBytes")
-    last_pruned_at: str | None = Field(alias="lastPrunedAt")
+    retention_days: int = Field(alias="retentionDays")
+    minimum_level: Literal["debug", "info", "warning", "error"] = Field(alias="minimumLevel")
 
 
 class LogSettingsPayload(HttpContractModel):
     storage: EventStorage
-    min_bytes: int | None = Field(default=None, alias="minBytes")
-    max_bytes: int | None = Field(default=None, alias="maxBytes")
+    min_days: int | None = Field(default=None, alias="minDays")
+    max_days: int | None = Field(default=None, alias="maxDays")
 
 
 class UpdateLogSettingsRequest(HttpContractModel):
-    max_bytes: int = Field(alias="maxBytes")
+    retention_days: int = Field(alias="retentionDays", strict=True)
+    minimum_level: Literal["debug", "info", "warning", "error"] | None = Field(default=None, alias="minimumLevel")
 
 
 class HealthEventStreamResponse(StreamingResponse):
@@ -222,14 +223,14 @@ class HealthRunNotFoundError(HttpContractError[HealthRunNotFoundBody]):
     body_model = HealthRunNotFoundBody
 
 
-class InvalidLogMaxBytesBody(HttpContractModel):
+class InvalidLogRetentionDaysBody(HttpContractModel):
     message: str
-    code: Literal["INVALID_LOG_MAX_BYTES"] = "INVALID_LOG_MAX_BYTES"
+    code: Literal["INVALID_LOG_RETENTION_DAYS"] = "INVALID_LOG_RETENTION_DAYS"
 
 
-class InvalidLogMaxBytesError(HttpContractError[InvalidLogMaxBytesBody]):
+class InvalidLogRetentionDaysError(HttpContractError[InvalidLogRetentionDaysBody]):
     status_code = 400
-    body_model = InvalidLogMaxBytesBody
+    body_model = InvalidLogRetentionDaysBody
 
 
 ServiceHealthResponse = SuccessEnvelope[ServiceHealthPayload]

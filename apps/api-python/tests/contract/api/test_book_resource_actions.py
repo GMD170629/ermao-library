@@ -4,6 +4,7 @@ import hashlib
 from base64 import b64decode
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import select
 
 from app.core.auth import hash_password
@@ -19,6 +20,48 @@ from app.models import (
     LibrarySourceNodeMetadata,
 )
 from app.models.auth import User
+
+
+@pytest.mark.parametrize("failure", ["filesystem", "database"])
+def test_book_source_delete_returns_original_exception_and_preserves_database(
+    client, db_session, tmp_path, monkeypatch, failure
+) -> None:
+    _login(client, db_session)
+    _add_graph(db_session, "failure-book", "failure-resource")
+    library = db_session.get(Library, "test-library")
+    library.root_path = str(tmp_path)
+    folder = tmp_path / "failure-book"
+    folder.mkdir()
+    (folder / "failure-resource.pdf").write_bytes(b"fixture")
+    db_session.commit()
+
+    def fail_delete(*_args, **_kwargs):
+        if failure == "filesystem":
+            raise PermissionError(13, "Permission denied", str(folder))
+        raise RuntimeError(f"delete source node failed: {folder}")
+
+    target = (
+        "app.modules.imports.infrastructure.readable_resource.filesystem.OsSourceTreeFilesystem.delete_source"
+        if failure == "filesystem"
+        else "app.modules.library.infrastructure.persistence.source_tree_repository.SqlAlchemySourceNodeRepository.delete_nodes"
+    )
+    monkeypatch.setattr(target, fail_delete)
+    response = client.post(
+        "/api/library/operations/books/delete-sources",
+        json={"ids": ["failure-book"], "confirmation": "DELETE_SOURCE_FILES"},
+    )
+    assert response.status_code == (409 if failure == "filesystem" else 500)
+    error = response.json()["error"]
+    if failure == "filesystem":
+        assert error["code"] == "SourceFileDeletionError"
+        assert "SourceFileDeletionError: failure-book" in error["message"]
+        assert f"PermissionError: [Errno 13] Permission denied: {str(folder)!r}" in error["message"]
+    else:
+        assert error["code"] == "RuntimeError"
+        assert error["message"] == f"RuntimeError: delete source node failed: {folder}"
+    db_session.expire_all()
+    assert db_session.get(LibraryBook, "failure-book") is not None
+    assert db_session.get(LibraryResourceAsset, "failure-resource-asset") is not None
 
 
 def _path_key(relative_path: str) -> str:

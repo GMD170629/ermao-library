@@ -1,4 +1,6 @@
+
 from app.contracts.automation_upload import UploadError
+from app.core.exception_diagnostics import capture_exception
 
 """Cookie-only grant management; MCP credentials never authenticate these routes."""
 
@@ -100,6 +102,7 @@ def list_grants(
             )
         )
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -127,6 +130,7 @@ def create_grant(
             )
         )
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -155,6 +159,7 @@ def update_grant(
         )
         return _private(ok(UpdatedGrantPayload(grant=GrantView.from_grant(grant))))
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -171,6 +176,7 @@ def revoke_grant(
         build_grant_manager(db, settings).revoke(user_id=user.id, grant_id=grant_id)
         return _private(ok(RevokedGrantPayload()))
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -192,6 +198,7 @@ def get_service_settings(
             )
         )
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -211,6 +218,7 @@ def update_service_settings(
         saved = build_automation_settings(db).update(user.id, payload.to_domain())
         return _private(ok(ServiceSettingsFields.from_domain(saved)))
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)
 
 
@@ -241,6 +249,7 @@ def list_operations(
         StandardMetadataError,
         UploadError,
     ) as error:
+        capture_exception(error)
         return _error(request, AutomationAccessError(str(error)))
 
 
@@ -268,6 +277,7 @@ def cancel_operation(
         StandardMetadataError,
         UploadError,
     ) as error:
+        capture_exception(error)
         return _error(request, AutomationAccessError(str(error)))
 
 
@@ -286,4 +296,5 @@ def reveal_grant(
         )
         return _private(ok(RevealedTokenPayload(token=token)))
     except AutomationAccessError as error:
+        capture_exception(error)
         return _error(request, error)

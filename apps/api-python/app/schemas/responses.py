@@ -4,7 +4,7 @@ import sys
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import exception_message, record_exception
 from app.core.time import timestamp_ms_to_iso
 
 
@@ -45,6 +45,10 @@ def fail(
     code: str | None = None,
     params: dict[str, object] | None = None,
 ) -> JSONResponse:
+    caught = sys.exception()
+    if status_code >= 500 and caught is not None:
+        message = exception_message(caught)
+        code = type(caught).__name__
     error: dict[str, object] = {"message": message}
     if code is not None:
         error["code"] = code
@@ -52,17 +56,16 @@ def fail(
         error["params"] = params
     if details is not None:
         error["details"] = details
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger("ermao.api_diagnostics"),
         "api.request_rejected" if status_code < 500 else "api.request_failed",
-        sys.exception()
+        caught
         or HttpResponseFailure(f"HTTP {status_code}: {code or message}: {message}"),
         level="warning" if status_code < 500 else "error",
-        context={"stage": "http_response", "outcome": code or str(status_code)},
         source="system",
     )
     return JSONResponse(
         jsonable_encoder({"ok": False, "error": _normalize_timestamps(error)}),
         status_code=status_code,
-        headers={"X-Error-Id": diagnostic_id},
+        headers={},
     )

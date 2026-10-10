@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from app.core.exception_diagnostics import capture_exception
+
 
 class TargetLibraryOrganizationMode(str, Enum):
     FLAT = "FLAT"
@@ -20,6 +22,7 @@ def parse_target_organization_mode(
 ) -> TargetLibraryOrganizationMode | OrganizationModeViolationCode:
     try:
         return TargetLibraryOrganizationMode(value)
-    except ValueError:
+    except ValueError as _caught_error:
         # diagnostics-control-flow: enum membership is the domain validation result; the caller handles UNSUPPORTED_MODE.
+        capture_exception(_caught_error)
         return OrganizationModeViolationCode.UNSUPPORTED_MODE

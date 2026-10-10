@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from time import time
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 LOGGER = logging.getLogger(__name__)
 PREVIEW_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -35,8 +35,9 @@ class ResourcePreviewCache:
             current /= component
             try:
                 observed = current.lstat()
-            except FileNotFoundError:
+            except FileNotFoundError as _caught_error:
                 # diagnostics-control-flow: A cache directory may not exist yet.
+                capture_exception(_caught_error, level="debug")
                 continue
             if not stat.S_ISDIR(observed.st_mode) or getattr(
                 observed, "st_file_attributes", 0
@@ -49,7 +50,6 @@ class ResourcePreviewCache:
             LOGGER,
             "media.preview_cache.failed",
             error,
-            context={"stage": stage},
         )
 
     def read(self, digest: str) -> bytes | None:
@@ -66,11 +66,13 @@ class ResourcePreviewCache:
             )
             with os.fdopen(os.open(path, flags), "rb") as handle:
                 return handle.read()
-        except FileNotFoundError:
+        except FileNotFoundError as _caught_error:
             # diagnostics-control-flow: Cold/expired cache entries are optional;
             # the maintenance worker can also remove one before it is opened.
+            capture_exception(_caught_error, level="debug")
             return None
         except (OSError, ValueError) as error:
+            capture_exception(error)
             self._record_failure("read", error)
             return None
 
@@ -94,6 +96,7 @@ class ResourcePreviewCache:
             os.replace(temporary, path)
             temporary = None
         except (OSError, ValueError) as error:
+            capture_exception(error)
             self._record_failure("publish", error)
         finally:
             if temporary is not None:
@@ -101,6 +104,7 @@ class ResourcePreviewCache:
                     self._validate_directory(temporary.parent)
                     temporary.unlink(missing_ok=True)
                 except (OSError, ValueError) as error:
+                    capture_exception(error)
                     self._record_failure("publish_cleanup", error)
 
     def prune(self, *, cancelled: Callable[[], bool] = lambda: False) -> int:
@@ -134,21 +138,26 @@ class ResourcePreviewCache:
                                         self._validate_directory(directory)
                                         Path(entry.path).unlink()
                                         deleted += 1
-                                except FileNotFoundError:
+                                except FileNotFoundError as _caught_error:
                                     # diagnostics-control-flow: Another maintenance
                                     # process may have removed the same cache entry.
+                                    capture_exception(_caught_error, level="debug")
                                     continue
                                 except (OSError, ValueError) as error:
+                                    capture_exception(error)
                                     self._record_failure("prune_entry", error)
-                    except FileNotFoundError:
+                    except FileNotFoundError as _caught_error:
                         # diagnostics-control-flow: An optional cache shard can
                         # disappear concurrently with directory enumeration.
+                        capture_exception(_caught_error, level="debug")
                         continue
                     except (OSError, ValueError) as error:
+                        capture_exception(error)
                         self._record_failure("prune_directory", error)
-        except FileNotFoundError:
+        except FileNotFoundError as _caught_error:
             # diagnostics-control-flow: No previews have been cached yet.
-            pass
+            capture_exception(_caught_error, level="debug")
         except (OSError, ValueError) as error:
+            capture_exception(error)
             self._record_failure("prune", error)
         return deleted

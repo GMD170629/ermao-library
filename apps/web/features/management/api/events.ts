@@ -4,8 +4,6 @@ export type ManagementEvent = {
   source: string;
   actorType: string;
   action: string;
-  targetType?: string | null;
-  targetId?: string | null;
   message: string;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -13,8 +11,8 @@ export type ManagementEvent = {
 
 export type EventStorage = {
   sizeBytes: number;
-  maxBytes: number;
-  lastPrunedAt?: string | null;
+  retentionDays: number;
+  minimumLevel: 'debug' | 'info' | 'warning' | 'error';
 };
 
 export type ManagementEventsPage = {
@@ -35,12 +33,6 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function nullableString(value: unknown, field: string): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  return requiredString(value, field);
-}
-
 function requiredNumber(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`Invalid management events field: ${field}`);
@@ -50,11 +42,12 @@ function requiredNumber(value: unknown, field: string): number {
 
 function parseStorage(value: unknown): EventStorage {
   if (!isObject(value)) throw new Error('Invalid management event storage');
-  const lastPrunedAt = nullableString(value.lastPrunedAt, 'storage.lastPrunedAt');
+  const minimumLevel = requiredString(value.minimumLevel, 'storage.minimumLevel');
+  if (!['debug', 'info', 'warning', 'error'].includes(minimumLevel)) throw new Error('Invalid log level');
   return {
     sizeBytes: requiredNumber(value.sizeBytes, 'storage.sizeBytes'),
-    maxBytes: requiredNumber(value.maxBytes, 'storage.maxBytes'),
-    ...(lastPrunedAt === undefined ? {} : { lastPrunedAt })
+    retentionDays: requiredNumber(value.retentionDays, 'storage.retentionDays'),
+    minimumLevel: minimumLevel as EventStorage['minimumLevel']
   };
 }
 
@@ -68,8 +61,6 @@ function parseEvent(value: unknown): ManagementEvent {
     source: requiredString(value.source, 'event.source'),
     actorType: requiredString(value.actorType, 'event.actorType'),
     action: requiredString(value.action, 'event.action'),
-    targetType: nullableString(value.targetType, 'event.targetType'),
-    targetId: nullableString(value.targetId, 'event.targetId'),
     message: requiredString(value.message, 'event.message'),
     metadata: value.metadata,
     createdAt: requiredString(value.createdAt, 'event.createdAt')
@@ -117,6 +108,15 @@ export async function fetchManagementEventDetail(eventId: string): Promise<Manag
   return parseEvent(data);
 }
 
+export async function downloadManagementLogFiles(): Promise<Blob> {
+  const response = await fetch('/api/management/events/export', {
+    cache: 'no-store',
+    credentials: 'same-origin'
+  });
+  if (!response.ok) await readData(response, '导出日志失败');
+  return response.blob();
+}
+
 export async function clearManagementEvents(): Promise<number> {
   const data = await readData(
     await fetch('/api/management/events', {
@@ -129,15 +129,15 @@ export async function clearManagementEvents(): Promise<number> {
   return requiredNumber(data.deleted, 'deleted');
 }
 
-export async function updateSystemLogLimit(maxBytes: number): Promise<EventStorage> {
+export async function updateSystemLogLimit(retentionDays: number, minimumLevel?: EventStorage['minimumLevel']): Promise<EventStorage> {
   const data = await readData(
     await fetch('/api/system/log-settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ maxBytes })
+      body: JSON.stringify({ retentionDays, minimumLevel })
     }),
-    '保存日志容量失败'
+    '保存日志设置失败'
   );
   if (!isObject(data)) throw new Error('Invalid log-settings response');
   return parseStorage(data.storage);

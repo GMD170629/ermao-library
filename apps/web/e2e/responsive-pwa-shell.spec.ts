@@ -1347,7 +1347,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
           events: [{ id: 'mobile-event', level: 'warning', source: 'import', actorType: 'system', action: 'import.failed', message: '用于验证长日志摘要在手机上自然换行', metadata: {}, createdAt: '2026-07-17T08:30:00.000Z' }],
           total: 1,
           totalPages: 1,
-          storage: { sizeBytes: 0, maxBytes: 1024 },
+          storage: { sizeBytes: 0, retentionDays: 3, minimumLevel: 'error' },
           facets: { sources: [], levels: [] }
         }
       }

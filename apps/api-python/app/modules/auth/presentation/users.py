@@ -17,6 +17,7 @@ from app.core.authorization import (
     read_user_preferences,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.core.i18n import configured_locale
 from app.db.session import get_db
 from app.models.auth import User, db_timestamp
@@ -168,6 +169,7 @@ def _validate_preference(key: str, value: object) -> object:
         try:
             return str(EMAIL_ADAPTER.validate_python(normalized)).lower()
         except ValidationError as exc:
+            capture_exception(exc, persist=False)
             raise ValueError("Kindle 邮箱格式不正确") from exc
     raise ValueError("包含不支持的用户偏好")
 
@@ -187,6 +189,7 @@ def list_users(
             _actor(actor)
         )
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return UsersResponse(
         data=UsersPayload(users=[_admin_user_payload(user) for user in users])
@@ -213,6 +216,7 @@ def get_user(
             _actor(actor), user_id
         )
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return AdminUserResponse(data=AdminUserPayload(user=_admin_user_payload(user)))
 
@@ -248,6 +252,7 @@ def create_user(
             ),
         )
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return AdminUserResponse(
         data=AdminUserPayload(
@@ -296,6 +301,7 @@ def update_user(
             ),
         )
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return AdminUserResponse(data=AdminUserPayload(user=_admin_user_payload(user)))
 
@@ -321,6 +327,7 @@ def set_user_password(
             _actor(actor), user_id, payload.password
         )
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return AdminPasswordChangedResponse(data=AdminPasswordChangedPayload())
 
@@ -348,6 +355,7 @@ def delete_user(
             db, settings
         ).delete_user.execute(_actor(actor), user_id, payload.confirmation)
     except UserAdministrationError as exc:
+        capture_exception(exc)
         _raise_user_administration_error(exc)
     return UserDeletedResponse(
         data=UserDeletedPayload(deleted=True, userId=deleted_user_id)
@@ -402,6 +410,7 @@ def update_preferences(
             for key, value in payload.preferences.items()
         }
     except ValueError as exc:
+        capture_exception(exc, persist=False)
         raise UserBadRequestError(
             CodedMessageBody(
                 message=str(exc),

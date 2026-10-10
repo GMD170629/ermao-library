@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.public import LibraryOrganizationMode
 from app.modules.system.public import PreparedSystemEvent
 
@@ -69,7 +70,8 @@ class CreateLibrary:
         try:
             self._store.create(prepared)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -87,7 +89,8 @@ class UpdateLibrary:
         try:
             self._store.update(prepared)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -105,7 +108,8 @@ class ReorderLibraries:
         try:
             self._store.reorder(prepared)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -125,7 +129,8 @@ class DeleteLibrary:
             deleted = self._store.delete(prepared)
             self._unit_of_work.commit()
             return deleted
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 

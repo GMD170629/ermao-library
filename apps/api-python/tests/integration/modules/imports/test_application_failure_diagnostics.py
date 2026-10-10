@@ -1,16 +1,15 @@
+from tests.support.log_events import log_records
+
 """Application ports retain filesystem/parser failures in runtime and event logs."""
 
 import errno
-import json
 import logging
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.failure_diagnostics import RuntimeFailureDiagnostics
-from app.models import SystemEvent
 from app.modules.imports.application.library_paths import library_directory_tree_node
 from app.modules.imports.infrastructure.readable_resource.support import (
     StructuredPipelineLog,
@@ -19,7 +18,7 @@ from app.modules.imports.infrastructure.readable_resource.support import (
 
 def events(db, action):
     db.rollback()
-    return list(db.scalars(select(SystemEvent).where(SystemEvent.action == action)))
+    return [row for row in log_records() if row.action == action]
 
 
 @pytest.mark.parametrize(
@@ -67,12 +66,12 @@ def test_directory_browser_preserves_actual_filesystem_failure(
     observed = events(db_session, f"library.directory.{action}")
     assert len(observed) == 1
     metadata = observed[0].metadata_json
-    assert metadata["step"] == step
+    assert "step" not in metadata
     assert metadata["diagnostics"]["rootCause"]["errno"] == (
         errno.EACCES if step == "list_directory" else errno.EIO
     )
-    assert observed[0].id in caplog.text
-    assert str(root) not in json.dumps(metadata)
+    assert observed[0].message in caplog.text
+    assert repr(str(child if step == "resolve_child" else root)) in metadata["diagnostics"]["message"]
     if step == "resolve_directory":
         assert status == 404 and result is None and message
     elif step == "list_directory":
@@ -81,7 +80,7 @@ def test_directory_browser_preserves_actual_filesystem_failure(
         assert status == 200 and result["children"] == []
 
 
-def test_pipeline_exception_port_persists_task_context_and_actual_parser_cause(
+def test_pipeline_exception_port_persists_actual_parser_cause_without_task_links(
     db_session, caplog
 ):
     log = StructuredPipelineLog(lambda: Session(db_session.get_bind()))
@@ -91,17 +90,14 @@ def test_pipeline_exception_port_persists_task_context_and_actual_parser_cause(
         log.emit(
             "readable_resource.local_cover.rejected",
             error=error,
-            task_id="task-damaged-cover",
-            resource_id="resource-cover",
-            source_node_id="source-cover",
             stage="cover_prepare",
             outcome="invalid",
         )
     observed = events(db_session, "readable_resource.local_cover.rejected")
     assert len(observed) == 1
     metadata = observed[0].metadata_json
-    assert metadata["taskId"] == "task-damaged-cover"
-    assert metadata["sourceNodeId"] == "source-cover"
+    assert "taskId" not in metadata
+    assert "sourceNodeId" not in metadata
     assert metadata["diagnostics"]["exceptionType"] == "SyntaxError"
     assert metadata["diagnostics"]["message"] == "injected damaged image chunk"
-    assert observed[0].id in caplog.text
+    assert observed[0].message in caplog.text

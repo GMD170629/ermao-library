@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
 from app.contracts.metadata_identity import MetadataIdentity
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.i18n import configured_locale
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
@@ -78,8 +78,9 @@ def _json_value(value: Any, fallback: Any = None) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as _caught_error:
         # diagnostics-control-flow: Provider preferences accept literal strings as well as structured JSON.
+        capture_exception(_caught_error)
         return value
 
 
@@ -204,7 +205,8 @@ class MetadataProviderRegistry:
             entry_points = importlib_metadata.entry_points()
             selected = entry_points.select(group=ENTRY_POINT_GROUP)
         except Exception as error:  # noqa: BLE001 - isolate third-party provider discovery failures
-            record_exception(LOGGER, "metadata_provider.discovery_failed", error, context={"step": "discover_plugins"})
+            capture_exception(error, persist=False)
+            record_exception(LOGGER, "metadata_provider.discovery_failed", error)
             return
         for entry_point in selected:
             try:
@@ -212,7 +214,8 @@ class MetadataProviderRegistry:
                 plugin = loaded() if isinstance(loaded, type) else loaded
                 self.register(plugin)
             except Exception as error:  # noqa: BLE001 - isolate third-party provider discovery failures
-                record_exception(LOGGER, "metadata_provider.load_failed", error, context={"step": "load_plugin", "resource_id": getattr(entry_point, "name", "unknown")})
+                capture_exception(error, persist=False)
+                record_exception(LOGGER, "metadata_provider.load_failed", error)
 
     def get(self, provider_id: str) -> MetadataProviderPlugin | None:
         return self._plugins.get(provider_id)
@@ -489,23 +492,21 @@ def test_metadata_provider(
     db.close()
     if validation:
         reason = "；".join(validation)
-        diagnostic_id = record_exception(LOGGER, "metadata_provider.configuration_rejected", MetadataProviderTestRejected(reason), context={"step": "validate_provider_configuration", "resource_id": provider_id})
-        result = {"ok": False, "message": configuration_message, "diagnosticId": diagnostic_id}
+        record_exception(LOGGER, "metadata_provider.configuration_rejected", MetadataProviderTestRejected(reason))
+        result = {"ok": False, "message": configuration_message}
     else:
         try:
             result = plugin.test(config)
             if not result.get("ok"):
-                diagnostic_id = record_exception(LOGGER, "metadata_provider.test_rejected", MetadataProviderTestRejected(str(result.get("message") or "Provider returned ok=false; further reason not provided")), context={"step": "test_provider", "resource_id": provider_id})
-                result = {"ok": False, "message": failure_message, "diagnosticId": diagnostic_id}
+                record_exception(LOGGER, "metadata_provider.test_rejected", MetadataProviderTestRejected(str(result.get("message") or "Provider returned ok=false; further reason not provided")))
+                result = {"ok": False, "message": failure_message}
         except Exception as exc:  # noqa: BLE001 - contains provider failures.
-            diagnostic_id = record_exception(logging.getLogger(__name__), "services.metadata_provider_registry.test_metadata_provider.failed", exc,
-                             context={"step": "test_metadata_provider", "resource_id": provider_id})
-            result = {"ok": False, "message": failure_message, "diagnosticId": diagnostic_id}
+            capture_exception(exc, persist=False)
+            record_exception(logging.getLogger(__name__), "services.metadata_provider_registry.test_metadata_provider.failed", exc)
+            result = {"ok": False, "message": failure_message}
     now = _now()
     status = "ok" if result.get("ok") else "failed"
     error = None if result.get("ok") else str(result.get("message") or "连接测试失败")
-    if error and result.get("diagnosticId"):
-        error = f"{error} (diagnostic_id={result['diagnosticId']})"
     with MetadataWriteTransaction(db):
         update_source_test_result(
             db,

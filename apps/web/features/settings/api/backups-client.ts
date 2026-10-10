@@ -8,7 +8,7 @@ export type BackupItem = Omit<Backup, 'filename' | 'compatibility'> & {
 };
 
 export class BackupApiError extends Error {
-  constructor(message: string, readonly messageEn: string, readonly diagnosticId = '') {
+  constructor(message: string, readonly messageEn: string) {
     super(message);
   }
 }
@@ -78,14 +78,13 @@ async function request(path: string, signal: AbortSignal, method = 'GET', body?:
     value = JSON.parse(new TextDecoder().decode(await readBoundedResponse(response, 16 * 1024 * 1024)));
   } catch (error) {
     if (signal.aborted) throw error;
-    throw new BackupApiError(`服务器响应无法解析（HTTP ${response.status}）`, `Cannot parse the server response (HTTP ${response.status})`, response.headers.get('X-Error-Id') ?? '');
+    throw new BackupApiError(`服务器响应无法解析（HTTP ${response.status}）`, `Cannot parse the server response (HTTP ${response.status})`);
   }
   const envelope = record(value);
   if (!response.ok || envelope.ok !== true) {
     const error = record(envelope.error);
     const params = error.params == null ? {} : record(error.params);
-    throw new BackupApiError(text(error.message), typeof params.messageEn === 'string' ? params.messageEn : text(error.message),
-      response.headers.get('X-Error-Id') ?? '');
+    throw new BackupApiError(text(error.message), typeof params.messageEn === 'string' ? params.messageEn : text(error.message));
   }
   return record(envelope.data);
 }
@@ -117,7 +116,7 @@ export function backupDownloadUrl(id: string): string {
 export function backupErrorMessage(error: unknown, locale: string): string {
   if (error instanceof BackupApiError) {
     const message = locale === 'en-US' ? error.messageEn : error.message;
-    return error.diagnosticId ? `${message}\n${locale === 'en-US' ? 'Diagnostic ID' : '诊断编号'}: ${error.diagnosticId}` : message;
+    return message;
   }
   return error instanceof Error ? error.message : String(error);
 }

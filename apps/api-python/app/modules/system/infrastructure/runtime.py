@@ -13,24 +13,21 @@ from app.core.exception_diagnostics import (
 from app.core.time import now_timestamp_ms
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.domain.events import (
-    LOG_MAX_BYTES_SETTING,
     PreparedSystemEvent,
-    validate_log_max_bytes,
 )
 from app.modules.system.domain.health import HealthRunSnapshot
 from app.modules.system.domain.queue import prepare_queue_heartbeat
 from app.modules.system.infrastructure.events import (
     clear_all_system_events,
-    configured_max_event_bytes,
+    configured_retention_days,
     get_system_event,
     list_event_level_facets,
     list_event_source_facets,
     list_system_events_page,
     prepare_system_event,
-    prepare_system_event_prune,
+    set_retention_days,
     system_event_size_bytes,
     system_event_storage_view,
-    write_prepared_system_event_prune,
     write_prepared_system_events,
 )
 from app.modules.system.infrastructure.events import (
@@ -52,6 +49,11 @@ from app.modules.system.infrastructure.health_runs import (
 )
 from app.modules.system.infrastructure.import_status import (
     library_import_dashboard_snapshot,
+)
+from app.modules.system.infrastructure.log_files import (
+    append_log_event,
+    log_settings,
+    save_log_settings,
 )
 from app.modules.system.infrastructure.management import (
     management_card_counts,
@@ -98,7 +100,7 @@ def management_overview_snapshot(
     cards = {
         **management_card_counts(db),
         "eventLogSizeBytes": int(storage["sizeBytes"]),
-        "eventLogMaxBytes": int(storage["maxBytes"]),
+        "eventLogRetentionDays": int(storage["retentionDays"]),
     }
     return {
         "cards": cards,
@@ -107,37 +109,12 @@ def management_overview_snapshot(
     }
 
 
-def prune_system_events(
-    db: Session,
-    max_bytes: int | None = None,
-) -> dict[str, int]:
-    return _prune_system_events(db, max_bytes)
+def prune_system_events(db: Session, retention_days: int | None = None) -> dict[str, int]:
+    return _prune_system_events(db, retention_days)
 
 
-def maintain_system_events(
-    db: Session,
-    max_bytes: int | None = None,
-) -> dict[str, int]:
-    prepared = prepare_system_event_prune(db, max_bytes)
-    if not prepared.event_ids:
-        return {
-            "deleted": 0,
-            "sizeBytes": prepared.current_size_bytes,
-            "maxBytes": prepared.max_bytes,
-        }
-    with SystemWriteTransaction(db):
-        result = write_prepared_system_event_prune(db, prepared)
-    return result
-
-
-def set_max_event_bytes(db: Session, max_bytes: int) -> dict[str, Any]:
-    prepared_max_bytes = validate_log_max_bytes(max_bytes)
-    prepared_settings = prepare_settings_write(
-        {LOG_MAX_BYTES_SETTING: prepared_max_bytes}
-    )
-    with SystemWriteTransaction(db):
-        write_prepared_settings(db, prepared_settings)
-    return system_event_storage_view(db)
+def maintain_system_events(db: Session, retention_days: int | None = None) -> dict[str, int]:
+    return _prune_system_events(db, retention_days)
 
 
 def record_system_event(
@@ -149,8 +126,6 @@ def record_system_event(
     level: str = "info",
     actor_type: str = "system",
     actor_id: str | None = None,
-    target_type: str | None = None,
-    target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> str:
     prepared_event = prepare_system_event(
@@ -160,8 +135,6 @@ def record_system_event(
         level=level,
         actor_type=actor_type,
         actor_id=actor_id,
-        target_type=target_type,
-        target_id=target_id,
         metadata=metadata,
     )
     return write_prepared_system_events(db, [prepared_event])[0]
@@ -198,13 +171,13 @@ def persist_system_setting_values(
 def persist_log_settings_update(
     db: Session,
     *,
-    max_bytes: int,
+    retention_days: int,
     event: PreparedSystemEvent,
+    minimum_level: str | None = None,
 ) -> None:
-    prepared_settings = prepare_settings_write({LOG_MAX_BYTES_SETTING: max_bytes})
-    with SystemWriteTransaction(db):
-        write_prepared_settings(db, prepared_settings)
-        write_prepared_system_events(db, (event,))
+    save_log_settings(retention_days, minimum_level or log_settings()["minimumLevel"])
+    from app.modules.system.infrastructure.events import event_record
+    append_log_event(event_record(event))
 
 
 def persist_opds_settings_update(
@@ -235,9 +208,7 @@ def persist_system_settings_update(
 
 
 def clear_system_events(db: Session) -> int:
-    with SystemWriteTransaction(db):
-        deleted = clear_all_system_events(db)
-    return deleted
+    return clear_all_system_events(db)
 
 
 def create_or_reuse_health_run(
@@ -311,7 +282,7 @@ __all__ = [
     "QueueHeartbeatPump",
     "clear_all_system_events",
     "clear_system_events",
-    "configured_max_event_bytes",
+    "configured_retention_days",
     "create_or_reuse_health_run",
     "delete_setting",
     "delete_settings",
@@ -342,7 +313,7 @@ __all__ = [
     "record_queue_heartbeat",
     "record_system_event",
     "run_system_health_checks",
-    "set_max_event_bytes",
+    "set_retention_days",
     "start_health_run",
     "system_event_size_bytes",
     "system_event_storage_view",

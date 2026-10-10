@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -26,8 +27,10 @@ def resolve_publication_source(raw_path: str, source_root: Path) -> Path:
     try:
         resolved_root = source_root.expanduser().resolve(strict=True)
     except FileNotFoundError as error:
+        capture_exception(error, persist=False)
         raise PublicationNotFoundError from error
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("publication source root is unavailable") from error
     candidate = Path(raw_path)
     if not candidate.is_absolute():
@@ -35,12 +38,15 @@ def resolve_publication_source(raw_path: str, source_root: Path) -> Path:
     try:
         resolved = candidate.expanduser().resolve(strict=True)
     except FileNotFoundError as error:
+        capture_exception(error, persist=False)
         raise PublicationNotFoundError from error
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("publication source is unavailable") from error
     try:
         resolved.relative_to(resolved_root)
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise PublicationCorruptError(
             "publication source escapes its library"
         ) from error

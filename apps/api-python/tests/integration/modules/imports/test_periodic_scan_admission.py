@@ -178,7 +178,7 @@ def test_failed_periodic_request_waits_for_next_interval(db_session, test_settin
         coordinator.tick()
     assert calls == ["healthy", "failing"]
     assert coordinator._next_periodic_at > datetime.now(UTC)
-    assert "library_scan.request_failed" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "synthetic enqueue failure" in caplog.text
 
 

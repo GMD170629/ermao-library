@@ -12,6 +12,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.domain.access import AutomationAccessError
 
 
@@ -45,6 +46,7 @@ class AutomationTokenVault:
                 return self._read_key()
             except FileNotFoundError as error:
                 # diagnostics-control-flow: Only an explicitly authorized first initialization may create the absent key; decrypt/non-initializing calls preserve FileNotFoundError as their cause, covered by immutable-key tests.
+                capture_exception(error, level="debug")
                 if not initialize:
                     raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from error
             self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -58,9 +60,10 @@ class AutomationTokenVault:
                     os.fsync(stream.fileno())
                 try:
                     os.link(temporary, self._key_path)
-                except FileExistsError:
+                except FileExistsError as _caught_error:
                     # diagnostics-control-flow: A concurrent first issuer already published the authoritative immutable key; tested by concurrent key creation.
-                    pass  # A concurrent first issuer published the authoritative key.
+                    capture_exception(_caught_error)
+                    # A concurrent first issuer published the authoritative key.
                 # Windows does not expose directory handles through os.open.
                 # The key file itself is flushed on every supported platform.
                 if sys.platform != "win32":
@@ -73,6 +76,7 @@ class AutomationTokenVault:
                 os.unlink(temporary)
             return self._read_key()
         except OSError as error:
+            capture_exception(error, persist=False)
             raise AutomationAccessError("TOKEN_KEY_UNAVAILABLE") from error
 
     @staticmethod
@@ -99,4 +103,5 @@ class AutomationTokenVault:
                 payload[:12], payload[12:], self._binding(user_id, grant_id)
             ).decode("utf-8")
         except (ValueError, binascii.Error, InvalidTag) as error:
+            capture_exception(error, persist=False)
             raise AutomationAccessError("TOKEN_DECRYPTION_FAILED") from error

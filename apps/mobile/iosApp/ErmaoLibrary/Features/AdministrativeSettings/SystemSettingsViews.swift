@@ -362,7 +362,7 @@ struct SystemLogsView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<LogPage> = .idle
     @State private var filter = LogFilter(query: "", levels: Set(LogLevel.allCases), source: nil, since: Calendar.current.date(byAdding: .day, value: -7, to: Date()))
-    @State private var settings = LogSettings(limitMegabytes: 50)
+    @State private var settings = LogSettings(retentionDays: 3)
     @State private var initialSettings: LogSettings?
     @State private var manageShown = false
     @State private var clearShown = false
@@ -375,13 +375,12 @@ struct SystemLogsView: View {
         AdministrativeStateView(state: state, retry: load) { page in
             SettingsList {
                 Section {
-                    SettingsValueRow(LocalizedStringKey(copy[.logCapacity]), value: "\(page.usedBytes.administrativeByteCount) / \(page.limitBytes.administrativeByteCount)", systemImage: "doc")
-                    ProgressView(value: Double(page.usedBytes), total: Double(max(page.limitBytes, 1))).tint(theme.brandAccent)
+                    SettingsValueRow(LocalizedStringKey(copy[.logRetention]), value: "\(page.retentionDays)", systemImage: "doc")
                     SettingsActionRow(LocalizedStringKey(copy[.manageLogs])) { manageShown = true }
                         .disabled(store.operationInFlight != nil)
                 }
                 ForEach(page.events) { event in
-                    DisclosureGroup { if let correlationID = event.correlationID { LabeledContent(copy[.correlationID], value: correlationID) }; if let target = event.target { LabeledContent(copy[.targetCategory], value: target) } } label: { VStack(alignment: .leading, spacing: .spaceHalf) { HStack { Text(event.timestamp.administrativeFormatted(locale: copy.locale)).font(.caption).foregroundStyle(theme.textSecondary); Text(level(event.level)).font(.caption).foregroundStyle(event.level == .error ? .red : event.level == .warning ? .orange : .blue); Text(event.source).font(.caption) }; Text(event.summary) } }
+                    VStack(alignment: .leading, spacing: .spaceHalf) { HStack { Text(event.timestamp.administrativeFormatted(locale: copy.locale)).font(.caption).foregroundStyle(theme.textSecondary); Text(level(event.level)).font(.caption).foregroundStyle(event.level == .error ? .red : event.level == .warning ? .orange : .blue); Text(event.source).font(.caption) }; Text(event.summary) }
                 }
             }.overlay { if page.events.isEmpty { AdministrativeEmptyView(title: copy[.noResults], systemImage: "doc.text.magnifyingglass") } }
         }.navigationTitle(copy[.logsTitle]).navigationBarTitleDisplayMode(.inline).searchable(text: $filter.query, prompt: copy[.searchLogs]).onSubmit(of: .search, load)
@@ -398,12 +397,12 @@ struct SystemLogsView: View {
     private var manageSheet: some View {
         NavigationStack {
             SettingsForm {
-                Section(copy[.logCapacity]) {
-                    SettingsFieldRow(LocalizedStringKey(copy[.capacityMegabytes])) {
+                Section(copy[.logRetention]) {
+                    SettingsFieldRow(LocalizedStringKey(copy[.retentionDays])) {
                         Stepper(
-                            "\(settings.limitMegabytes)",
-                            value: $settings.limitMegabytes,
-                            in: AdministrativeInputValidation.logMegabytesRange,
+                            "\(settings.retentionDays)",
+                            value: $settings.retentionDays,
+                            in: AdministrativeInputValidation.logRetentionDaysRange,
                             step: 1
                         )
                     }
@@ -422,7 +421,7 @@ struct SystemLogsView: View {
                 ToolbarItem(placement: .cancellationAction) { Button(copy[.close]) { manageShown = false } }
                 ToolbarItem(placement: .confirmationAction) {
                     AdministrativeToolbarAction(
-                        title: copy[.saveCapacity],
+                        title: copy[.saveRetention],
                         working: store.operationInFlight == "save-log-settings",
                         disabled: logSaveIsDisabled,
                         action: saveSettings
@@ -438,7 +437,7 @@ struct SystemLogsView: View {
         guard let initialSettings else { return true }
         return store.operationInFlight != nil || settings == initialSettings
     }
-    private func level(_ value: LogLevel) -> String { switch value { case .information: copy[.information]; case .warning: copy[.warning]; case .error: copy[.failed] } }
+    private func level(_ value: LogLevel) -> String { switch value { case .debug: copy[.debugLog]; case .information: copy[.information]; case .warning: copy[.warning]; case .error: copy[.failed] } }
     private func load() { Task { await loadAsync() } }; private func loadAsync() async { let request = filter; state = .loading; state = await store.load(scope: "logs") { try await store.client.loadLogs(filter: request) } }; private func loadAll() async { async let page: Void = loadAsync(); if let loaded = await store.loadValue(scope: "log-settings", operation: { try await store.client.loadLogSettings() }) { settings = loaded; initialSettings = loaded }; _ = await page }
     private func saveSettings() {
         guard let originalSettings = initialSettings, settings != originalSettings, store.operationInFlight == nil else { return }

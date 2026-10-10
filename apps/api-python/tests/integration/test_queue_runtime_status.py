@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import QueueRuntimeState
 from app.modules.system.infrastructure.queue_runtime import QueueHeartbeatPump
+from tests.support.log_events import log_records
 
 
 def test_periodic_heartbeat_preserves_paused_status(db_session):
@@ -44,12 +45,12 @@ def test_dead_consumer_cannot_report_healthy_from_heartbeat_thread(db_session):
 def test_every_heartbeat_write_failure_retains_real_database_cause(
     db_session, monkeypatch, caplog
 ):
+    from app.modules.system.infrastructure.log_files import save_log_settings
+    save_log_settings(3, "debug")
     import sqlite3
 
-    from sqlalchemy import select
     from sqlalchemy.exc import OperationalError
 
-    from app.models.settings import SystemEvent
     from app.modules.system.infrastructure import queue_runtime
 
     factory = sessionmaker(bind=db_session.get_bind())
@@ -69,18 +70,14 @@ def test_every_heartbeat_write_failure_retains_real_database_cause(
     monkeypatch.setattr(queue_runtime, "write_prepared_queue_runtime", fail_write)
     pump.pulse()
     pump.pulse()
-    with factory() as db:
-        events = db.scalars(
-            select(SystemEvent).where(SystemEvent.action == "queue.heartbeat_deferred")
-        ).all()
+    with factory() as _db:
+        events = [row for row in log_records() if row.action == 'queue.heartbeat_deferred']
     assert len(events) == 2
-    assert {event.metadata_json["attempt"] for event in events} == {1, 2}
-    assert {event.metadata_json["taskId"] for event in events} == {
-        "heartbeat-diag-test"
-    }
+    assert len({event.id for event in events}) == 2
+    assert all("taskId" not in event.metadata_json for event in events)
     for event in events:
         cause = event.metadata_json["diagnostics"]["rootCause"]
         assert cause["databaseCode"] == sqlite3.SQLITE_BUSY
         assert cause["databaseErrorName"] == "SQLITE_BUSY"
         assert cause["message"] == "database is locked"
-    assert caplog.text.count("queue.heartbeat_write_deferred diagnostic_id=") == 2
+    assert len([record for record in caplog.records if "UPDATE QueueRuntimeState" in record.getMessage()]) == 2

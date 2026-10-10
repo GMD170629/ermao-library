@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.backup.application.operations import (
     BackupCompatibility,
     BackupOperationError,
@@ -74,6 +74,7 @@ def inspect_backup(path: Path, required_revision: str) -> InspectedBackup:
                 try:
                     datetime.fromisoformat(str(raw["createdAt"]))
                 except ValueError as error:
+                    capture_exception(error, persist=False)
                     raise BackupOperationError(
                         problem(
                             "BACKUP_METADATA_INVALID",
@@ -128,11 +129,11 @@ def inspect_backup(path: Path, required_revision: str) -> InspectedBackup:
             if issue:
                 status = "incompatible"
     except Exception as error:  # noqa: BLE001 - isolate one damaged archive; retain diagnostics.
+        capture_exception(error, persist=False)
         record_exception(
             logging.getLogger(__name__),
             "backup.inspect.failed",
             error,
-            context={"stage": "inspect"},
         )
         status = "unreadable"
         if isinstance(error, BackupOperationError):

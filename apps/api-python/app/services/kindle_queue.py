@@ -26,6 +26,7 @@ from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import (
+    capture_exception,
     exception_diagnostic_boundary,
     record_exception,
 )
@@ -75,8 +76,8 @@ def _library_asset_path(file_row: dict[str, Any]) -> Path | None:
         if resolved == library_root or library_root in resolved.parents:
             return resolved
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "services.kindle_queue._library_asset_path.failed", error,
-                         context={"step": "_library_asset_path"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "services.kindle_queue._library_asset_path.failed", error)
         return None
     return None
 
@@ -147,8 +148,6 @@ def _prepared_event(
         message=message,
         level=level,
         actor_type="system",
-        target_type="kindleSendTask",
-        target_id=str(task.get("id") or ""),
         metadata={
             "bookId": task.get("bookId"),
             "assetId": task.get("assetId"),
@@ -249,19 +248,20 @@ def _send_task(db: Session, _settings: Settings, task: dict[str, Any]) -> None:
     # SMTP and provider libraries expose heterogeneous exceptions; translate
     # them at this adapter boundary before the queue records the failure.
     except Exception as exc:
+        capture_exception(exc, persist=False)
         raise _smtp_error(exc, config.password) from exc
     finally:
         if client is not None:
             try:
                 client.quit()
             except (OSError, smtplib.SMTPException) as error:
-                record_exception(logging.getLogger(__name__), "services.kindle_queue._send_task.failed", error,
-                                 context={"step": "_send_task", "task_id": str(task.get("id") or "")})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "services.kindle_queue._send_task.failed", error)
                 client.close()
 
 
 def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
-    with exception_diagnostic_boundary(LOGGER, "kindle.task_failed", context={"step": "kindle_send"}):
+    with exception_diagnostic_boundary(LOGGER, "kindle.task_failed"):
         try:
             queued = next_queued_task(db)
             db.close()
@@ -275,23 +275,15 @@ def process_next_kindle_send_task(db: Session, settings: Settings) -> bool:
             # Task processing is a queue containment boundary: translate every
             # adapter failure into the durable retry/failure state for this task.
             except Exception as exc:  # noqa: BLE001
+                capture_exception(exc, persist=False)
                 record_exception(
                     LOGGER,
                     "kindle_queue.task_failed",
                     exc,
                     level="warning",
-                    context={
-                        "stage": "kindle_send",
-                        "outcome": "failed",
-                        "task_id": str(task.get("id")) if task.get("id") else None,
-                        "resource_id": str(task.get("assetId"))
-                        if task.get("assetId")
-                        else None,
-                    },
                     source="kindle",
                     action="kindle.task_failed",
-                    target_type="kindleSendTask",
-                    target_id=str(task.get("id")) if task.get("id") else None,
+
                 )
                 error = (
                     exc
@@ -369,11 +361,6 @@ def recover_interrupted_tasks(db: Session) -> int:
             KindleSendError(
                 "Startup observed persisted sending state without a terminal SMTP result; delivery outcome and interruption cause were not provided"
             ),
-            context={
-                "task_id": str(task["id"]), "resource_id": task.get("assetId"),
-                "book_id": task.get("bookId"), "step": "startup_recovery", "outcome": "unknown",
-                "attempt": task.get("attemptCount"),
-            },
         )
     prepared_events = [
         _prepared_event(
@@ -430,7 +417,7 @@ class KindleSendQueueWorker:
             self._thread.join()
 
     def process_once(self) -> bool:
-        with exception_diagnostic_boundary(LOGGER, "kindle_queue.execution", context={}):
+        with exception_diagnostic_boundary(LOGGER, "kindle_queue.execution"):
             if not self._process_lock.acquire(blocking=False):
                 return False
             try:
@@ -439,11 +426,11 @@ class KindleSendQueueWorker:
             # The worker boundary must keep the queue alive after an unexpected
             # database or adapter failure.
             except Exception as exc:
+                capture_exception(exc, persist=False)
                 record_exception(
                     LOGGER,
                     "kindle_queue.task_failed",
                     exc,
-                    context={"stage": "kindle_queue", "outcome": "error"},
                     source="kindle",
                     action="kindle.task_failed",
                 )
@@ -462,15 +449,12 @@ class KindleSendQueueWorker:
                         recover_interrupted_tasks(db)
                     break
                 except Exception as exc:  # noqa: BLE001 - gate claims until recovery succeeds.
+                    capture_exception(exc, persist=False)
                     retry = is_database_busy_error(exc)
                     record_exception(
                         LOGGER,
                         "kindle_queue.recovery_failed",
                         exc,
-                        context={
-                            "stage": "recovery",
-                            "outcome": "retrying" if retry else "paused",
-                        },
                         source="kindle",
                         action="kindle.recovery_failed",
                     )
@@ -490,11 +474,11 @@ class KindleSendQueueWorker:
                         processed=processed, error=None, status="running"
                     )
                 except Exception as exc:  # noqa: BLE001 - thread must not die
+                    capture_exception(exc, persist=False)
                     record_exception(
                         LOGGER,
                         "kindle_queue.loop_failure",
                         exc,
-                        context={"stage": "kindle_queue", "outcome": "error"},
                         source="kindle",
                         action="kindle.loop_failure",
                     )
@@ -524,7 +508,8 @@ def start_kindle_send_queue_worker(
     worker = KindleSendQueueWorker(db_factory, settings, heartbeat_db_factory)
     try:
         worker.start()
-    except BaseException:
+    except BaseException as _caught_error:
+        capture_exception(_caught_error)
         worker.stop()
         raise
     return worker

@@ -33,15 +33,14 @@ _STABLE_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 async def diagnostic_http_exception_handler(
     request: Request, error: HTTPException
 ) -> Response:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger("ermao.api_diagnostics"),
         "api.request_rejected",
         error,
         level="warning" if error.status_code < 500 else "error",
-        context={"stage": "http_exception", "outcome": str(error.status_code)},
     )
     response = await http_exception_handler(request, error)
-    response.headers["X-Error-Id"] = diagnostic_id
+
     return response
 
 
@@ -49,15 +48,11 @@ async def typed_http_error_handler(
     _request: Request,
     error: HttpContractError[BaseModel],
 ) -> JSONResponse:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger("ermao.api_diagnostics"),
         "api.request_rejected",
         error,
         level="warning" if error.status_code < 500 else "error",
-        context={
-            "stage": "http_contract",
-            "outcome": getattr(error.body, "code", None),
-        },
     )
     envelope_type = cast(
         type[ErrorEnvelope[BaseModel]],
@@ -68,7 +63,7 @@ async def typed_http_error_handler(
         status_code=error.status_code,
         content=envelope.model_dump(mode="json", by_alias=True),
     )
-    response.headers["X-Error-Id"] = diagnostic_id
+
     if (
         isinstance(error.body, MessageError)
         and error.body.code is not None
@@ -115,12 +110,11 @@ async def request_validation_error_handler(
     _request: Request,
     error: RequestValidationError,
 ) -> JSONResponse:
-    diagnostic_id = record_exception(
+    record_exception(
         logging.getLogger("ermao.api_diagnostics"),
         "api.request_validation_failed",
         error,
         level="warning",
-        context={"stage": "http_validation"},
     )
     issues = [
         RequestValidationIssue(
@@ -151,6 +145,6 @@ async def request_validation_error_handler(
     )
     return JSONResponse(
         status_code=422,
-        headers={"X-Error-Id": diagnostic_id},
+        headers={},
         content=envelope.model_dump(mode="json", by_alias=True),
     )

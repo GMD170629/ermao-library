@@ -11,7 +11,7 @@ import struct
 import zipfile
 from enum import StrEnum
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 
 
 class ArchivePathProblem(StrEnum):
@@ -75,8 +75,8 @@ def zip_entry_data_span(
         start = info.header_offset + 30 + name_length + extra_length
         return start, start + info.compress_size
     except (OSError, ValueError) as error:
-        record_exception(logging.getLogger(__name__), "infrastructure.archive_integrity.zip_entry_data_span.failed", error,
-                         context={"step": "zip_entry_data_span"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "infrastructure.archive_integrity.zip_entry_data_span.failed", error)
         return None
     finally:
         file_pointer.seek(position)

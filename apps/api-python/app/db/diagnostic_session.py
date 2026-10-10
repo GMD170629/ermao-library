@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from uuid import uuid4
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.core.exception_diagnostics import (
     DiagnosticSnapshot,
+    capture_exception,
     emergency_diagnostic,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
@@ -48,25 +48,20 @@ class DiagnosticSession(Session):
                 logging.getLogger(__name__),
                 action,
                 error,
-                context={
-                    "step": f"before_{step}_cleanup" if observing_original else step,
-                    "parent_diagnostic_id": parent.diagnostic_id if parent else None,
-                },
             )
             self.info.setdefault("pending_diagnostics", {})[snapshot.diagnostic_id] = (
                 snapshot
             )
             return snapshot
         except Exception as diagnostic_error:  # noqa: BLE001 - diagnostics cannot prevent transaction cleanup
-            diagnostic_id = f"diag_{uuid4().hex}"
+            capture_exception(diagnostic_error)
             emergency_diagnostic(
-                action, error, diagnostic_id=diagnostic_id
+                action, error
             )
             emergency_diagnostic(
                 "database.diagnostic_capture_failed",
                 diagnostic_error,
-                diagnostic_id=f"diag_{uuid4().hex}",
-                parent_diagnostic_id=diagnostic_id,
+
             )
             return None
 
@@ -77,17 +72,18 @@ class DiagnosticSession(Session):
             try:
                 persist_exception_diagnostic(logging.getLogger(__name__), snapshot)
             except Exception as error:  # noqa: BLE001 - transaction result must remain unchanged
+                capture_exception(error)
                 emergency_diagnostic(
                     "database.diagnostic_persist_failed",
                     error,
-                    diagnostic_id=f"diag_{uuid4().hex}",
-                    parent_diagnostic_id=snapshot.diagnostic_id,
+
                 )
 
     def commit(self) -> None:
         try:
             super().commit()
         except Exception as error:
+            capture_exception(error, persist=False)
             self._capture_failure(error, "commit")
             raise
         finally:
@@ -117,9 +113,9 @@ class DiagnosticSession(Session):
                     write_prepared_system_events(diagnostics_db, [prepared])
                     diagnostics_db.commit()
         except Exception as error:  # noqa: BLE001 - diagnostics cannot alter commit result
+            capture_exception(error)
             emergency_diagnostic(
                 "database.slow_transaction_persist_failed", error,
-                diagnostic_id=f"diag_{uuid4().hex}",
             )
 
     def rollback(self) -> None:
@@ -127,6 +123,7 @@ class DiagnosticSession(Session):
         try:
             super().rollback()
         except Exception as error:
+            capture_exception(error, persist=False)
             self._capture_failure(error, "rollback", original)
             raise
         finally:
@@ -138,6 +135,7 @@ class DiagnosticSession(Session):
         try:
             super().close()
         except Exception as error:
+            capture_exception(error, persist=False)
             self._capture_failure(error, "close", original)
             raise
         finally:

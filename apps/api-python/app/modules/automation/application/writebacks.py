@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.execution import RecheckMutationAccess
 from app.modules.automation.application.grants import GrantUnitOfWork
 from app.modules.automation.application.receipts import (
@@ -102,7 +103,8 @@ class AutomationWritebacks:
             self.store.save(plan)
             self.uow.commit()
             return writeback_plan_result(plan)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise
 
@@ -132,7 +134,8 @@ class AutomationWritebacks:
             self.receipts.complete(access.grant_id, request_id, result)
             self.uow.commit()
             return result
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise
 
@@ -152,6 +155,7 @@ class AutomationWritebacks:
             require_writeback_plan(current, status.plan)
             self.uow.commit()
             return writeback_progress_result(status)
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self.uow.rollback()
             raise

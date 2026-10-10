@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.domain.access import AutomationAccessError
 from app.modules.library.public import MetadataChange, MetadataTarget, MetadataValue
 from app.modules.metadata.public import MetadataFileSource, StandardMetadataObservation
@@ -60,6 +61,7 @@ def project_file_metadata(
             try:
                 parsed = datetime.fromisoformat(str(value))
             except ValueError as error:
+                capture_exception(error, persist=False)
                 raise AutomationAccessError(
                     "SOURCE_DATE_PRECISION_UNSUPPORTED"
                 ) from error

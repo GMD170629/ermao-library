@@ -9,10 +9,15 @@ from app.modules.library.infrastructure.source_paths import (
 )
 
 
-def test_missing_optional_source_path_is_normal(tmp_path):
+def test_missing_optional_source_path_is_logged_without_adding_database_writes(tmp_path, caplog):
+    caplog.set_level("DEBUG", logger="ermao.exceptions")
     with deferred_exception_persistence() as pending:
         assert resolve_existing_library_file(str(tmp_path), "absent.epub") is None
-    assert pending == []
+    assert len(pending) == 1
+    assert pending[0].level == "debug"
+    assert pending[0].persisted is False
+    assert "FileNotFoundError" in caplog.text
+    assert "absent.epub" in caplog.text
 
 
 @pytest.mark.parametrize("number", [errno.EACCES, errno.EIO])
@@ -25,4 +30,4 @@ def test_optional_source_io_failure_retains_actual_errno(tmp_path, monkeypatch, 
     assert len(pending) == 1
     assert pending[0].metadata["diagnostics"]["rootCause"]["errno"] == number
     assert "source resolution failed" in caplog.text
-    assert "/private/books" not in caplog.text
+    assert "/private/books" in caplog.text

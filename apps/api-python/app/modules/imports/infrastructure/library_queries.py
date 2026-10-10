@@ -20,7 +20,7 @@ from app.core.authorization import (
     AuthorizationContext,
     library_visibility_predicate,
 )
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import (
     Library,
     LibraryBookMetadata,
@@ -119,16 +119,16 @@ def library_id_for_path(db: Session, target: Path) -> str | None:
     try:
         resolved_target = target.expanduser().resolve()
     except OSError as error:
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error,
-                         context={"step": "library_id_for_path"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error)
         return None
     for row in db.scalars(select(Library).where(Library.enabled.is_(True))).all():
         try:
             root = Path(row.root_path).expanduser().resolve()
             resolved_target.relative_to(root)
         except (OSError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error,
-                             context={"step": "library_id_for_path"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error)
             continue
         return row.id
     return None

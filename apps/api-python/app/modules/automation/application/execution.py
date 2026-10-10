@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.grants import AuthorizeAutomation
 from app.modules.automation.application.settings import AutomationSettingsPort
 from app.modules.automation.domain.access import (
@@ -45,6 +46,7 @@ class RecheckMoveAccess:
             )
             current.require(Scope.FILES_MODIFY)
         except AutomationAccessError as error:
+            capture_exception(error, persist=False)
             raise FileMoveError("AUTHORIZATION_REVOKED") from error
         return MoveActor(
             current.user_id,

@@ -1,9 +1,6 @@
 """Narrow diagnostic boundary for application-owned failure handling."""
 
-from collections.abc import Mapping
 from typing import Protocol
-
-DiagnosticContext = Mapping[str, str | int | bool | None]
 
 
 class DiagnosticHandle(Protocol):
@@ -13,7 +10,7 @@ class DiagnosticHandle(Protocol):
 
 class FailureDiagnostics(Protocol):
     def prepare(
-        self, error: BaseException, *, event: str, context: DiagnosticContext
+        self, error: BaseException, *, event: str
     ) -> DiagnosticHandle:
         """Capture the original failure before rollback or error conversion."""
         ...

@@ -13,7 +13,7 @@ async function mockFeedbackApi(page: Page, locale: 'zh-CN' | 'en-US') {
       const draft = route.request().postDataJSON();
       await route.fulfill({ json: { ok: true, data: { previewHash: 'a'.repeat(64), diagnostics: {
         ...(draft.includeEnvironment ? { environment: { appVersion: '1.5.1', installationMethod: draft.installationMethod, ...draft.clientEnvironment } } : {}),
-        ...(draft.eventId ? { log: { selectedEventId: draft.eventId, events: [{ id: draft.eventId, message: 'Read failed' }], relatedBooks: [] } } : {})
+        ...(draft.eventId ? { log: { selectedEventId: draft.eventId, events: [{ id: draft.eventId, message: 'Read failed' }] } } : {})
       } } } });
     } else if (path === '/api/feedback' && route.request().method() === 'POST') {
       sends++;
@@ -21,9 +21,9 @@ async function mockFeedbackApi(page: Page, locale: 'zh-CN' | 'en-US') {
         ? { status: 503, json: { ok: false, error: { code: 'FEEDBACK_DELIVERY_FAILED', message: '暂时失败' } } }
         : { json: { ok: true, data: { id: 'FB-TEST', status: 'sent' } } });
     } else if (path === '/api/management/events') {
-      await route.fulfill({ json: { ok: true, data: { events: [{ id: 'event-1', level: 'error', source: 'reader', actorType: 'system', action: 'open', targetType: 'book', targetId: 'book-1', message: 'Read failed', metadata: {}, createdAt: '2026-09-29T10:00:00Z' }], total: 1, totalPages: 1, storage: { sizeBytes: 100, maxBytes: 5 * 1024 * 1024 } } } });
+      await route.fulfill({ json: { ok: true, data: { events: [{ id: 'event-1', level: 'error', source: 'reader', actorType: 'system', action: 'open', message: 'Read failed', metadata: {}, createdAt: '2026-09-29T10:00:00Z' }], total: 1, totalPages: 1, storage: { sizeBytes: 100, retentionDays: 3, minimumLevel: 'error' } } } });
     } else if (path === '/api/management/events/event-1') {
-      await route.fulfill({ json: { ok: true, data: { id: 'event-1', level: 'error', source: 'reader', actorType: 'system', action: 'open', targetType: 'book', targetId: 'book-1', message: 'Read failed', metadata: {}, createdAt: '2026-09-29T10:00:00Z' } } });
+      await route.fulfill({ json: { ok: true, data: { id: 'event-1', level: 'error', source: 'reader', actorType: 'system', action: 'open', message: 'Read failed', metadata: {}, createdAt: '2026-09-29T10:00:00Z' } } });
     } else {
       await route.fulfill({ json: { ok: true, data: {} } });
     }

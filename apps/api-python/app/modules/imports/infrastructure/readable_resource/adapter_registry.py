@@ -16,8 +16,11 @@ from app.contracts.local_metadata import (
 from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
-from app.core.exception_diagnostics import record_exception
-from app.core.safe_errors import safe_error_message
+from app.core.exception_diagnostics import (
+    capture_exception,
+    exception_message,
+    record_exception,
+)
 from app.infrastructure.bounded_inspection import (
     COVER_BYTES,
     METADATA_BYTES,
@@ -236,8 +239,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             pass  # Verify access without consuming source contents.
         navigation_units: tuple[ResourceNavigationUnitInput, ...] = ()
         page_count: int | None = None
-        # OS exceptions quote/escape filenames; parser errors may use the plain path.
-        private_path_forms = [str(absolute_path), repr(str(absolute_path))[1:-1]]
         audio_metadata: AudioFileMetadata | None = None
         local_audio_metadata: LocalAudioMetadata | None = None
         embedded: LocalMetadataCandidate | None = None
@@ -255,26 +256,26 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             try:
                 audio_metadata = self._audio_metadata.inspect(absolute_path)
             except AudioInspectionError as exc:
-                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc,
-                                 context={"step": "parse_file"})
+                capture_exception(exc, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc)
                 return FileParseResult(
                     ok=False,
                     adapter=adapter,
                     resource_title=None,
                     asset=None,
                     error_code=exc.code,
-                    error_summary=safe_error_message(exc, private_path_forms),
+                    error_summary=exception_message(exc),
                 )
             except (OSError, ValueError) as exc:
-                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc,
-                                 context={"step": "parse_file"})
+                capture_exception(exc, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc)
                 return FileParseResult(
                     ok=False,
                     adapter=adapter,
                     resource_title=None,
                     asset=None,
                     error_code="AUDIO_METADATA_INVALID",
-                    error_summary=safe_error_message(exc, private_path_forms),
+                    error_summary=exception_message(exc),
                 )
             local_audio_metadata = self._map_audio_metadata(audio_metadata)
         effective_resource_path = resource_absolute_path or (
@@ -332,9 +333,9 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 try:
                     validated_cover_suffix(sidecar.cover)
                     prefer_sidecar_cover = True
-                except ValueError:
+                except ValueError as _caught_error:
                     # diagnostics-control-flow: Cover preparation records this rejected optional candidate.
-                    pass
+                    capture_exception(_caught_error)
             try:
                 inspection = inspect_comic_archive(
                     absolute_path,
@@ -342,19 +343,19 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     include_cover=not prefer_sidecar_cover,
                 )
             except InspectionLimitReached as error:
-                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", error,
-                                 context={"step": "parse_file"})
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", error)
                 inspection = None
             except (ComicArchiveError, OSError, ValueError) as exc:
-                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc,
-                                 context={"step": "parse_file"})
+                capture_exception(exc, persist=False)
+                record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry.parse_file.failed", exc)
                 return FileParseResult(
                     ok=False,
                     adapter=adapter,
                     resource_title=None,
                     asset=None,
                     error_code="COMIC_ARCHIVE_INVALID",
-                    error_summary=safe_error_message(exc, private_path_forms),
+                    error_summary=exception_message(exc),
                     local_metadata=resolved,
                 )
             if inspection is not None:
@@ -476,8 +477,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 with source.independent_read(COVER_BYTES + 65558):
                     cover = self._epub_cover(archive, opf_name, metadata.cover_href)
         except (BadZipFile, KeyError, OSError, ValueError, ElementTree.ParseError) as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_epub_details.failed", error,
-                             context={"step": "_inspect_epub_details"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_epub_details.failed", error)
             return candidate, units
         return LocalMetadataCandidate(
             source="EMBEDDED",
@@ -589,8 +590,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         try:
             inspection = inspect_pdf(path)
         except (OSError, RuntimeError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_pdf.failed", error,
-                             context={"step": "_inspect_pdf"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_pdf.failed", error)
             return None
         return (
             LocalMetadataCandidate(
@@ -621,8 +622,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         try:
             inspection = inspect_reflowable_book(path, source_format)
         except (OSError, ValueError) as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_reflowable.failed", error,
-                             context={"step": "_inspect_reflowable"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_reflowable.failed", error)
             return None
         titles = titles_from_local_source(
             inspection.title,
@@ -663,8 +664,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 return None
             content = archive.read(info)
         except (KeyError, OSError, BadZipFile) as error:
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._epub_cover.failed", error,
-                             context={"step": "_epub_cover"})
+            capture_exception(error, persist=False)
+            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._epub_cover.failed", error)
             return None
         prefix = content[:16]
         valid = prefix.startswith(
@@ -684,8 +685,8 @@ def _disc_number_from_path(path: Path, resource_root: Path) -> int | None:
     try:
         parents = path.relative_to(resource_root).parts[:-1]
     except ValueError as error:
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._disc_number_from_path.failed", error,
-                         context={"step": "_disc_number_from_path"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._disc_number_from_path.failed", error)
         return None
     for name in reversed(parents):
         if not is_transparent_audiobook_directory_name(name):

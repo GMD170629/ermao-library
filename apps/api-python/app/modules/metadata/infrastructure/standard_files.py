@@ -19,7 +19,7 @@ from mutagen.mp4 import MP4
 from pypdf.errors import PdfReadError
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import (
     InspectionLimitReached,
     LimitedReader,
@@ -89,11 +89,11 @@ def read_comic_metadata(content: bytes) -> PublicationMetadata:
             value = float(raw)
             return value if math.isfinite(value) else None
         except ValueError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "metadata.comic_number_invalid",
                 error,
-                context={"step": "parse_comic_number"},
                 source="metadata",
             )
             return None
@@ -153,6 +153,7 @@ class AnchoredStandardMetadataReader:
             try:
                 return self._read_one(root, relative_path, source)
             except FileNotFoundError as error:
+                capture_exception(error, persist=False)
                 raise StandardMetadataError("SOURCE_NOT_FOUND") from error
         path = Path(relative_path)
         candidates = tuple(
@@ -174,6 +175,7 @@ class AnchoredStandardMetadataReader:
                 found.append(self._read_one(root, candidate, source))
             except FileNotFoundError as error:
                 # diagnostics-control-flow: optional sidecar candidates may be absent; no match is rejected below.
+                capture_exception(error, level="debug")
                 last_missing = error
                 continue
         if not found:
@@ -216,11 +218,11 @@ class AnchoredStandardMetadataReader:
                                 patch_comicinfo(content, metadata, frozenset({"title"}))
                                 writable = tuple(sorted(COMIC_WRITABLE_FIELDS))
                         except StandardMetadataError as error:
+                            capture_exception(error, persist=False)
                             record_exception(
                                 logging.getLogger(__name__),
                                 "metadata.sidecar_write_capability_unavailable",
                                 error,
-                                context={"step": "inspect_sidecar_write"},
                                 source="metadata",
                             )
                             writable = ()
@@ -258,11 +260,11 @@ class AnchoredStandardMetadataReader:
                                     )
                                 )
                             except StandardMetadataError as error:
+                                capture_exception(error, persist=False)
                                 record_exception(
                                     logging.getLogger(__name__),
                                     "metadata.archive_write_capability_unavailable",
                                     error,
-                                    context={"step": "inspect_archive_write"},
                                     source="metadata",
                                 )
                                 writable = ()
@@ -283,11 +285,11 @@ class AnchoredStandardMetadataReader:
                             PdfReadError,
                             etree.XMLSyntaxError,
                         ) as error:
+                            capture_exception(error, persist=False)
                             record_exception(
                                 logging.getLogger(__name__),
                                 "metadata.pdf_write_capability_unavailable",
                                 error,
-                                context={"step": "inspect_pdf_write"},
                                 source="metadata",
                             )
                             writable = ()
@@ -305,17 +307,18 @@ class AnchoredStandardMetadataReader:
                                 mp4_structure(stream, verify_payload=False)
                             writable = tuple(sorted(AUDIO_WRITABLE_FIELDS))
                         except (StandardMetadataError, InspectionLimitReached) as error:
+                            capture_exception(error, persist=False)
                             record_exception(
                                 logging.getLogger(__name__),
                                 "metadata.audio_write_capability_unavailable",
                                 error,
-                                context={"step": "inspect_audio_write"},
                                 source="metadata",
                             )
                             writable = ()
                     else:
                         raise StandardMetadataError("UNSUPPORTED_FORMAT")
-            except StandardMetadataError:
+            except StandardMetadataError as _caught_error:
+                capture_exception(_caught_error, persist=False)
                 raise
             except (
                 MutagenError,
@@ -325,6 +328,7 @@ class AnchoredStandardMetadataReader:
                 etree.XMLSyntaxError,
                 PdfReadError,
             ) as error:
+                capture_exception(error, persist=False)
                 raise StandardMetadataError("INVALID_METADATA") from error
             if file_revision(os.fstat(descriptor)) != file_revision(before):
                 raise StandardMetadataError("SOURCE_CHANGED")

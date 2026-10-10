@@ -22,7 +22,6 @@ from app.models import (
     ReaderResourceProgress,
 )
 from app.models.auth import User
-from app.models.settings import SystemEvent
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
@@ -32,6 +31,7 @@ from app.modules.reader.infrastructure.persistence.models import (
 )
 from app.modules.system.infrastructure.settings import upsert_setting
 from app.services.log_maintenance import SystemEventMaintenanceWorker
+from tests.support.log_events import log_records
 
 
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
@@ -215,11 +215,7 @@ def test_opds_catalog_keeps_download_and_retires_progression_without_writes(
     finally:
         event.remove(db_session.bind, "before_cursor_execute", capture_dml)
 
-    assert dml_statements
-    assert all(
-        statement.startswith('INSERT INTO "SystemEvent"')
-        for statement in dml_statements
-    )
+    assert dml_statements == []
     progress = db_session.scalar(
         select(ReaderResourceProgress).where(
             ReaderResourceProgress.user_id == "opds-user",
@@ -264,11 +260,7 @@ def test_opds_missing_resource_page_does_not_read_or_create_navigation_units(
             event.remove(db_session.bind, "before_cursor_execute", capture_dml)
 
     assert response.status_code == 404
-    assert dml_statements
-    assert all(
-        statement.startswith('INSERT INTO "SystemEvent"')
-        for statement in dml_statements
-    )
+    assert dml_statements == []
     assert (
         db_session.scalar(
             select(func.count()).select_from(ReadableResourceNavigationUnit)
@@ -287,6 +279,8 @@ def test_opds_authentication_is_read_only_and_does_not_log_credentials(
     caplog.set_level("INFO", logger="app.bootstrap.opds")
 
     with _client(test_settings, db_session) as client:
+        from app.modules.system.infrastructure.log_files import save_log_settings
+        save_log_settings(3, "debug")
         assert client.get("/opds/v1.2/catalog").status_code == 401
         assert (
             client.get(
@@ -303,9 +297,11 @@ def test_opds_authentication_is_read_only_and_does_not_log_credentials(
             == 200
         )
 
-    events = db_session.scalars(select(SystemEvent)).all()
-    assert len(events) == 2
-    assert all(event.metadata_json["diagnostics"]["id"] == event.id for event in events)
+    events = log_records()
+    rejected = [event for event in events if event.metadata_json.get("diagnostics", {}).get("exceptionType", "").endswith("OpdsAuthenticationRequired")]
+    assert len(rejected) == 2
+    assert len({event.id for event in rejected}) == 2
+    assert all("id" not in event.metadata_json["diagnostics"] for event in events)
     assert "reader-password" not in caplog.text
     assert "wrong-password" not in caplog.text
     assert "reader-password" not in str(

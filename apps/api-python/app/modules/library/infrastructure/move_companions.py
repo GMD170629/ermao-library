@@ -3,6 +3,7 @@
 import os
 from pathlib import Path, PurePosixPath
 
+from app.core.exception_diagnostics import capture_exception
 from app.infrastructure.sidecar_paths import same_stem_source_names, sidecar_opf_paths
 from app.modules.library.application.file_move_plans import MoveDestination, MoveSource
 from app.modules.library.domain.file_moves import (
@@ -74,6 +75,7 @@ def move_companion_paths(
         try:
             metadata = parse_opf_metadata(bytes(data))
         except OpfMetadataError as error:
+            capture_exception(error, persist=False)
             raise FileMoveError("SIDECAR_INVALID") from error
         if metadata.cover_href:
             href = PurePosixPath(metadata.cover_href)

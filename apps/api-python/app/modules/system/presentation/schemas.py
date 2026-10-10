@@ -143,7 +143,8 @@ class EventFacets(HttpContractModel):
 class EventPruneStorage(HttpContractModel):
     deleted: int
     size_bytes: int = Field(alias="sizeBytes")
-    max_bytes: int = Field(alias="maxBytes")
+    retention_days: int = Field(alias="retentionDays")
+    minimum_level: str = Field(alias="minimumLevel")
 
 
 class ManagementEventsPayload(HttpContractModel):

@@ -75,7 +75,6 @@ class ProviderPayload(HttpContractModel):
 class ProviderTestResult(HttpContractModel):
     ok: bool
     message: str
-    diagnosticId: str | None = None
 
 
 class ProviderTestPayload(HttpContractModel):

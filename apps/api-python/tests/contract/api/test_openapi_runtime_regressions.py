@@ -196,6 +196,9 @@ def test_management_events_and_overview_accept_real_event_metadata(
     client: TestClient,
     db_session: Session,
 ) -> None:
+    from app.modules.system.infrastructure.log_files import save_log_settings
+
+    save_log_settings(3, "info")
     user = _login_admin(client, db_session)
     metadata = {
         "sourceFormat": "TXT",

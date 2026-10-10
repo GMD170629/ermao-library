@@ -128,7 +128,7 @@ def test_registry_missing_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("error_kind", ["os", "value", "inspection"])
-def test_registry_failure_summary_hides_source_path(
+def test_registry_failure_summary_preserves_exception_type_and_source_path(
     tmp_path: Path, error_kind: str
 ) -> None:
     source = tmp_path / "private directory" / "track.mp3"
@@ -155,8 +155,13 @@ def test_registry_failure_summary_hides_source_path(
     assert result.error_code == "AUDIO_METADATA_INVALID"
     assert result.error_summary is not None
     assert "Permission denied" in result.error_summary
-    assert str(source) not in result.error_summary
-    assert repr(str(source))[1:-1] not in result.error_summary
+    if error_kind == "os":
+        assert result.error_summary == f"PermissionError: [Errno 13] Permission denied: {str(source)!r}"
+    elif error_kind == "value":
+        assert result.error_summary == f"ValueError: Permission denied: {source}"
+    else:
+        assert "AudioInspectionError: Permission denied:" in result.error_summary
+        assert str(source) in result.error_summary
 
 
 def test_registry_preserves_inspected_pdf_page_count(

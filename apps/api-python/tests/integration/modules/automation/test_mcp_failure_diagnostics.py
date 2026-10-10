@@ -1,9 +1,10 @@
-"""Real official-SDK calls can follow safe errors to their actual causes."""
+from tests.support.log_events import find_log
+
+"""Official SDK errors keep their business code; authorized logs retain raw causes."""
 
 import asyncio
 import errno
 import logging
-import re
 import socket
 
 import httpx2
@@ -13,7 +14,6 @@ from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy.orm import sessionmaker
 
 from app.main import create_app
-from app.models.settings import SystemEvent
 from app.modules.automation.infrastructure.runtime import DatabaseAutomationRuntime
 from tests.integration.modules.automation.test_mcp_catalog import seed
 
@@ -91,16 +91,14 @@ def test_official_sdk_failure_to_diagnostic_query(
                     assert "INTERNAL_ERROR" in text
                     assert "INVALID_ARGUMENT" not in text
                     assert "must-remain-secret" not in text
-                    diagnostic_id = re.search(
-                        r"diagnostic_id=(diag_[a-f0-9]+)", text
-                    ).group(1)
+                    assert "diagnostic_id=" not in text
                     async with asyncio.timeout(5):
                         while True:
                             found = await client.call_tool(
-                                "list_system_logs", {"search": diagnostic_id}
+                                "list_system_logs", {"search": "automation.request_failed"}
                             )
                             assert not found.is_error
-                            events = found.structured_content["events"]
+                            events = [event for event in found.structured_content["events"] if event["action"] == "automation.request_failed" and str(failure) in event["diagnostics"]["traceback"]]
                             if events:
                                 break
                             await asyncio.sleep(0.01)
@@ -115,8 +113,8 @@ def test_official_sdk_failure_to_diagnostic_query(
                     assert isinstance(summary["contextProvided"], bool)
                     assert isinstance(summary["contextsTruncated"], bool)
                     for name in ("directException", "directCause", "rootCause"):
-                        assert "location" not in summary.get(name, {})
-                    assert "traceback" not in summary
+                        assert "location" in summary.get(name, {})
+                    assert str(failure) in summary["traceback"]
                     if failure is contextual_failure:
                         assert summary["contextProvided"] is True
                         assert summary["contextsTruncated"] is False
@@ -124,14 +122,11 @@ def test_official_sdk_failure_to_diagnostic_query(
                         assert context["relationship"] == "context"
                         assert context["parentIndex"] == root["chainIndex"]
                         assert context["errno"] == errno.EACCES
-                        assert "location" not in context
+                        assert "location" in context
                         assert root["message"] == "rollback handling failed"
-                    assert events[0]["correlation"]["requestId"] == "mcp-real-failure"
-                    assert events[0]["correlation"]["step"] == "get_context"
-                    assert "/private/library" not in str(events)
-                    assert "must-remain-secret" not in str(events)
-                    with factory() as db:
-                        persisted = db.get(SystemEvent, diagnostic_id)
+                    assert "correlation" not in events[0]
+                    with factory() as _db:
+                        persisted = find_log(events[0]['id'])
                         assert persisted is not None
                         assert (
                             persisted.metadata_json["diagnostics"]["rootCause"]["type"]
@@ -140,7 +135,7 @@ def test_official_sdk_failure_to_diagnostic_query(
                 invalid = await client.call_tool("get_books", {"book_ids": []})
                 assert invalid.is_error
                 assert "INVALID_ARGUMENT" in invalid.content[0].text
-                assert "diagnostic_id=" in invalid.content[0].text
+                assert "diagnostic_id=" not in invalid.content[0].text
                 invalid_sensitive = await client.call_tool(
                     "get_books", {"book_ids": "PRIVATE-REQUEST-BODY-SENTINEL"}
                 )
@@ -155,6 +150,6 @@ def test_official_sdk_failure_to_diagnostic_query(
         asyncio.run(exercise())
     assert "ValueError: program defect" in caplog.text
     assert "PermissionError: [Errno 13] Permission denied" in caplog.text
-    assert "must-remain-secret" not in caplog.text
-    assert "/private/library" not in caplog.text
-    assert "PRIVATE-REQUEST-BODY-SENTINEL" not in caplog.text
+    assert "must-remain-secret" in caplog.text
+    assert "/private/library" in caplog.text
+    assert "PRIVATE-REQUEST-BODY-SENTINEL" in caplog.text

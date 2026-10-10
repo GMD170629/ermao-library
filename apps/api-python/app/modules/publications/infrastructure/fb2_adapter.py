@@ -18,6 +18,7 @@ from app.contracts.reader_safety_policy_generated import (
     reader_safety_budget,
     reader_safety_fb2_embedded_image_extension,
 )
+from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
@@ -180,15 +181,19 @@ def _xml_root(content: bytes) -> ElementTree.Element:
             expansion_limit_bytes=MAX_FB2_XML_EXPANSION_BYTES,
         )
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
+        capture_exception(error, persist=False)
         raise PublicationMarkupError("FB2 XML is invalid") from error
     except XmlPolicyExpansionLimitError as error:
+        capture_exception(error, persist=False)
         raise publication_parser_limit(
             ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
             "FB2 XML entity expansion exceeds the size limit",
         ) from error
     except XmlPolicyDecodeError as error:
+        capture_exception(error, persist=False)
         raise PublicationMarkupError("FB2 XML encoding is invalid") from error
     except XmlPolicyPreparationError as error:
+        capture_exception(error, persist=False)
         raise publication_native_parser_implementation_failure(
             ReaderSafetyRuleId.REFLOWABLE_PREPARE_XML,
             parser="reader-xml-policy",
@@ -572,6 +577,7 @@ def _snapshot(
     try:
         content = source_path.read_bytes()
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("FB2 source is unavailable") from error
     root = _xml_root(content)
     description = _first_descendant(root, "description")
@@ -709,6 +715,7 @@ class Fb2PublicationAdapter(PublicationAdapter):
                 try:
                     content = base64.b64decode(payload, validate=True)
                 except (ValueError, binascii.Error) as error:
+                    capture_exception(error, persist=False)
                     raise publication_integrity_failure(
                         ReaderSafetyRuleId.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE,
                         "FB2 binary resource is invalid",

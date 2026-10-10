@@ -139,7 +139,8 @@ def test_cross_library_move_with_source_and_target_scan_failures(
                 )
             }
             assert scans["lib-a"].state == "FAILED"
-            assert scans["lib-a"].error_summary == "SOURCE_SCAN_INCOMPLETE"
+            assert "SourceScanIncompleteError: SOURCE_SCAN_INCOMPLETE" in scans["lib-a"].error_summary
+            assert scans["lib-a"].error_summary.endswith("PermissionError: injected enumeration failure")
             assert scans["lib-b"].state == "FAILED"
             # The unrelated library's changed resource is fully imported.
             c_tasks = db.scalars(
@@ -185,10 +186,9 @@ def test_cross_library_move_with_source_and_target_scan_failures(
                 )
             )
             assert any(
-                "source_tree.scan.directory_unreadable" in record.getMessage()
-                and getattr(record, "library_id", None) == "lib-a"
-                and "PermissionError" in record.getMessage()
-                and "diagnostic_id=diag_" in record.getMessage()
+                "PermissionError: injected enumeration failure" in record.getMessage()
+                and "Traceback (most recent call last):" in record.getMessage()
+                and "diagnostic_id=" not in record.getMessage()
                 for record in caplog.records
             )
 

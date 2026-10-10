@@ -39,6 +39,7 @@ from app.core.authorization import (
     can_access_library,
 )
 from app.core.config import Settings, get_settings
+from app.core.exception_diagnostics import capture_exception
 from app.db.session import get_db
 from app.models.auth import User
 from app.models.common import cuid
@@ -168,8 +169,6 @@ def reorder_libraries(
         actor_type="admin",
         actor_id=user.id,
         action="library_order.updated",
-        target_type="libraryOrder",
-        target_id="global",
         message="更新书库显示顺序",
         metadata={"libraryIds": requested_ids},
     )
@@ -320,6 +319,7 @@ def create_library(
     try:
         root_path = str(resolve_root(payload.root_path))
     except LibraryPathError as exc:
+        capture_exception(exc)
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
     if get_library_by_root_path(db, root_path) is not None:
         return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
@@ -347,8 +347,6 @@ def create_library(
         actor_type="admin",
         actor_id=user.id,
         action="created",
-        target_type="library",
-        target_id=library_id,
         message=f"新增书库：{library['name']}",
         metadata={"rootPath": root_path},
     )
@@ -357,7 +355,8 @@ def create_library(
             db,
             PreparedLibraryCreate(library, prepared_event),
         )
-    except IntegrityError:
+    except IntegrityError as _caught_error:
+        capture_exception(_caught_error)
         return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
     if payload.enabled:
         continue_library_import(db, library_id, trigger="ENABLE")
@@ -413,6 +412,7 @@ def update_library(
         try:
             root_path = str(resolve_root(values["rootPath"]))
         except LibraryPathError as exc:
+            capture_exception(exc)
             return fail(str(exc), status_code=exc.status_code, code=exc.code)
         if get_library_by_root_path(db, root_path, exclude_id=library_id) is not None:
             return fail("书库路径已存在", status_code=409)
@@ -426,8 +426,6 @@ def update_library(
             actor_type="admin",
             actor_id=user.id,
             action="updated",
-            target_type="library",
-            target_id=library_id,
             message=f"更新书库：{values.get('name') or existing.get('name')}",
             metadata={
                 "changes": values,
@@ -443,7 +441,8 @@ def update_library(
                     prepared_event,
                 ),
             )
-        except IntegrityError:
+        except IntegrityError as _caught_error:
+            capture_exception(_caught_error)
             return fail("书库路径已存在", status_code=409)
     updated = get_library(db, library_id) or existing
     if bool(updated.get("enabled")) and not was_enabled:
@@ -474,8 +473,6 @@ def delete_library(
         actor_type="admin",
         actor_id=user.id,
         action="deleted",
-        target_type="library",
-        target_id=library_id,
         message=f"删除书库：{existing.get('name') or library_id}",
         metadata={
             "rootPath": existing.get("rootPath"),

@@ -215,7 +215,8 @@ def test_metadata_maintenance_failure_does_not_revoke_recovery_or_busy_loop(
     worker._maintain()
     assert len(calls) == 1
     assert worker._writeback_recovery.ready
-    assert "metadata.maintenance_deferred" in caplog.text
+    assert str(failure) in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     clock[0] = 300
     worker._maintain()
     assert len(calls) == 2
@@ -333,13 +334,13 @@ def test_metadata_worker_records_each_database_busy_failure(
     deferred = [
         record
         for record in caplog.records
-        if "metadata.iteration_failed diagnostic_id=" in record.getMessage()
+        if "database is locked" in record.getMessage()
     ]
     assert len(deferred) == 2
     assert (
         len(
             {
-                record.getMessage().split("diagnostic_id=", 1)[1].split()[0]
+                id(record)
                 for record in deferred
             }
         )
@@ -457,13 +458,13 @@ def test_organizer_scheduler_records_each_database_busy_failure(
     deferred = [
         record
         for record in caplog.records
-        if "organize.iteration_failed diagnostic_id=" in record.getMessage()
+        if "database is locked" in record.getMessage()
     ]
     assert len(deferred) == 2
     assert (
         len(
             {
-                record.getMessage().split("diagnostic_id=", 1)[1].split()[0]
+                id(record)
                 for record in deferred
             }
         )
@@ -532,11 +533,13 @@ def test_organizer_scheduler_preserves_pending_state_under_real_writer_lock(
         deferred = [
             record
             for record in caplog.records
-            if "organize.database_attempt_failed diagnostic_id=" in record.getMessage()
+            if "database is locked" in record.getMessage()
         ]
-        assert len(deferred) == 1
+        # Driver, SQLAlchemy wrapper and the independent log-storage failure
+        # are distinct caught exceptions; each retains its own raw traceback.
+        assert len(deferred) == 3
         assert "database is locked" in deferred[0].getMessage()
-        assert "attempt=1" in deferred[0].getMessage()
+        assert "diagnostic_id=" not in deferred[0].getMessage()
         assert deferred[0].exc_info is None
     finally:
         blocker_engine.dispose()

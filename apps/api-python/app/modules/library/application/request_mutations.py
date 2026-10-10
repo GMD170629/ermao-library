@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.core.authorization import AuthorizationContext
+from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.metadata_effects import (
     MetadataSideEffectPolicy,
     validate_writeback_intents,
@@ -140,7 +141,8 @@ class SaveDetailPreference:
         try:
             self._gateway.save_detail_preference(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 
@@ -162,7 +164,8 @@ class UpdateBookRecord:
         try:
             result = self._gateway.update_book(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return result
@@ -185,7 +188,8 @@ class UpdateBulkBooks:
         try:
             updated = self._gateway.update_books(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return updated
@@ -204,7 +208,8 @@ class UpdateBulkReadingStatus:
         try:
             updated = self._gateway.update_reading_status(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return updated
@@ -223,7 +228,8 @@ class UpdateBulkShelfMembership:
         try:
             updated = self._gateway.update_shelf_membership(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return updated
@@ -242,7 +248,8 @@ class UpdateCoverRecords:
         try:
             updated = self._gateway.update_covers(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return updated
@@ -265,7 +272,8 @@ class ApplyBookMetadata:
         try:
             result = self._gateway.apply_metadata(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return result
@@ -284,7 +292,8 @@ class CompensateCoverPublication:
         try:
             compensated = self._gateway.compensate_cover_publication(command)
             self._unit_of_work.commit()
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
         return compensated

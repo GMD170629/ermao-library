@@ -10,7 +10,7 @@ from typing import Literal, cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.i18n import configured_locale
 from app.models import (
     LibraryBook,
@@ -29,7 +29,10 @@ from app.modules.library.public import (
 )
 from app.modules.metadata.infrastructure.generation import complete_missing_metadata
 from app.modules.metadata.infrastructure.matching import (
-    MetadataMatch, candidate_key, match_metadata_candidates, prepare_matched_metadata,
+    MetadataMatch,
+    candidate_key,
+    match_metadata_candidates,
+    prepare_matched_metadata,
 )
 from app.modules.metadata.public import (
     enabled_metadata_provider_ids,
@@ -221,8 +224,8 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
                 try:
                     result = search_with_metadata_provider(self._db, context, source, effective_query)
                 except Exception as error:  # noqa: BLE001 - one source must not block others.
-                    record_exception(logging.getLogger(__name__), "metadata.source_search_failed", error,
-                                     context={"step": "source_search", "resource_id": source})
+                    capture_exception(error, persist=False)
+                    record_exception(logging.getLogger(__name__), "metadata.source_search_failed", error)
                     source_issues.append(f"{source}:search_failed")
                     continue
                 source_completed = source_completed or result.get("enabled") is not False
@@ -247,6 +250,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             if identity is not None and (identity.title or identity.author):
                 values.append(identity.candidate())
         except Exception as exc:
+            capture_exception(exc, persist=False)
             raise MetadataProviderSearchError(provider_id) from exc
         candidates = tuple(
             candidate

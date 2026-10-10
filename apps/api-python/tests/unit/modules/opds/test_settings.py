@@ -78,7 +78,7 @@ def test_invalid_stored_public_url_is_disabled_with_the_exact_rule_logged(
         diagnostics=RuntimeFailureDiagnostics(logging.getLogger(__name__), "opds"),
     )
     assert snapshot.enabled is False and snapshot.configured is False
-    assert "opds.stored_public_url_invalid" in caplog.text
+    assert "Traceback (most recent call last):" in caplog.text
     assert "OpdsPublicBaseUrlInvalid" in caplog.text
     assert "omit credentials" in caplog.text
     assert "user:secret" not in caplog.text

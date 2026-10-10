@@ -154,8 +154,6 @@ def test_admin_user_and_audit_event_roll_back_atomically(db_session, monkeypatch
         source="authorization",
         action="user.created",
         message="Atomic user create",
-        target_type="user",
-        target_id=user.id,
     )
 
     def fail_event_write(db, events):

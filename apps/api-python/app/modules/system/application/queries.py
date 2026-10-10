@@ -116,7 +116,7 @@ def management_events_empty_page(page: int, page_size: int) -> dict[str, Any]:
         "pageSize": page_size,
         "total": 0,
         "totalPages": 1,
-        "storage": {"sizeBytes": 0, "maxBytes": 5 * 1024 * 1024},
+        "storage": {"sizeBytes": 0, "retentionDays": 3, "minimumLevel": "error"},
         "facets": {"sources": [], "levels": []},
     }
 
@@ -130,10 +130,9 @@ def management_events_payload(
     storage: dict[str, Any],
     sources: list[dict[str, Any]],
     levels: list[dict[str, Any]],
-    include_diagnostics: bool = False,
 ) -> dict[str, Any]:
     return {
-        "events": [serialize_system_event(event, include_diagnostics=include_diagnostics) for event in events],
+        "events": [serialize_system_event(event) for event in events],
         "page": page,
         "pageSize": page_size,
         "total": total,
@@ -146,7 +145,7 @@ def management_events_payload(
 def management_event_payload(event: dict[str, Any]) -> dict[str, Any]:
     """Detail projection that keeps the full diagnostic stack and chain."""
 
-    return serialize_system_event(event, include_diagnostics=True)
+    return serialize_system_event(event)
 
 
 def parse_event_date_bounds(

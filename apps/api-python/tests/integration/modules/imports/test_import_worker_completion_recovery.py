@@ -112,7 +112,8 @@ def test_success_terminal_write_failure_is_closed_once_and_next_task_runs(
         first = observer.get(LibraryImportTask, first_id)
         second = observer.get(LibraryImportTask, second_id)
         assert first is not None and first.state == "FAILED"
-        assert first.error_summary == "TASK_COMPLETION_WRITE_FAILED"
+        assert first.error_summary.startswith("sqlalchemy.exc.OperationalError:")
+        assert "disk I/O error" in first.error_summary
         assert first.completion_outcome is None
         assert second is not None and second.state == "QUEUED"
     assert attempts == 1
@@ -168,6 +169,9 @@ def test_failure_terminal_write_does_not_schedule_another_execution(
         first = observer.get(LibraryImportTask, first_id)
         assert first is not None and first.state == "FAILED"
         assert first.completion_outcome is None
+        assert "RuntimeError: injected scan failure" in first.error_summary
+        assert "sqlalchemy.exc.OperationalError:" in first.error_summary
+        assert "disk I/O error" in first.error_summary
     assert worker.process_once() == "scan"
     assert scanned == ["test-library", "second-library"]
 
@@ -339,14 +343,7 @@ def test_outer_loop_continues_after_one_task_cannot_persist_terminal(
         assert observer.get(LibraryImportTask, first_id).state == "RUNNING"
         assert observer.get(LibraryImportTask, second_id).state == "SUCCEEDED"
         assert observer.get(LibraryImportTask, third_id[0]).state == "SUCCEEDED"
-    for diagnostic_event, stage in (
-        ("completion_write_failed", "completion"),
-        ("failure_close_failed", "failure_close"),
-    ):
-        assert any(
-            diagnostic_event in record.message
-            and "disk I/O error" in record.message
-            and getattr(record, "stage", None) == stage
-            and getattr(record, "task_id", None) == first_id
-            for record in caplog.records
-        )
+    failures = [record for record in caplog.records if "disk I/O error" in record.getMessage()]
+    assert len(failures) == 2
+    assert all("Traceback (most recent call last):" in record.getMessage() for record in failures)
+    assert all(not hasattr(record, "task_id") for record in failures)

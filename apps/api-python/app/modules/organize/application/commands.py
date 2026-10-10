@@ -8,6 +8,7 @@ from types import TracebackType
 from typing import Any, Literal, Protocol, Self
 
 from app.contracts.local_metadata import validate_local_metadata_priority
+from app.core.exception_diagnostics import capture_exception
 from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
 
 MIN_INTERVAL_MINUTES = 15
@@ -57,6 +58,7 @@ def prepare_organize_policy_update(
     try:
         interval = int(payload.get("intervalMinutes", current["intervalMinutes"]))
     except (TypeError, ValueError) as error:
+        capture_exception(error, persist=False)
         raise InvalidOrganizeRequestError("执行间隔格式不正确") from error
     if interval < MIN_INTERVAL_MINUTES or interval > MAX_INTERVAL_MINUTES:
         raise InvalidOrganizeRequestError(
@@ -80,6 +82,7 @@ def prepare_organize_policy_update(
             payload.get("localMetadataPriority", current["localMetadataPriority"])
         )
     except (TypeError, ValueError) as exc:
+        capture_exception(exc, persist=False)
         raise InvalidOrganizeRequestError(str(exc)) from exc
     newly_enabled_for_new = auto_run_on_new and not current["autoRunOnNew"]
     auto_since = (
@@ -110,6 +113,7 @@ def prepare_organize_policy_update(
             try:
                 next_run_at = datetime.fromisoformat(str(supplied_next_run))
             except ValueError as exc:
+                capture_exception(exc, persist=False)
                 raise InvalidOrganizeRequestError("下次执行时间格式不正确") from exc
     return PreparedOrganizePolicyUpdate(
         enabled=enabled,

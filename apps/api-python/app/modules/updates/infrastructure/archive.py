@@ -11,6 +11,8 @@ import time
 from pathlib import Path, PurePosixPath
 from threading import Event
 
+from app.core.exception_diagnostics import capture_exception
+
 from ..application.dependency_release import CodePackage, ProgramIdentity
 from ..application.models import (
     MAX_EXPANDED,
@@ -109,6 +111,7 @@ def validate_layout(
         if actual != identity:
             raise UpdateError("PACKAGE_IDENTITY_MISMATCH")
     except ValueError as error:
+        capture_exception(error, persist=False)
         raise UpdateError("INVALID_LAYOUT") from error
 
 
@@ -212,6 +215,7 @@ def extract_package(
         try:
             resolved = (destination / member.name).resolve(strict=True)
         except (OSError, RuntimeError) as error:
+            capture_exception(error, persist=False)
             raise UpdateError("UNSAFE_ARCHIVE") from error
         if not resolved.is_relative_to(destination):
             raise UpdateError("UNSAFE_ARCHIVE")

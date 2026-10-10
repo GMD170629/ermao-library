@@ -11,7 +11,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
     MetadataLookupTask,
@@ -91,8 +91,8 @@ def _json_string_list(value: object) -> list[str]:
     try:
         parsed = json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError) as error:
-        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.job_queries._json_string_list.failed", error,
-                         context={"step": "_json_string_list"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.job_queries._json_string_list.failed", error)
         return []
     if not isinstance(parsed, list):
         return []

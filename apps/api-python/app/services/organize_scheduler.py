@@ -42,6 +42,7 @@ from app.bootstrap.organize import (
 )
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import (
+    capture_exception,
     exception_diagnostic_boundary,
     record_exception,
 )
@@ -378,11 +379,11 @@ def process_organize_schedule_tick(db: Session) -> int:
         try:
             next_due = datetime.fromisoformat(str(next_run)) <= now
         except ValueError as error:
+            capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "services.organize_scheduler.process_organize_schedule_tick.failed",
                 error,
-                context={"step": "process_organize_schedule_tick"},
             )
             next_due = True
     if policy["enabled"] and policy["scheduleMode"] == "INTERVAL" and next_due:
@@ -424,7 +425,7 @@ class OrganizerScheduler:
 
     def _process_iteration(self) -> bool:
         with exception_diagnostic_boundary(
-            LOGGER, "organize.iteration_failed", context={}
+            LOGGER, "organize.iteration_failed"
         ):
             for attempt in range(len(DATABASE_BUSY_RETRY_DELAYS_SECONDS) + 1):
                 if attempt and self._stop.wait(
@@ -436,11 +437,11 @@ class OrganizerScheduler:
                         process_organize_schedule_tick(db)
                     return True
                 except OperationalError as error:
+                    capture_exception(error, persist=False)
                     record_exception(
                         LOGGER,
                         "organize.database_attempt_failed",
                         error,
-                        context={"step": "iteration", "attempt": attempt + 1},
                     )
                     if not is_database_busy_error(error) or attempt == len(
                         DATABASE_BUSY_RETRY_DELAYS_SECONDS
@@ -453,10 +454,6 @@ class OrganizerScheduler:
             LOGGER,
             "organize.iteration_failed",
             error,
-            context={
-                "step": "iteration",
-                "outcome": "retrying" if is_database_busy_error(error) else "paused",
-            },
             source="organize",
         )
 
@@ -466,6 +463,7 @@ class OrganizerScheduler:
                 if not self._process_iteration():
                     break
             except Exception as error:  # noqa: BLE001 - worker containment boundary.
+                capture_exception(error)
                 self._record_iteration_error(error)
                 if not is_database_busy_error(error):
                     # Preserve queued work; a deterministic failure requires a

@@ -23,8 +23,8 @@ fun isValidAdministrativeSmtpPort(value: Int): Boolean =
 fun isValidAdministrativeAttachmentMegabytes(value: Double): Boolean =
     AdministrativeSettingsValidation.isValidAttachmentMegabytes(value)
 
-fun isValidAdministrativeLogMegabytes(value: Int): Boolean =
-    AdministrativeSettingsValidation.isValidLogMegabytes(value)
+fun isValidAdministrativeLogRetentionDays(value: Int): Boolean =
+    AdministrativeSettingsValidation.isValidLogRetentionDays(value)
 
 fun administrativeMinimumPasswordLength(): Int =
     AdministrativeSettingsValidation.MINIMUM_PASSWORD_LENGTH
@@ -32,11 +32,11 @@ fun administrativeMinimumPasswordLength(): Int =
 fun administrativeMaximumPasswordLength(): Int =
     AdministrativeSettingsValidation.MAXIMUM_PASSWORD_LENGTH
 
-fun administrativeMinimumLogMegabytes(): Int =
-    AdministrativeSettingsValidation.MINIMUM_LOG_MEGABYTES
+fun administrativeMinimumLogRetentionDays(): Int =
+    AdministrativeSettingsValidation.MINIMUM_LOG_RETENTION_DAYS
 
-fun administrativeMaximumLogMegabytes(): Int =
-    AdministrativeSettingsValidation.MAXIMUM_LOG_MEGABYTES
+fun administrativeMaximumLogRetentionDays(): Int =
+    AdministrativeSettingsValidation.MAXIMUM_LOG_RETENTION_DAYS
 
 fun isValidManagedUserDeletionConfirmation(email: String, confirmation: String): Boolean =
     confirmation.length <= 191 && confirmation.trim().equals(email, ignoreCase = true)

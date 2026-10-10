@@ -381,7 +381,7 @@ fun LogsScreen(
         toolbarActions = {
             com.ermao.library.ui.components.WarmPageIconAction(
                 icon = Icons.Outlined.Settings,
-                label = AdministrativeCopy.ManageLogCapacity.text(locale),
+                label = AdministrativeCopy.ManageLogRetention.text(locale),
                 onClick = { manageOpen = true },
             )
         },
@@ -402,9 +402,9 @@ fun LogsScreen(
     ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
             AdministrativeTextField(search, { search = it }, AdministrativeCopy.SearchLogs, locale, textAlign = TextAlign.Start)
-            Text("${snapshot.usedMegabytes} MB / ${snapshot.capacityMegabytes} MB", Modifier.padding(16.dp))
+            Text("${AdministrativeCopy.RetentionDays.text(locale)}: ${snapshot.retentionDays}", Modifier.padding(16.dp))
             val filteredRecords = snapshot.records.filter { record ->
-                (search.isBlank() || record.summary.contains(search, true) || record.target.orEmpty().contains(search, true)) && (level == null || record.level == level)
+                (search.isBlank() || record.summary.contains(search, true)) && (level == null || record.level == level)
             }
             if (filteredRecords.isEmpty()) {
                 WarmSettingsEmptyState(
@@ -419,8 +419,6 @@ fun LogsScreen(
                         Text(record.level.copy().text(locale), color = record.level.color())
                     }
                     Text("${record.source} · ${record.summary}")
-                    record.correlationId?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    record.target?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
                 AdministrativeDivider()
             }
@@ -438,6 +436,7 @@ fun LogsScreen(
 }
 
 private fun LogLevel.copy(): AdministrativeCopy = when (this) {
+    LogLevel.Debug -> AdministrativeCopy.DebugLog
     LogLevel.Information -> AdministrativeCopy.Information
     LogLevel.Warning -> AdministrativeCopy.Warning
     LogLevel.Error -> AdministrativeCopy.Failed
@@ -447,7 +446,7 @@ private fun LogLevel.copy(): AdministrativeCopy = when (this) {
 private fun LogLevel.color() = when (this) {
     LogLevel.Error -> MaterialTheme.colorScheme.error
     LogLevel.Warning -> MaterialTheme.colorScheme.tertiary
-    LogLevel.Information -> MaterialTheme.colorScheme.primary
+    LogLevel.Debug, LogLevel.Information -> MaterialTheme.colorScheme.primary
 }
 
 @Composable
@@ -457,24 +456,24 @@ private fun ManageLogsDialog(
     onDismiss: () -> Unit,
     onCommand: (AdministrativeCommand) -> Unit,
 ) {
-    var capacity by remember(state.snapshot) { mutableIntStateOf(state.snapshot?.capacityMegabytes ?: 50) }
+    var capacity by remember(state.snapshot) { mutableIntStateOf(state.snapshot?.retentionDays ?: 3) }
     var clearConfirm by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(AdministrativeCopy.ManageLogCapacity.text(locale)) },
+        title = { Text(AdministrativeCopy.ManageLogRetention.text(locale)) },
         text = {
             Column {
-                StepperRow(AdministrativeCopy.CapacityMegabytes.text(locale), locale, capacity, 10..500) { capacity = it }
+                StepperRow(AdministrativeCopy.RetentionDays.text(locale), locale, capacity, 1..365) { capacity = it }
                 OutlinedButton({ clearConfirm = true }) {
                     Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                     Text(AdministrativeCopy.ClearInformationAndWarnings.text(locale), color = MaterialTheme.colorScheme.error) }
             }
         },
-        confirmButton = { OutlinedButton({ onCommand(AdministrativeCommand.SaveLogCapacity(capacity)); onDismiss() }) {
+        confirmButton = { OutlinedButton({ onCommand(AdministrativeCommand.SaveLogRetention(capacity)); onDismiss() }) {
             Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text(AdministrativeCopy.SaveCapacity.text(locale)) } },
+            Text(AdministrativeCopy.SaveRetention.text(locale)) } },
         dismissButton = { OutlinedButton(onClick = onDismiss) {
             Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))

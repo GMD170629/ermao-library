@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
 from app.contracts.automation_upload import UploadError
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.runtime import (
     AutomationRequest,
     AutomationRuntime,
@@ -402,7 +403,8 @@ class AutomationMcpEndpoint:
             SourceAccessError,
             StandardMetadataError,
         ) as error:
-            diagnostic_id = record_mcp_failure(error, stage="mcp_authentication")
+            capture_exception(error)
+            record_mcp_failure(error, stage="mcp_authentication")
             code = str(error)
             status = (
                 503 if code in {"AUTOMATION_DISABLED", "DATABASE_MAINTENANCE"} else 401
@@ -411,7 +413,6 @@ class AutomationMcpEndpoint:
                 {"code": code, "message": "请求被拒绝 / Request rejected"},
                 status_code=status,
                 headers={
-                    "X-Error-Id": diagnostic_id,
                     "Cache-Control": "no-store",
                     "Vary": "Authorization",
                     **(

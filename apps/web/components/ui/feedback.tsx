@@ -105,7 +105,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
               <Icon size={18} className={cn('mt-0.5 shrink-0', tone.iconClassName)} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold">{i18nAttribute(item.title)}</div>
-                {item.description ? <div className="mt-1 text-sm opacity-80">{i18nAttribute(item.description)}</div> : null}
+                {item.description ? <div data-i18n-skip={item.tone === 'error' || undefined} className="mt-1 whitespace-pre-wrap break-words text-sm opacity-80">{item.tone === 'error' ? item.description : i18nAttribute(item.description)}</div> : null}
               </div>
               <button type="button" onClick={() => removeToast(item.id)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition hover:bg-white/60" aria-label={i18nAttribute("关闭提示")}>
                 <X size={15} />

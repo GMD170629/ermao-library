@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import cast
 
+from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.catalog import AutomationCatalog
 from app.modules.automation.application.grants import AuthorizeAutomation
 from app.modules.automation.application.settings import AutomationSettingsPort
@@ -67,6 +68,8 @@ class RecheckStandardWriteAccess:
             if snapshot.revision != target.metadata_revision:
                 raise StandardMetadataError("METADATA_CONFLICT")
         except AutomationAccessError as error:
+            capture_exception(error, persist=False)
             raise StandardMetadataError("AUTHORIZATION_REVOKED") from error
         except MetadataPatchError as error:
+            capture_exception(error, persist=False)
             raise StandardMetadataError("SOURCE_CHANGED") from error

@@ -12,7 +12,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models.organize import OrganizeJob, OrganizeRun
 from app.modules.organize.infrastructure.policy import DEFAULT_RULES
 
@@ -71,8 +71,8 @@ def _json_dict(value: Any, fallback: dict[str, Any]) -> dict[str, Any]:
     try:
         parsed = json.loads(str(value or "{}"))
     except (TypeError, ValueError, json.JSONDecodeError) as error:
-        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.runs._json_dict.failed", error,
-                         context={"step": "_json_dict"})
+        capture_exception(error, persist=False)
+        record_exception(logging.getLogger(__name__), "modules.organize.infrastructure.runs._json_dict.failed", error)
         return dict(fallback)
     return parsed if isinstance(parsed, dict) else dict(fallback)
 

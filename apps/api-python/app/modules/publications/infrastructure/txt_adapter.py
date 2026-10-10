@@ -12,6 +12,7 @@ from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyRuleId,
     reader_safety_budget,
 )
+from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
@@ -85,6 +86,7 @@ def _decode_txt(content: bytes) -> str:
             decoded = payload.decode(encoding, errors="strict")
         except UnicodeDecodeError as error:
             # diagnostics-control-flow: Try candidate encodings; the final decoder failure is propagated with cause.
+            capture_exception(error)
             last_decode_error = error
             continue
         return decoded
@@ -153,6 +155,7 @@ def _snapshot(
     try:
         content = source_path.read_bytes()
     except OSError as error:
+        capture_exception(error, persist=False)
         raise PublicationReadError("TXT source is unavailable") from error
     decoded = _decode_txt(content)
     if not decoded.strip():

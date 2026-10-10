@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.core.exception_diagnostics import capture_exception
+
 
 class BookMutationPort(Protocol):
     """Persistence operations required by the Book mutation use case."""
@@ -51,7 +53,8 @@ class UpdateBook:
                 return None
             self._unit_of_work.commit()
             return updated
-        except Exception:
+        except Exception as _caught_error:
+            capture_exception(_caught_error)
             self._unit_of_work.rollback()
             raise
 

@@ -23,6 +23,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Mapper, Session
 
+from app.core.exception_diagnostics import capture_exception
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
@@ -212,6 +213,7 @@ def _converted_column_value(column: Any, value: object) -> object:
         try:
             return datetime.fromisoformat(value)
         except ValueError as exc:
+            capture_exception(exc, persist=False)
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             ) from exc
@@ -235,6 +237,7 @@ def _converted_column_value(column: Any, value: object) -> object:
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
+            capture_exception(exc, persist=False)
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             ) from exc
@@ -250,6 +253,7 @@ def _converted_column_value(column: Any, value: object) -> object:
         try:
             return float(value)
         except (TypeError, ValueError) as exc:
+            capture_exception(exc, persist=False)
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             ) from exc

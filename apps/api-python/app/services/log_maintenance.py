@@ -12,8 +12,7 @@ from app.bootstrap.media import resource_preview_cache
 from app.bootstrap.system import maintain_system_events
 from app.core.auth import utcnow
 from app.core.config import Settings
-from app.core.database_errors import is_database_busy_error
-from app.core.exception_diagnostics import record_exception
+from app.core.exception_diagnostics import capture_exception, record_exception
 from app.services.default_cover_cleanup import cleanup_default_cover_residue
 from app.services.health_runs import fail_abandoned_health_runs
 
@@ -38,7 +37,7 @@ class SystemEventMaintenanceWorker:
             else None
         )
         self._next_preview_prune_at: float | None = None
-        self._startup_pending = {"health", "covers"} if settings is not None else set()
+        self._startup_pending = {"health", "covers", "logs"} if settings is not None else set()
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="system-event-maintenance", daemon=True
@@ -63,14 +62,16 @@ class SystemEventMaintenanceWorker:
                 with self._db_factory() as db:
                     if name == "health":
                         fail_abandoned_health_runs(db)
+                    elif name == "logs":
+                        maintain_system_events(db)
                     elif self._settings is not None:
                         cleanup_default_cover_residue(db, self._settings)
             except Exception as error:  # noqa: BLE001 - independent deferred maintenance.
+                capture_exception(error, persist=False)
                 record_exception(
                     LOGGER,
                     "startup.maintenance_deferred",
                     error,
-                    context={"stage": name, "outcome": "deferred"},
                     source="system",
                     action="startup.maintenance_deferred",
                 )
@@ -102,11 +103,11 @@ class SystemEventMaintenanceWorker:
         try:
             return self._preview_cache.prune(cancelled=self._stop.is_set)
         except Exception as error:  # noqa: BLE001 - optional maintenance boundary.
+            capture_exception(error, persist=False)
             record_exception(
                 LOGGER,
                 "media.preview_cache.maintenance_failed",
                 error,
-                context={"stage": "prune_resource_previews", "outcome": "deferred"},
                 session_factory=self._db_factory,
             )
             return 0
@@ -119,15 +120,10 @@ class SystemEventMaintenanceWorker:
             try:
                 self.run_once()
             except Exception as exc:  # noqa: BLE001 - iteration boundary records every failed attempt
+                capture_exception(exc, persist=False)
                 record_exception(
                     LOGGER,
                     "system.maintenance_failed",
                     exc,
-                    context={
-                        "stage": "system_maintenance",
-                        "outcome": "deferred"
-                        if is_database_busy_error(exc)
-                        else "failed",
-                    },
                     session_factory=self._db_factory,
                 )
