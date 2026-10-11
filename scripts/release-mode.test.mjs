@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -101,6 +101,36 @@ test('a quick release commit suppresses builds, but subsequent ordinary developm
   assert.equal(run().mode, 'code-only');
   put('apps/web/features/fix.ts', 'export const fixed = true;'); commit();
   assert.equal(run().mode, 'full');
+});
+
+test('v1.5.6 permits only the two authorized complete diagnostic migration blobs', t => {
+  const { root, put, commit, git } = repository(t);
+  const paths = ['0037_single_import_execution.py', '0040_periodic_scan_admission.py']
+    .map(name => `apps/api-python/app/db/alembic/versions/${name}`);
+  const contents = paths.map(path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n'));
+  for (const [index, path] of paths.entries()) {
+    put(path, contents[index]
+      .replace('from app.core.exception_diagnostics import capture_exception\n\n', '')
+      .replace(/(except (?:\(TypeError, ValueError\)|json.JSONDecodeError)) as error:/u, '$1:')
+      .replace(/^\s*capture_exception\(error\)\n/mu, ''));
+  }
+  put('package.json', { version: '1.5.5' });
+  commit(); git('tag', 'v1.5.5');
+  paths.forEach((path, index) => put(path, contents[index]));
+  put('package.json', { version: '1.5.6' });
+  const approved = commit();
+  const server = { ...update, baseVersion: '1.5.5' };
+  assert.doesNotThrow(() => validateMode({ server, sourceCommit: approved }, { root }));
+  for (const path of paths) {
+    put(path, `${contents[paths.indexOf(path)]}\n# An additional unapproved change\n`);
+    assert.throws(() => validateMode({ server, sourceCommit: commit() }, { root }), /cannot edit or delete/);
+    git('reset', '--hard', approved);
+  }
+  put('package.json', { version: '1.5.7' });
+  assert.throws(() => validateMode({ server, sourceCommit: commit() }, { root }), /cannot edit or delete/);
+  git('reset', '--hard', approved);
+  git('rm', paths[0]);
+  assert.throws(() => validateMode({ server, sourceCommit: commit() }, { root }), /cannot edit or delete/);
 });
 
 test('Wiki gitlink changes are unrelated to application eligibility', t => {

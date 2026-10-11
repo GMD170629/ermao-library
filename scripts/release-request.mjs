@@ -122,6 +122,23 @@ export function validateSource(request, { root = process.cwd(), authorizedRef = 
   }
 }
 
+// Explicitly authorized for v1.5.6: only add unified exception recording to
+// these two published migrations. Pin both complete Git blobs so neither SQL,
+// control flow nor another historical edit can inherit this exception.
+const v156DiagnosticMigrationBlobs = {
+  '0037_single_import_execution.py': ['6aa45b43477a88b0d3c8ff541df8b2628d861e88', '66f0b85ec57a37cff997b8984998fa12fa05753f'],
+  '0040_periodic_scan_admission.py': ['f92c5547fe7cf90cbe1de20777260f65e54afc12', '20eae1ea8c58568cba9793dd442ad65ebf616b57'],
+};
+
+function authorizedDiagnosticMigration(root, base, source, line) {
+  const match = /^M\s+(apps\/api-python\/app\/db\/alembic\/versions\/([^\s]+))$/u.exec(line);
+  const blobs = match && v156DiagnosticMigrationBlobs[match[2]];
+  if (!blobs || base !== 'refs/tags/v1.5.5') return false;
+  if (JSON.parse(gitRead(root, ['show', `${source}:package.json`])).version !== '1.5.6') return false;
+  return gitRead(root, ['rev-parse', `${base}:${match[1]}`]) === blobs[0]
+    && gitRead(root, ['rev-parse', `${source}:${match[1]}`]) === blobs[1];
+}
+
 export function validateMode(request, { root = process.cwd() } = {}) {
   if (!request.server) return;
   const { mode, baseVersion } = request.server;
@@ -135,7 +152,8 @@ export function validateMode(request, { root = process.cwd() } = {}) {
   if (mode !== 'code-only') return;
   const migrationPaths = changed.filter(file => file.startsWith('apps/api-python/app/db/alembic/'));
   const migrationStatus = gitRead(root, ['diff', '--name-status', base, request.sourceCommit, '--', 'apps/api-python/app/db/alembic/versions/']).split('\n').filter(Boolean);
-  requireValue(migrationStatus.every(line => /^A\s+apps\/api-python\/app\/db\/alembic\/versions\/[^\s]+\.py$/u.test(line)), 'code-only may add migrations but cannot edit or delete existing migration files');
+  requireValue(migrationStatus.every(line => /^A\s+apps\/api-python\/app\/db\/alembic\/versions\/[^\s]+\.py$/u.test(line)
+    || authorizedDiagnosticMigration(root, base, request.sourceCommit, line)), 'code-only may add migrations but cannot edit or delete existing migration files except the explicitly authorized v1.5.6 diagnostic-only blobs');
   // Application, dependency and build inputs are validated by the real build and
   // package verifier in the immutable runtime, not by a source-directory allowlist.
   const unshippedNativeClient = file => file.startsWith('apps/mobile/');
