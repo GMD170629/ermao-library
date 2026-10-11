@@ -99,7 +99,7 @@ from app.core.exception_diagnostics import record_exception
 try:
     urllib.request.urlopen('http://127.0.0.1:${PYTHON_API_PORT}/api/health', timeout=1).read()
 except Exception as error:
-    record_exception(logging.getLogger('ermao.startup'), 'runtime.health_probe_failed', error, context={'stage': 'api_health'})
+    record_exception(logging.getLogger('ermao.startup'), 'runtime.health_probe_failed', error)
     sys.exit(1)
 ") >/dev/null; then
     break
