@@ -24,12 +24,13 @@ def test_prepare_table_records_filters_unknown_fields_and_converts_timestamps() 
                 "unknown": "discarded",
             }
         ],
+        legacy_setting_values=True,
     )
 
     assert records == (
         {
             "key": "backup.test",
-            "value": "enabled",
+            "value": '"enabled"',
             "updatedAt": datetime.fromisoformat("2026-08-11T12:00:00+00:00"),
         },
     )

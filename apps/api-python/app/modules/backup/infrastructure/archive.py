@@ -39,6 +39,7 @@ from app.modules.backup.application.restore import (
 from app.modules.backup.infrastructure.inspection import (
     BACKUP_FORMAT_VERSION,
     inspect_backup,
+    migrates_literal_settings,
     require_compatible,
 )
 from app.modules.backup.infrastructure.persistence import (
@@ -493,12 +494,17 @@ def _calibrate_runtime_rows(
 
 def _prepare_restore(
     database_export: dict[str, object],
+    *,
+    legacy_setting_values: bool = False,
 ) -> PreparedRestorePlan:
     records_by_table: dict[str, tuple[dict[str, object], ...]] = {}
     for export_key, table_name in BACKUP_TABLES:
         records = _calibrate_runtime_rows(
             table_name,
-            prepare_table_records(table_name, database_export.get(export_key, [])),
+            prepare_table_records(
+                table_name, database_export.get(export_key, []),
+                legacy_setting_values=legacy_setting_values,
+            ),
         )
         if table_name == "SystemSetting":
             records = tuple(
@@ -561,7 +567,12 @@ def restore_backup(
             stage="validate",
         )
     with backup_stage("validate"):
-        plan = _prepare_restore(database_export)
+        plan = _prepare_restore(
+            database_export,
+            legacy_setting_values=migrates_literal_settings(
+                metadata.get("databaseRevision"), head_revision()
+            ),
+        )
         _validate_restore_against_temporary_database(plan)
     writer = SqlAlchemyBackupRestoreWriter(db)
     ApplyValidatedBackupRestore(writer, db).execute(

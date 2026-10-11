@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -48,10 +49,14 @@ class BudgetedFilesystem(OsSourceTreeFilesystem):
 
 def test_absent_optional_metadata_candidates_are_not_failures(tmp_path, caplog):
     filesystem = OsSourceTreeFilesystem()
-    observations = filesystem.metadata_input_observations(tmp_path, directory=True)
+    with caplog.at_level(logging.DEBUG):
+        observations = filesystem.metadata_input_observations(tmp_path, directory=True)
     assert observations
     assert all(size is None and version is None for _, size, version in observations)
-    assert "observe_readable_file.failed" not in caplog.text
+    records = [record for record in caplog.records if "FileNotFoundError" in record.message]
+    assert records
+    assert all(record.levelno == logging.DEBUG for record in records)
+    assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
 
 def test_required_file_absence_and_optional_io_failure_keep_actual_reason(
@@ -62,6 +67,7 @@ def test_required_file_absence_and_optional_io_failure_keep_actual_reason(
     filesystem = OsSourceTreeFilesystem()
     assert filesystem.observe_readable_file(tmp_path / "missing") is None
     assert "FileNotFoundError" in caplog.text
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
     caplog.clear()
 
     def inaccessible(self, *args, **kwargs):
@@ -74,6 +80,7 @@ def test_required_file_absence_and_optional_io_failure_keep_actual_reason(
     )
     assert "PermissionError" in caplog.text
     assert "injected candidate read denial" in caplog.text
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
 
 
 @pytest.mark.parametrize("reuse_listings", [False, True])

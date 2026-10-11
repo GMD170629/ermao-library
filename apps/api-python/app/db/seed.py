@@ -13,6 +13,7 @@ from app.bootstrap.metadata import (
     prepare_metadata_source_seed_write,
 )
 from app.core.i18n import DEFAULT_LOCALE
+from app.core.setting_values import encode_setting_value
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
 from app.modules.metadata.public import BUILTIN_MANIFESTS
@@ -40,7 +41,7 @@ def seed_baseline_data(db: Session) -> None:
     setting_rows = tuple(
         {
             "key": key,
-            "value": value,
+            "value": encode_setting_value(value),
             "created_at": now,
             "updated_at": now,
         }

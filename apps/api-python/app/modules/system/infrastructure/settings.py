@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import capture_exception
+from app.core.setting_values import decode_setting_value, encode_setting_value
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
@@ -33,7 +32,7 @@ def prepare_settings_write(
         rows=tuple(
             {
                 "key": key,
-                "value": _serialize_setting_value(value),
+                "value": encode_setting_value(value),
                 "created_at": now,
                 "updated_at": now,
             }
@@ -42,22 +41,10 @@ def prepare_settings_write(
     )
 
 
-def _serialize_setting_value(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def parse_setting_value(raw: Any, fallback: Any = None) -> Any:
+def parse_setting_value(raw: str | None, fallback: Any = None) -> Any:
     if raw is None:
         return fallback
-    if isinstance(raw, (dict, list, int, float, bool)):
-        return raw
-    text = str(raw)
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError) as _caught_error:
-        # diagnostics-control-flow: Stored settings support literal strings and JSON; non-JSON text is a successful legacy representation.
-        capture_exception(_caught_error)
-        return text if text else fallback
+    return decode_setting_value(raw)
 
 
 def get_setting_raw(db: Session, key: str) -> str | None:
@@ -86,7 +73,7 @@ def get_setting(db: Session, key: str, fallback: Any = None) -> Any:
 
 def list_settings(db: Session) -> dict[str, Any]:
     rows = db.execute(select(SystemSetting.key, SystemSetting.value)).all()
-    return {str(key): parse_setting_value(value, value) for key, value in rows}
+    return {str(key): parse_setting_value(value) for key, value in rows}
 
 
 def upsert_setting(db: Session, key: str, value: Any) -> None:

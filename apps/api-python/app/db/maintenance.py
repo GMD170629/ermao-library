@@ -14,6 +14,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.core.setting_values import decode_setting_value
 from app.db.file_lock import try_file_lock, unlock_file
 from app.models.settings import SystemSetting
 
@@ -123,4 +124,7 @@ def database_maintenance_is_active(db: Session) -> bool:
             SystemSetting.key == DATABASE_MAINTENANCE_SETTING_KEY
         )
     )
-    return value == DATABASE_MAINTENANCE_RESTORE_VALUE
+    return (
+        value is not None
+        and decode_setting_value(value) == DATABASE_MAINTENANCE_RESTORE_VALUE
+    )

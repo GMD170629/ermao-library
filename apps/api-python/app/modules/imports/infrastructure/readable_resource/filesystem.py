@@ -285,12 +285,13 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         except FileNotFoundError as error:
             # diagnostics-control-flow: optional metadata candidates may be absent;
             # required source files and referenced cover assets still record ENOENT.
-            capture_exception(error, persist=False)
+            level = "debug" if missing_ok else "error"
+            capture_exception(error, level=level, persist=False)
             record_exception(
                 logging.getLogger(__name__),
                 "modules.imports.infrastructure.readable_resource.filesystem.observe_readable_file.failed",
                 error,
-                level="debug" if missing_ok else "error",
+                level=level,
             )
             return None
         except OSError as error:

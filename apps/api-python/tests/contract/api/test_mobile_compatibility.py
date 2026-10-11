@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.core.setting_values import encode_setting_value
 from app.models.settings import SystemSetting
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 
@@ -10,7 +11,7 @@ def _store_server_identity(db: Session, server_identity: str) -> None:
     db.add(
         SystemSetting(
             key=SERVER_IDENTITY_SETTING_KEY,
-            value=server_identity,
+            value=encode_setting_value(server_identity),
         )
     )
     db.commit()

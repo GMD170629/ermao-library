@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.services.metadata_lookup_queue as metadata_queue
 from app.core.config import Settings
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.organize import OrganizeRun
@@ -509,7 +510,7 @@ def test_organizer_scheduler_preserves_pending_state_under_real_writer_lock(
             seed.commit()
 
         with Session(blocker_engine) as blocker:
-            blocker.add(SystemSetting(key="writer-lock", value="held"))
+            blocker.add(SystemSetting(key="writer-lock", value=encode_setting_value("held")))
             blocker.flush()
             with pytest.raises(OperationalError) as captured:
                 scheduler._process_iteration()

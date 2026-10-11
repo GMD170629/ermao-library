@@ -19,6 +19,7 @@ from sqlalchemy.orm import ORMExecuteState, Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from app.core.config import Settings
+from app.core.setting_values import encode_setting_value
 from app.db.maintenance import (
     DATABASE_MAINTENANCE_RESTORE_VALUE,
     DATABASE_MAINTENANCE_SETTING_KEY,
@@ -195,7 +196,7 @@ def test_maintenance_blocks_writes_and_preserves_safe_methods(
         db.add(
             SystemSetting(
                 key=DATABASE_MAINTENANCE_SETTING_KEY,
-                value=DATABASE_MAINTENANCE_RESTORE_VALUE,
+                value=encode_setting_value(DATABASE_MAINTENANCE_RESTORE_VALUE),
             )
         )
 

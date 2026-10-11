@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.setting_values import decode_setting_value
 from app.models.settings import SystemSetting
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.domain.ignore_rules import (
@@ -56,19 +56,7 @@ class RawImportPreferencesProjection:
     rows: tuple[tuple[str, str | None], ...] = ()
 
 
-def _json_value(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError) as _caught_error:
-        # diagnostics-control-flow: String preferences may be plain strings instead of JSON values.
-        capture_exception(_caught_error)
-        return value
-
-
 def normalize_allowed_extensions(value: Any) -> tuple[str, ...]:
-    value = _json_value(value)
     if value is None:
         return SUPPORTED_IMPORT_EXTENSIONS
     if not isinstance(value, (list, tuple, set)):
@@ -87,7 +75,7 @@ def normalize_import_setting_value(key: str, value: Any) -> Any:
     if key == IMPORT_ALLOWED_EXTENSIONS_KEY:
         return list(normalize_allowed_extensions(value))
     if key == IMPORT_IGNORE_PATTERNS_KEY:
-        return normalize_ignore_patterns(_json_value(value))
+        return normalize_ignore_patterns(value)
     return value
 
 
@@ -119,13 +107,16 @@ def prepare_import_preferences(
 
     if not projection.available:
         return ImportPreferences()
-    values = dict(projection.rows)
+    values = {
+        key: decode_setting_value(raw) if raw is not None else None
+        for key, raw in projection.rows
+    }
     return ImportPreferences(
         allowed_extensions=normalize_allowed_extensions(
             values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),
         ignore_patterns=normalize_ignore_patterns(
-            _json_value(values.get(IMPORT_IGNORE_PATTERNS_KEY))
+            values.get(IMPORT_IGNORE_PATTERNS_KEY)
         ),
     )
 

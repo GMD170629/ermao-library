@@ -29,6 +29,7 @@ from app.core.exception_diagnostics import (
     exception_diagnostic_boundary,
     record_exception,
 )
+from app.core.setting_values import decode_setting_value
 from app.modules.download.infrastructure.tasks import (
     find_active_download_task as find_active_download_task_row,
 )
@@ -110,12 +111,7 @@ def system_setting(db: Session, key: str) -> str | None:
     value = system_setting_value(db, key)
     if value is None:
         return None
-    try:
-        parsed = json.loads(str(value))
-    except json.JSONDecodeError as _caught_error:
-        # diagnostics-control-flow: Headers accept both JSON and legacy literal forms; continue legacy parsing.
-        capture_exception(_caught_error)
-        parsed = value
+    parsed = decode_setting_value(value)
     return string_value(parsed) or None
 
 

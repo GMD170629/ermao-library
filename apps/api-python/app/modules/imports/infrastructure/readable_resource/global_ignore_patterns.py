@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import logging
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.setting_values import decode_setting_value
 from app.models.settings import SystemSetting
 from app.modules.imports.domain.ignore_rules import (
     IMPORT_IGNORE_PATTERNS_KEY,
@@ -24,12 +21,7 @@ def load_global_ignore_patterns(session: Session) -> str:
     )
     if raw is None:
         return ""
-    try:
-        value: object = json.loads(str(raw))
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
-        capture_exception(error, persist=False)
-        record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.global_ignore_patterns.load_global_ignore_patterns.failed", error)
-        value = str(raw)
+    value = decode_setting_value(raw)
     return normalize_ignore_patterns(value)
 
 

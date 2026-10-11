@@ -41,6 +41,40 @@ def test_parse_opf_maps_multiple_authors_series_isbn_and_subjects() -> None:
     assert metadata.isbn == "978-7-0000-0000-1"
 
 
+@pytest.mark.parametrize("index", [None, "", "   "])
+def test_absent_series_indices_are_not_exceptions(index, caplog) -> None:
+    import logging
+
+    indices = "" if index is None else f"""
+    <meta name="calibre:series_index" content="{index}"/>
+    <meta name="shuku:series_index" content="{index}"/>
+    <meta property="group-position">{index}</meta>"""
+    with caplog.at_level(logging.DEBUG):
+        metadata = parse_opf_metadata(f"""
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Standalone book</dc:title>{indices}
+        </metadata>""".encode())
+
+    assert metadata.title == "Standalone book"
+    assert metadata.series_index is None
+    assert metadata.volume_index is None
+    assert metadata.unparsed_values == ()
+    assert not caplog.records
+
+
+def test_invalid_series_index_keeps_original_value_and_exception(caplog) -> None:
+    metadata = parse_opf_metadata(b"""
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>Book</dc:title>
+        <meta name="shuku:series_index" content="invalid-index"/>
+    </metadata>""")
+
+    assert metadata.series_index is None
+    assert ("seriesIndex", "invalid-index") in metadata.unparsed_values
+    assert "ValueError" in caplog.text
+    assert "invalid-index" in caplog.text
+
+
 def test_epub3_group_position_supplements_calibre_series_without_index() -> None:
     metadata = parse_opf_metadata(
         """<package xmlns="http://www.idpf.org/2007/opf"

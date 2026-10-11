@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.core.setting_values import encode_setting_value
 from app.db.maintenance import (
     DatabaseMaintenanceLockTimeout,
     database_restore_barrier,
@@ -22,7 +23,7 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
     engine = create_sqlite_engine(database_path, timeout_seconds=0.05)
     SystemSetting.__table__.create(engine)
     with Session(engine) as seed:
-        seed.add(SystemSetting(key="systemName", value="Shuku"))
+        seed.add(SystemSetting(key="systemName", value=encode_setting_value("Shuku")))
         seed.commit()
 
     existing_writer = Session(engine)
@@ -30,7 +31,7 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
         existing_writer.execute(
             update(SystemSetting)
             .where(SystemSetting.key == "systemName")
-            .values(value="writer active")
+            .values(value=encode_setting_value("writer active"))
         )
         with (
             pytest.raises(DatabaseMaintenanceLockTimeout),
@@ -47,7 +48,7 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
                 reader.scalar(
                     select(SystemSetting.value).where(SystemSetting.key == "systemName")
                 )
-                == "Shuku"
+                == encode_setting_value("Shuku")
             )
 
         with (
@@ -57,7 +58,7 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
             blocked_writer.execute(
                 update(SystemSetting)
                 .where(SystemSetting.key == "systemName")
-                .values(value="must not write")
+                .values(value=encode_setting_value("must not write"))
             )
 
         with Session(engine) as restore:
@@ -66,7 +67,7 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
                 restore.execute(
                     update(SystemSetting)
                     .where(SystemSetting.key == "systemName")
-                    .values(value="restored")
+                    .values(value=encode_setting_value("restored"))
                 )
                 restore.commit()
 
@@ -75,6 +76,6 @@ def test_restore_barrier_waits_for_writers_and_keeps_reads_available(
             verify.scalar(
                 select(SystemSetting.value).where(SystemSetting.key == "systemName")
             )
-            == "restored"
+            == encode_setting_value("restored")
         )
     engine.dispose()

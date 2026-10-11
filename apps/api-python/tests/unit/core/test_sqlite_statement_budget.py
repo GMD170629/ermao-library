@@ -16,6 +16,7 @@ from app.core import exception_diagnostics as diagnostics
 from app.core.database_errors import is_database_operation_timeout
 from app.core.exception_diagnostics import format_exception_diagnostics
 from app.core.logging_config import DailyFileHandler
+from app.core.setting_values import encode_setting_value
 from app.db.diagnostic_session import DiagnosticSession
 from app.db.sqlite import (
     SQLITE_LOCK_WAIT_SECONDS,
@@ -319,7 +320,7 @@ def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Pa
     SystemSetting.__table__.create(engine)
     try:
         with DiagnosticSession(engine) as session:
-            session.execute(sa.insert(SystemSetting).values(key="probe", value="full binding"))
+            session.execute(sa.insert(SystemSetting).values(key="probe", value=encode_setting_value("full binding")))
             time.sleep(0.02)
             session.commit()
         with DiagnosticSession(engine, info={"diagnostics_storage": True}) as _check:
@@ -327,7 +328,7 @@ def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Pa
         trace = event_row["databaseTrace"]
         assert trace["outcome"] == "committed"
         assert trace["duration_ms"] >= 10
-        assert trace["statements"][0]["parameters"][:2] == ["probe", "full binding"]
+        assert trace["statements"][0]["parameters"][:2] == ["probe", encode_setting_value("full binding")]
         assert 'INSERT INTO "SystemSetting"' in trace["statements"][0]["statement"]
         assert "statement_id" not in trace["statements"][0]["timing"]
         assert "slowest_statement_id" not in trace
@@ -347,7 +348,7 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
     try:
         with caplog.at_level(logging.WARNING, logger="app.db.sqlite"):
             with DiagnosticSession(engine) as session:
-                session.execute(sa.insert(SystemSetting).values(key="fast", value="fast"))
+                session.execute(sa.insert(SystemSetting).values(key="fast", value=encode_setting_value("fast")))
                 time.sleep(0.15)
                 session.commit()
 
@@ -355,7 +356,7 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
                 assert len([row for row in log_records() if row.action == 'database.write_transaction_slow']) == 0
 
             with DiagnosticSession(engine) as session:
-                session.execute(sa.insert(SystemSetting).values(key="slow", value="slow"))
+                session.execute(sa.insert(SystemSetting).values(key="slow", value=encode_setting_value("slow")))
                 time.sleep(1.05)
                 session.commit()
 
@@ -382,10 +383,10 @@ def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path:
     diagnostics.configure_exception_storage(sessionmaker(bind=engine, class_=Session))
     try:
         with DiagnosticSession(engine) as session:
-            session.execute(sa.insert(SystemSetting).values(key="first", value="first binding"))
-            session.execute(sa.insert(SystemSetting).values(key="duplicate", value="second binding"))
+            session.execute(sa.insert(SystemSetting).values(key="first", value=encode_setting_value("first binding")))
+            session.execute(sa.insert(SystemSetting).values(key="duplicate", value=encode_setting_value("second binding")))
             try:
-                session.execute(sa.insert(SystemSetting).values(key="duplicate", value="failed binding"))
+                session.execute(sa.insert(SystemSetting).values(key="duplicate", value=encode_setting_value("failed binding")))
             except IntegrityError:
                 session.rollback()
         with Session(engine) as _check:
@@ -393,8 +394,8 @@ def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path:
         trace = event_row.metadata_json["diagnostics"]["databaseTrace"]
         assert trace["outcome"] == "failed"
         assert len(trace["transaction_statements"]) == 3
-        assert trace["transaction_statements"][0]["parameters"][:2] == ["first", "first binding"]
-        assert trace["transaction_statements"][2]["parameters"][:2] == ["duplicate", "failed binding"]
+        assert trace["transaction_statements"][0]["parameters"][:2] == ["first", encode_setting_value("first binding")]
+        assert trace["transaction_statements"][2]["parameters"][:2] == ["duplicate", encode_setting_value("failed binding")]
     finally:
         diagnostics.reset_exception_storage()
         engine.dispose()

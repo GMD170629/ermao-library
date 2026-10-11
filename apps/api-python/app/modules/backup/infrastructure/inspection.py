@@ -19,6 +19,14 @@ from app.modules.backup.infrastructure.problems import failure_problem, problem
 BACKUP_FORMAT_VERSION = 5
 
 
+def migrates_literal_settings(source_revision: object, target_revision: str) -> bool:
+    """0041 changes only settings encoding; all other backup records are unchanged."""
+    return (
+        source_revision == "0040_periodic_scan_admission"
+        and target_revision == "0041_system_setting_json"
+    )
+
+
 @dataclass(frozen=True)
 class InspectedBackup:
     metadata: dict[str, object]
@@ -117,7 +125,9 @@ def inspect_backup(path: Path, required_revision: str) -> InspectedBackup:
                     actual=actual,
                     expected=expected,
                 )
-            elif raw["databaseRevision"] != required_revision:
+            elif raw["databaseRevision"] != required_revision and not migrates_literal_settings(
+                raw["databaseRevision"], required_revision
+            ):
                 actual = raw["databaseRevision"]
                 issue = problem(
                     "BACKUP_DATABASE_MISMATCH",

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.setting_values import decode_setting_value, encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.runner import apply_schema
 from app.db.sqlite import create_sqlite_engine
@@ -15,11 +16,12 @@ from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
 
 
 def _read_server_identity(db: Session) -> str | None:
-    return db.scalar(
+    raw = db.scalar(
         select(SystemSetting.value).where(
             SystemSetting.key == SERVER_IDENTITY_SETTING_KEY
         )
     )
+    return None if raw is None else decode_setting_value(raw)
 
 
 def _settings(tmp_path, directory: str) -> Settings:
@@ -58,12 +60,12 @@ def test_existing_database_bootstrap_adds_identity_without_replacing_settings(
     try:
         apply_schema(engine, settings)
         with Session(engine) as db, db.begin():
-            db.add(SystemSetting(key="systemName", value="Existing library"))
+            db.add(SystemSetting(key="systemName", value=encode_setting_value("Existing library")))
 
         bootstrap_database(engine, settings)
 
         with Session(engine) as db:
-            assert db.get(SystemSetting, "systemName").value == "Existing library"
+            assert decode_setting_value(db.get(SystemSetting, "systemName").value) == "Existing library"
             assert _read_server_identity(db) is not None
     finally:
         engine.dispose()
@@ -81,7 +83,7 @@ def test_backup_restore_preserves_server_identity(tmp_path) -> None:
         with Session(engine) as db, db.begin():
             identity_setting = db.get(SystemSetting, SERVER_IDENTITY_SETTING_KEY)
             assert identity_setting is not None
-            identity_setting.value = "server_replaced_after_backup"
+            identity_setting.value = encode_setting_value("server_replaced_after_backup")
 
         with Session(engine) as db:
             restore_backup(db, settings, backup.id)

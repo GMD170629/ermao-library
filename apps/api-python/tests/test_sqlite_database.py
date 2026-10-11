@@ -379,7 +379,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         with Session(engine) as db:
             assert db.scalar(select(SystemSetting).where(False)) is None
             settings_by_key = {
-                row.key: row.value for row in db.scalars(select(SystemSetting)).all()
+                row.key: json.loads(row.value) for row in db.scalars(select(SystemSetting)).all()
             }
             server_identity = settings_by_key.pop(SERVER_IDENTITY_SETTING_KEY)
             assert re.fullmatch(r"server_[0-9a-f]{32}", server_identity)
@@ -415,10 +415,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 40
-    assert script.get_heads() == ["0040_periodic_scan_admission"]
-    assert head_revision() == "0040_periodic_scan_admission"
+    assert len(revisions) == 41
+    assert script.get_heads() == ["0041_system_setting_json"]
+    assert head_revision() == "0041_system_setting_json"
     assert [revision.revision for revision in revisions] == [
+        "0041_system_setting_json",
         "0040_periodic_scan_admission",
         "0039_generated_metadata_fields",
         "0038_import_scan_round_fact",
@@ -471,7 +472,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0040_periodic_scan_admission"
+        assert _current_revision(engine) == "0041_system_setting_json"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -512,7 +513,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0040_periodic_scan_admission"
+        assert _current_revision(engine) == "0041_system_setting_json"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -563,7 +564,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0040_periodic_scan_admission"
+        assert _current_revision(engine) == "0041_system_setting_json"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -738,7 +739,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
             douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
             assert system_name is not None
             assert douban is not None
-            system_name.value = "我的书库"
+            system_name.value = json.dumps("我的书库")
             douban.name = "自定义豆瓣"
             douban.enabled = False
             db.commit()
@@ -759,8 +760,8 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
                 )
             )
             assert len(server_identities) == 1
-            assert re.fullmatch(r"server_[0-9a-f]{32}", server_identities[0])
-            assert db.get(SystemSetting, "systemName").value == "我的书库"
+            assert re.fullmatch(r"server_[0-9a-f]{32}", json.loads(server_identities[0]))
+            assert json.loads(db.get(SystemSetting, "systemName").value) == "我的书库"
             douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
             assert douban is not None
             assert (douban.name, douban.enabled) == ("自定义豆瓣", False)
@@ -861,7 +862,7 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            db.add(SystemSetting(key="backup.guard", value="archived"))
+            db.add(SystemSetting(key="backup.guard", value=json.dumps("archived")))
             db.commit()
             backup = create_backup(db, settings)
             with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
@@ -871,12 +872,12 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
 
             guard = db.get(SystemSetting, "backup.guard")
             assert guard is not None
-            guard.value = "changed"
+            guard.value = json.dumps("changed")
             db.commit()
             restored = restore_backup(db, settings, backup.id)
 
             assert restored["restored"] is True
-            assert db.get(SystemSetting, "backup.guard").value == "archived"
+            assert db.get(SystemSetting, "backup.guard").value == json.dumps("archived")
     finally:
         engine.dispose()
 
@@ -1052,7 +1053,7 @@ def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> No
     try:
         bootstrap_database(engine, settings)
         with Session(engine) as db:
-            db.add(SystemSetting(key="backup.sentinel", value="before"))
+            db.add(SystemSetting(key="backup.sentinel", value=json.dumps("before")))
             db.commit()
             backup = create_backup(db, settings)
 
@@ -1085,7 +1086,7 @@ def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> No
             ) as failure:
                 restore_backup(db, settings, backup.id)
             assert failure.value.problem.params["field"] == "LibraryBook.sourceNodeId"
-            assert db.get(SystemSetting, "backup.sentinel").value == "before"
+            assert db.get(SystemSetting, "backup.sentinel").value == json.dumps("before")
     finally:
         engine.dispose()
 

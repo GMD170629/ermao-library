@@ -15,6 +15,7 @@ from app.core.exception_diagnostics import (
     exception_diagnostic_boundary,
     reset_exception_storage,
 )
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.settings import SystemSetting
@@ -122,7 +123,7 @@ def test_failed_provider_result_without_exception_records_only_observed_reason(
     plugin = providers.metadata_provider_registry().require("douban")
     monkeypatch.setattr(plugin, "test", lambda _: {"ok": False})
     with Session(engine) as db:
-        db.merge(SystemSetting(key="language", value=locale))
+        db.merge(SystemSetting(key="language", value=encode_setting_value(locale)))
         db.commit()
         result, _provider = providers.test_metadata_provider(db, "douban")
     assert result["ok"] is False

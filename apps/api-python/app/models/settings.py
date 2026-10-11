@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -14,6 +15,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    column,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +39,9 @@ def db_timestamp() -> datetime:
 
 class SystemSetting(Base):
     __tablename__ = "SystemSetting"
+    __table_args__ = (
+        CheckConstraint(func.json_valid(column("value")), name="SystemSetting_value_json"),
+    )
 
     key: Mapped[str] = mapped_column(String(191), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)

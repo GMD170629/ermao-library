@@ -750,7 +750,7 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
     db_session.execute(
         text(
             "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "
-            "VALUES ('language', 'en-US', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+            "VALUES ('language', '\"en-US\"', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
             "ON CONFLICT (`key`) DO UPDATE SET `value` = excluded.`value`, "
             "`updatedAt` = excluded.`updatedAt`"
         )

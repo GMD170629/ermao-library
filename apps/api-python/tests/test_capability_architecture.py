@@ -526,6 +526,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0038_import_scan_round_fact.py",
         "0039_generated_metadata_fields.py",
         "0040_periodic_scan_admission.py",
+        "0041_system_setting_json.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import Settings, get_settings
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
@@ -124,6 +125,58 @@ def test_upload_requires_authentication(backup_client):
     assert response.status_code in (401, 403)
 
 
+@pytest.mark.parametrize("source_revision, accepted", [
+    ("0040_periodic_scan_admission", True),
+    ("0041_system_setting_json", False),
+    ("0039_generated_metadata_fields", False),
+])
+def test_legacy_setting_backup_is_normalized_only_from_supported_revision(
+    backup_client, tmp_path, source_revision, accepted
+):
+    from sqlalchemy import func, select
+
+    from app.modules.mobile.infrastructure.server_identity import (
+        SqlAlchemyServerIdentityReader,
+    )
+    from app.modules.system.infrastructure.settings import get_setting
+
+    client = backup_client
+    created = client.post("/api/backups").json()["data"]["backup"]
+    payload = client.get(f"/api/backups/{created['id']}/download").content
+    output = io.BytesIO()
+    identity = None
+    with zipfile.ZipFile(io.BytesIO(payload)) as original, zipfile.ZipFile(output, "w") as modified:
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "metadata.json":
+                metadata = json.loads(content)
+                metadata["databaseRevision"] = source_revision
+                content = json.dumps(metadata).encode()
+            elif name == "database-export.json":
+                exported = json.loads(content)
+                for record in exported["systemSettings"]:
+                    if record["key"] in {"language", "systemName", "mobile.serverIdentity"}:
+                        record["value"] = json.loads(record["value"])
+                    if record["key"] == "mobile.serverIdentity":
+                        identity = record["value"]
+                content = json.dumps(exported).encode()
+            modified.writestr(name, content)
+    response = client.post("/api/backups/upload", files={"file": ("legacy-settings.zip", output.getvalue())})
+    assert response.status_code == 201
+    backup = response.json()["data"]["backup"]
+    response = client.post(f"/api/backups/{backup['id']}/restore")
+    assert response.status_code == (200 if accepted else 400), response.text
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        with sessionmaker(bind=engine)() as db:
+            assert get_setting(db, "language") == "zh-CN"
+            assert SqlAlchemyServerIdentityReader(db).read_server_identity() == identity
+            assert db.scalar(select(func.count()).select_from(SystemSetting).where(func.json_valid(SystemSetting.value) == 0)) == 0
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("invalid", ["missing", "duplicate"])
 def test_real_database_constraints_are_explained_without_record_values(
     backup_client, invalid
@@ -174,11 +227,11 @@ def test_live_restore_failure_preserves_data_and_reports_recovery(
     engine = create_sqlite_engine(settings.database_path)
     factory = sessionmaker(bind=engine)
     with factory() as db:
-        db.add(SystemSetting(key="backup.sentinel", value="archived"))
+        db.add(SystemSetting(key="backup.sentinel", value=encode_setting_value("archived")))
         db.commit()
     created = client.post("/api/backups").json()["data"]["backup"]
     with factory() as db:
-        db.get(SystemSetting, "backup.sentinel").value = "live"
+        db.get(SystemSetting, "backup.sentinel").value = encode_setting_value("live")
         db.commit()
     original = backup_archive.SqlAlchemyBackupRestoreWriter.apply
 
@@ -212,6 +265,6 @@ def test_live_restore_failure_preserves_data_and_reports_recovery(
             assert "Permission denied" in error["params"]["messageEn"]
             assert "maintenance recovery permission denied" in caplog.text
         with factory() as db:
-            assert db.get(SystemSetting, "backup.sentinel").value == "live"
+            assert db.get(SystemSetting, "backup.sentinel").value == encode_setting_value("live")
     finally:
         engine.dispose()

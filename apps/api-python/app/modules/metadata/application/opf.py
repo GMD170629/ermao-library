@@ -67,8 +67,11 @@ def _meta_values(root: etree._Element) -> dict[str, str]:
 
 
 def _float(value: str | None) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
     try:
-        parsed = float(str(value or "").strip())
+        parsed = float(text)
     except ValueError as _caught_error:
         # diagnostics-control-flow: optional OPF numeric/date values remain in unparsed_values when unsupported.
         capture_exception(_caught_error)

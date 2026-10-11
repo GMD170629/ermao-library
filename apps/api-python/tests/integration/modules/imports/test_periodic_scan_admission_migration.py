@@ -119,7 +119,7 @@ def test_upgrade_clears_only_unfinished_library_scans(
                 sa.event.listen(connection, "before_execute", fail_cleanup)
                 try:
                     with pytest.raises(RuntimeError, match="interrupted scan cleanup"):
-                        command.upgrade(config, "head")
+                        command.upgrade(config, "0040_periodic_scan_admission")
                 finally:
                     sa.event.remove(connection, "before_execute", fail_cleanup)
                     config.attributes.pop("connection")
@@ -135,7 +135,7 @@ def test_upgrade_clears_only_unfinished_library_scans(
                 assert db.get(SystemSetting, "libraryScan.intervalMinutes").value == "30"
             assert _schema_snapshot(engine) == schema_before
 
-        command.upgrade(config, "head")
+        command.upgrade(config, "0040_periodic_scan_admission")
         assert _schema_snapshot(engine) == schema_before
         current = sa.Table("LibraryImportTask", sa.MetaData(), autoload_with=engine)
         with engine.connect() as connection:
@@ -159,7 +159,7 @@ def test_upgrade_clears_only_unfinished_library_scans(
                 id="new-scan", kind="SCAN_LIBRARY", libraryId="library",
                 state="QUEUED",
             ))
-        command.upgrade(config, "head")
+        command.upgrade(config, "0040_periodic_scan_admission")
         assert _schema_snapshot(engine) == schema_before
         with engine.connect() as connection:
             new_scan = connection.execute(
@@ -201,8 +201,8 @@ def test_upgrade_normalizes_only_existing_enabled_scan_setting(
             }
         schema_before = _schema_snapshot(engine)
 
-        command.upgrade(config, "head")
-        command.upgrade(config, "head")
+        command.upgrade(config, "0040_periodic_scan_admission")
+        command.upgrade(config, "0040_periodic_scan_admission")
 
         assert _schema_snapshot(engine) == schema_before
         with engine.connect() as connection:

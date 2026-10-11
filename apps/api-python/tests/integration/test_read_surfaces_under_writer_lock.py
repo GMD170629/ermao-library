@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.auth import hash_password
 from app.core.config import Settings
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.maintenance import (
     DATABASE_MAINTENANCE_RESTORE_VALUE,
@@ -170,7 +171,7 @@ def test_get_surfaces_remain_read_only_while_writer_slot_is_held(
             blocker.execute(
                 update(SystemSetting)
                 .where(SystemSetting.key == "systemName")
-                .values(value="writer owns SQLite slot")
+                .values(value=encode_setting_value("writer owns SQLite slot"))
             )
 
             paths = (
@@ -235,7 +236,7 @@ def test_maintenance_state_rejects_new_writes_but_keeps_gets_available(
             maintenance.add(
                 SystemSetting(
                     key=DATABASE_MAINTENANCE_SETTING_KEY,
-                    value=DATABASE_MAINTENANCE_RESTORE_VALUE,
+                    value=encode_setting_value(DATABASE_MAINTENANCE_RESTORE_VALUE),
                 )
             )
             maintenance.commit()

@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.setting_values import decode_setting_value
 from app.models.settings import SystemSetting
 from app.modules.mobile.domain.compatibility import SERVER_IDENTITY_SETTING_KEY
 
@@ -25,4 +26,4 @@ class SqlAlchemyServerIdentityReader:
                 SystemSetting.key == SERVER_IDENTITY_SETTING_KEY
             )
         )
-        return None if value is None else str(value)
+        return None if value is None else str(decode_setting_value(value))

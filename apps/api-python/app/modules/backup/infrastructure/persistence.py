@@ -24,6 +24,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Mapper, Session
 
 from app.core.exception_diagnostics import capture_exception
+from app.core.setting_values import decode_setting_value, encode_setting_value
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
 from app.db.base import Base
@@ -265,6 +266,8 @@ def _converted_column_value(column: Any, value: object) -> object:
 def prepare_table_records(
     table: str,
     records: object,
+    *,
+    legacy_setting_values: bool = False,
 ) -> tuple[dict[str, object], ...]:
     """Filter and convert untrusted JSON records before any write transaction."""
 
@@ -283,6 +286,17 @@ def prepare_table_records(
             for name, value in raw_record.items()
             if name in columns
         }
+        raw = record.get("value")
+        if table == "SystemSetting" and isinstance(raw, str):
+            try:
+                value = decode_setting_value(raw)
+            except ValueError as error:
+                # Only the backup import boundary accepts pre-0041 literal text.
+                capture_exception(error, level="debug" if legacy_setting_values else "error")
+                if not legacy_setting_values:
+                    raise BackupRecordValidationError("BACKUP_FIELD_TYPE_INVALID:SystemSetting.value") from error
+                value = raw
+            record["value"] = encode_setting_value(value)
         if record:
             prepared.append(record)
     return tuple(prepared)
@@ -500,13 +514,13 @@ class SqlAlchemyBackupRestoreWriter:
             sqlite_insert(SystemSetting)
             .values(
                 key=change.setting_key,
-                value=change.setting_value,
+                value=encode_setting_value(change.setting_value),
                 updated_at=change.changed_at,
             )
             .on_conflict_do_update(
                 index_elements=[SystemSetting.key],
                 set_={
-                    SystemSetting.value: change.setting_value,
+                    SystemSetting.value: encode_setting_value(change.setting_value),
                     SystemSetting.updated_at: change.changed_at,
                 },
             )

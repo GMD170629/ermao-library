@@ -12,6 +12,7 @@ from app.core.exception_diagnostics import (
     configure_exception_storage,
     reset_exception_storage,
 )
+from app.core.setting_values import encode_setting_value
 from app.models.settings import SystemEvent, SystemSetting
 from app.modules.imports.application.readable_resource.ports import (
     LibraryImportTaskRecord,
@@ -87,7 +88,7 @@ class _LockingScan:
 
     def execute_library(self, *_args, **_kwargs):
         self._session.execute(
-            insert(SystemSetting).values(key="business-lock", value="held")
+            insert(SystemSetting).values(key="business-lock", value=encode_setting_value("held"))
         )
         raise RuntimeError("scan failure under business write lock")
 

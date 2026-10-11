@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 from sqlalchemy import select
@@ -10,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.setting_values import decode_setting_value, encode_setting_value
 from app.models.common import db_timestamp
 from app.models.settings import SystemSetting
 from app.modules.imports.application.library_scan_settings import (
@@ -65,12 +65,7 @@ class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort)
     def _parse(raw: str | None) -> object | None:
         if raw is None:
             return None
-        try:
-            return json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError) as error:
-            capture_exception(error, persist=False)
-            record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_scan_settings._parse.failed", error)
-            return None
+        return decode_setting_value(raw)
 
     def save(self, settings: LibraryScanSettings) -> None:
         now = db_timestamp()
@@ -87,13 +82,13 @@ class SqlAlchemyLibraryScanSettingsRepository(LibraryScanSettingsRepositoryPort)
             [
                 {
                     "key": LIBRARY_SCAN_WATCH_ENABLED_KEY,
-                    "value": json.dumps(settings.watch_enabled),
+                    "value": encode_setting_value(settings.watch_enabled),
                     "created_at": now,
                     "updated_at": now,
                 },
                 {
                     "key": LIBRARY_SCAN_INTERVAL_MINUTES_KEY,
-                    "value": json.dumps(settings.interval_minutes),
+                    "value": encode_setting_value(settings.interval_minutes),
                     "created_at": now,
                     "updated_at": now,
                 },
