@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export function isFormalRelease({ eventName, refType, refName }) {
+export function isFormalRelease({ eventName, refType, refName, buildNasCandidate = false }) {
+  if (buildNasCandidate) {
+    if (eventName === 'workflow_dispatch' && refType === 'branch' && !['main', 'develop', 'prod'].includes(refName)) return false;
+    throw Error('NAS candidates require an explicit dispatch on an isolated development branch.');
+  }
   if (eventName === 'pull_request') return false;
   if (refType === 'tag' && /^v\d+\.\d+\.\d+$/.test(refName)) return true;
   if (refType === 'branch' && ['develop', 'prod'].includes(refName)) return false;
@@ -35,7 +39,7 @@ function optionalGitHubResource(path) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { GITHUB_EVENT_NAME: eventName, GITHUB_REF_TYPE: refType, GITHUB_REF_NAME: refName,
     GITHUB_SHA: sha, GITHUB_REPOSITORY: repository } = process.env;
-  if (isFormalRelease({ eventName, refType, refName })) {
+  if (isFormalRelease({ eventName, refType, refName, buildNasCandidate: process.env.BUILD_NAS_CANDIDATE === 'true' })) {
     command('git', ['fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main',
       '+refs/heads/develop:refs/remotes/origin/develop']);
     const version = JSON.parse(readFileSync('package.json', 'utf8')).version;

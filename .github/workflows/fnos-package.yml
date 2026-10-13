@@ -68,6 +68,10 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
+      build_nas_candidate:
+        description: '仅构建 NAS 测试镜像，不发布 / Build a NAS test image without publishing (isolated branch only)'
+        type: boolean
+        default: false
       build_android:
         description: '本次明确构建 Android / Explicitly build Android (tag only; omit when using a request)'
         type: boolean
@@ -113,6 +117,7 @@ jobs:
       - name: Validate release entry point and synchronized source
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_NAS_CANDIDATE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_nas_candidate || false }}
         run: node scripts/validate-release-source.mjs
 
       - name: Resolve explicit Android selection
@@ -295,12 +300,34 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: shuku-startup:candidate
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=startup-acceptance
           cache-to: type=gha,mode=max,scope=startup-acceptance
       - name: Verify actual image startup, recovery, crash isolation and core refusal
         run: |
           python3 scripts/smoke-container-runtime.py --image shuku-startup:candidate --fault-boundaries
           python3 scripts/smoke-container-runtime.py --image shuku-startup:candidate --update-boundaries
+      - name: Export verified NAS candidate without publishing
+        if: github.event_name == 'workflow_dispatch' && inputs.build_nas_candidate
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nas-candidate
+          docker save shuku-startup:candidate | gzip > artifacts/nas-candidate/image.tar.gz
+          sha256sum artifacts/nas-candidate/image.tar.gz > artifacts/nas-candidate/image.tar.gz.sha256
+          docker image inspect shuku-startup:candidate > artifacts/nas-candidate/image-inspect.json
+          printf '%s\n' "$SOURCE_COMMIT" > artifacts/nas-candidate/source-commit.txt
+      - name: Preserve verified NAS candidate
+        if: github.event_name == 'workflow_dispatch' && inputs.build_nas_candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: nas-candidate-${{ github.sha }}
+          path: artifacts/nas-candidate
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
       - name: Preserve startup diagnostics
         if: always()
         uses: actions/upload-artifact@v4
