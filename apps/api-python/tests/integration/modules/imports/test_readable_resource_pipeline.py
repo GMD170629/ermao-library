@@ -61,6 +61,10 @@ from app.modules.imports.application.readable_resource.process_book_resources im
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
+from app.modules.imports.application.readable_resource.request_library_scan import (
+    LibraryScanTrigger,
+    RequestLibraryScanCommand,
+)
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     SourceScanIncompleteError,
 )
@@ -111,6 +115,8 @@ from app.modules.library.public import (
     SourceNodePhysicalKind,
     SourceNodeRelativePath,
 )
+from app.modules.publications.application.ports import PublicationSource
+from app.modules.publications.infrastructure.txt_adapter import TxtPublicationAdapter
 
 
 class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
@@ -292,6 +298,87 @@ def _drain(pipeline: ReadableResourcePipeline, *, limit: int = 200) -> list[str]
             break
         outcomes.append(outcome)
     return outcomes
+
+
+@pytest.mark.parametrize("trigger", ["WATCHER", "UPLOAD"])
+@pytest.mark.parametrize(
+    "content",
+    [
+        "第一章\n有效中文正文\x00内容。第二段正文内容结束。".encode("gbk"),
+        "第一章\n有效中文正文�内容。第二段正文内容结束。".encode("gb18030"),
+    ],
+)
+def test_txt_chinese_encoding_import_read_and_forced_reimport(
+    tmp_path: Path, trigger: LibraryScanTrigger, content: bytes
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            path = root / "中文小说.txt"
+            path.write_bytes(content)
+            pipeline = build_readable_resource_pipeline(db)
+            request = pipeline.request_library_scan.execute(
+                RequestLibraryScanCommand(library_id="lib-1", trigger=trigger)
+            )
+            assert request.enqueued
+            assert _drain(pipeline) == ["scan", "book"]
+            db.expire_all()
+
+            resource = db.scalar(select(LibraryReadableResource))
+            asset = db.scalar(select(LibraryResourceAsset))
+            task = db.scalar(select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_BOOK"
+            ))
+            assert resource is not None and asset is not None and task is not None
+            assert resource.import_state == asset.import_state == "READY"
+            assert task.state == "SUCCEEDED"
+            candidates = json.loads(asset.local_metadata_candidates)
+            embedded = next(c for c in candidates if c["source"] == "EMBEDDED")
+            assert embedded["metadata"]["language"] == "zh-CN"
+
+            reader = TxtPublicationAdapter(root)
+            try:
+                source = PublicationSource(
+                    resource_id=resource.id, asset_id=asset.id, source_format="txt",
+                    path=str(path), size_bytes=len(content),
+                    mtime_ms=path.stat().st_mtime_ns // 1_000_000,
+                    title="中文小说", author=None,
+                )
+                publication = reader.open(source)
+                chapter = reader.read_resource(source, publication.reading_order[0].href)
+                assert content.decode("gb18030").split("\n", 1)[1] in chapter.content.decode()
+            finally:
+                reader.close()
+
+            # Reproduce the metadata omitted by the old encoding probe on a READY asset.
+            asset.local_metadata_candidates = json.dumps(
+                [c for c in candidates if c["source"] != "EMBEDDED"], ensure_ascii=False
+            )
+            db.commit()
+            with pipeline.uow.transaction():
+                retry = pipeline.queue.request_import_resource(
+                    library_id="lib-1", resource_id=resource.id,
+                    source_node_id=resource.source_node_id, force=True,
+                )
+            assert retry is not None and retry.id != task.id
+            assert _drain(pipeline) == ["book"]
+            db.expire_all()
+            refreshed = db.get(LibraryResourceAsset, asset.id)
+            assert refreshed is not None and refreshed.import_state == "READY"
+            assert any(
+                c["source"] == "EMBEDDED" and c["metadata"]["language"] == "zh-CN"
+                for c in json.loads(refreshed.local_metadata_candidates)
+            )
+            assert db.get(LibraryImportTask, retry.id).state == "SUCCEEDED"
+            assert db.get(LibraryImportTask, task.id).state == "SUCCEEDED"
+            assert db.scalar(select(func.count()).select_from(LibraryResourceAsset)) == 1
+            assert db.scalar(select(func.count()).select_from(LibraryReadableResource)) == 1
+            assert path.read_bytes() == content
+    finally:
+        engine.dispose()
 
 
 def test_root_scan_keeps_missing_nodes_after_late_enumeration_failure(

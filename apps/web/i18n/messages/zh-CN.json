@@ -2397,7 +2397,7 @@
   "SMTP 用户名": "SMTP 用户名",
   "SMTP 正常，但尚无用户配置 Kindle 邮箱": "SMTP 正常，但尚无用户配置 Kindle 邮箱",
   "SMTP 主机": "SMTP 主机",
-  "TXT 解码器无法解码此文件。": "TXT 解码器无法解码此文件。",
+  "TXT 解码器无法解码此文件。请将文件转换为 UTF-8 后重试。": "TXT 解码器无法解码此文件。请将文件转换为 UTF-8 后重试。",
   "TXT 解析器未找到可读文本。": "TXT 解析器未找到可读文本。",
   "URL 加 ?debug=0 可关闭持久开关": "URL 加 ?debug=0 可关闭持久开关",
   "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "useAudioPlayback 必须在 AudioPlaybackProvider 内使用"

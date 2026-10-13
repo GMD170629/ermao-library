@@ -175,7 +175,7 @@ def list_system_events_page(db: Session, *, page: int, page_size: int,
     levels: Counter[str] = Counter()
     total = 0
     selected = []
-    last_page = []
+    last_page: list[dict[str, Any]] = []
     for event in read_log_events():
         sources[event["source"]] += 1
         levels[event["level"]] += 1

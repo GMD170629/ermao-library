@@ -84,7 +84,7 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'REQUEST_TIMEOUT') return translate('读取阅读资源超时。');
   if (code === 'TLS_FAILURE') return translate('阅读连接的 TLS 验证失败。');
   if (code === 'PUBLICATION_TXT_NUL_CHARACTER') return translate('服务器的 TXT 解析实现拒绝了 NUL 字符。');
-  if (code === 'PUBLICATION_TXT_ENCODING_UNSUPPORTED') return translate('TXT 解码器无法解码此文件。');
+  if (code === 'PUBLICATION_TXT_ENCODING_UNSUPPORTED') return translate('TXT 解码器无法解码此文件。请将文件转换为 UTF-8 后重试。');
   if (code === 'PUBLICATION_TXT_EMPTY') return translate('TXT 解析器未找到可读文本。');
   if (code === SAFETY_ERROR.PUBLICATION_CORRUPT) return translate('出版物资源已损坏，无法可靠读取。');
   if (code === 'PUBLICATION_PARSE_FAILED' || code === 'PUBLICATION_MARKUP_INVALID') return translate('格式解析器解析失败。');
