@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import base64
+import json
 import struct
 from pathlib import Path
 
+import pytest
+
 from app.modules.imports.infrastructure.reflowable_metadata import (
+    ReflowableMetadataError,
     inspect_reflowable_book,
 )
+from app.modules.imports.infrastructure.text_encoding import TextEncodingError
 
 
 def test_txt_inspection_reads_metadata_without_generating_navigation(
@@ -24,6 +29,69 @@ def test_txt_inspection_reads_metadata_without_generating_navigation(
     assert metadata.language == "zh-CN"
     assert "navigationCount" not in metadata.raw_metadata
     assert "navigationFingerprint" not in metadata.raw_metadata
+
+
+def test_txt_inspection_accepts_decodable_shared_contract_sources(
+    tmp_path: Path,
+) -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[6]
+        / "packages/reader-contracts/fixtures/txt-decoding-v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    source = tmp_path / "contract.txt"
+    for case in fixture["cases"]:
+        content = bytes.fromhex(case["sourceHex"])
+        if not content or case["expectedText"] is None:
+            continue
+        source.write_bytes(content)
+
+        metadata = inspect_reflowable_book(source, "TXT")
+
+        encoding = metadata.raw_metadata["inputEncoding"]
+        assert content.decode(encoding).lstrip("\ufeff") == case["expectedText"], case["id"]
+        assert source.read_bytes() == content
+
+
+@pytest.mark.parametrize("encoding", ["gbk", "gb18030", "utf-8", "utf-8-sig"])
+@pytest.mark.parametrize("text", ["第一章\n正文结束。", "\x00正文\x00结束。\x00"])
+def test_txt_inspection_accepts_chinese_encodings_without_rewriting_source(
+    tmp_path: Path, encoding: str, text: str
+) -> None:
+    source = tmp_path / "中文.txt"
+    content = text.encode(encoding)
+    source.write_bytes(content)
+
+    metadata = inspect_reflowable_book(source, "TXT")
+
+    assert content.decode(metadata.raw_metadata["inputEncoding"]) == text
+    assert source.read_bytes() == content
+
+
+def test_txt_inspection_preserves_literal_replacement_character(tmp_path: Path) -> None:
+    source = tmp_path / "literal.txt"
+    content = "正文�结束".encode("gb18030")
+    source.write_bytes(content)
+
+    metadata = inspect_reflowable_book(source, "TXT")
+
+    assert metadata.raw_metadata["inputEncoding"] == "gb18030"
+    assert source.read_bytes() == content
+
+
+@pytest.mark.parametrize("content", [b"A\xffB", bytes.fromhex("d6d0ce")])
+def test_txt_inspection_rejects_invalid_bytes_with_original_decoder_cause(
+    tmp_path: Path, content: bytes
+) -> None:
+    source = tmp_path / "invalid.txt"
+    source.write_bytes(content)
+
+    with pytest.raises(ReflowableMetadataError) as caught:
+        inspect_reflowable_book(source, "TXT")
+
+    assert isinstance(caught.value.__cause__, TextEncodingError)
+    assert isinstance(caught.value.__cause__.__cause__, UnicodeDecodeError)
+    assert source.read_bytes() == content
 
 
 def test_txt_inspection_uses_matching_sidecar_cover(tmp_path: Path) -> None:

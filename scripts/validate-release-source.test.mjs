@@ -27,6 +27,17 @@ test('a release must start from the same commit on both branches and match the v
   assert.throws(() => validateReleaseSource({ ...source, tag: 'v1.0.6' }), /version/);
 });
 
+test('NAS candidate builds need explicit dispatch on an isolated branch', () => {
+  const candidate = { eventName: 'workflow_dispatch', refType: 'branch', refName: 'fix/ermao-5', buildNasCandidate: true };
+  assert.equal(isFormalRelease(candidate), false);
+  for (const refName of ['main', 'develop', 'prod']) {
+    assert.throws(() => isFormalRelease({ ...candidate, refName }), /isolated development branch/);
+  }
+  assert.throws(() => isFormalRelease({ ...candidate, refType: 'tag', refName: 'v1.5.7' }), /isolated development branch/);
+  assert.throws(() => isFormalRelease({ ...candidate, eventName: 'pull_request' }), /explicit dispatch/);
+  assert.throws(() => isFormalRelease({ ...candidate, buildNasCandidate: false }), /build once/);
+});
+
 test('an already published version cannot rebuild, while a draft can recover', () => {
   validateReleaseSource({ ...source, release: { draft: true } });
   assert.throws(() => validateReleaseSource({ ...source, release: { draft: false } }), /already published/);

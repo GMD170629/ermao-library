@@ -2397,7 +2397,7 @@
   "SMTP 用户名": "SMTP Username",
   "SMTP 正常，但尚无用户配置 Kindle 邮箱": "SMTP is healthy, but no user has configured a Kindle address",
   "SMTP 主机": "SMTP Host",
-  "TXT 解码器无法解码此文件。": "The TXT decoder could not decode this file.",
+  "TXT 解码器无法解码此文件。请将文件转换为 UTF-8 后重试。": "The TXT decoder could not decode this file. Convert it to UTF-8 and try again.",
   "TXT 解析器未找到可读文本。": "The TXT parser found no readable text.",
   "URL 加 ?debug=0 可关闭持久开关": "URL plus ?debug=0 to close the persistent switch",
   "useAudioPlayback 必须在 AudioPlaybackProvider 内使用": "Use AudioPlayback to use in AudioPlaybackProvider"

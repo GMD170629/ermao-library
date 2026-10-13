@@ -9,6 +9,18 @@ const unifiedAppStartup = readFileSync('scripts/start-unified-app.sh', 'utf8');
 const job = name => releaseWorkflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][\w-]*:/)[0];
 const gitAttributes = readFileSync('.gitattributes', 'utf8');
 
+test('NAS candidates export the already verified image without publishing', () => {
+  const startup = job('startup-acceptance');
+  assert.match(startup, /org.opencontainers.image.revision=\$\{\{ github.sha \}\}/u);
+  const verify = startup.indexOf('Verify actual image startup');
+  const save = startup.indexOf('docker save shuku-startup:candidate');
+  assert.ok(verify >= 0 && save > verify);
+  assert.match(startup, /if: github.event_name == 'workflow_dispatch' && inputs.build_nas_candidate/u);
+  assert.match(startup, /sha256sum artifacts\/nas-candidate\/image.tar.gz/u);
+  assert.match(startup, /name: nas-candidate-\$\{\{ github.sha \}\}/u);
+  assert.doesNotMatch(startup, /push: true|docker push|gh release create|gh release edit/u);
+});
+
 test('repository text normalization protects container entrypoints', () => {
   assert.doesNotMatch(unifiedAppStartup, /\r/u);
   assert.match(gitAttributes, /^\* text=auto eol=lf$/mu);

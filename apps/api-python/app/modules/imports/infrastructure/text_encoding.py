@@ -35,17 +35,6 @@ def _decode_sample(sample: bytes, continuation: bytes, *, encoding: str) -> str:
     return decoded
 
 
-def _strip_verified_trailing_nul_padding(prefix: bytes) -> bytes:
-    first_nul = prefix.find(b"\x00")
-    if first_nul < 0:
-        return prefix
-
-    # Only validate the observed sample; never walk the source tail.
-    if prefix[first_nul:].strip(b"\x00"):
-        raise TextEncodingError("无法可靠识别 TXT 编码")
-    return prefix[:first_nul]
-
-
 def detect_txt_encoding(path: Path) -> str:
     """Return a deterministic TXT encoding or reject ambiguous bytes."""
 
@@ -62,18 +51,13 @@ def detect_sample_encoding(prefix: bytes) -> str:
     if not sample:
         raise TextEncodingError("TXT 文件为空")
     if sample.startswith(codecs.BOM_UTF8):
-        _strip_verified_trailing_nul_padding(prefix)
         return "utf-8-sig"
     if sample.startswith(codecs.BOM_UTF16_LE):
         return "utf-16-le"
     if sample.startswith(codecs.BOM_UTF16_BE):
         return "utf-16-be"
-    if b"\x00" in sample:
-        prefix = _strip_verified_trailing_nul_padding(prefix)
-        sample = prefix[:TXT_ENCODING_SAMPLE_BYTES]
-        continuation = prefix[TXT_ENCODING_SAMPLE_BYTES:]
-        if not sample:
-            raise TextEncodingError("无法可靠识别 TXT 编码")
+    # NUL and literal U+FFFD are valid decoded content, not encoding failures.
+    # Preserve them, matching the TXT decoding contract used by the readers.
     try:
         _decode_sample(sample, continuation, encoding="utf-8")
         return "utf-8"
@@ -81,12 +65,10 @@ def detect_sample_encoding(prefix: bytes) -> str:
         # diagnostics-control-flow: UTF-8 is the first encoding probe; the configured encoding is tried next.
         capture_exception(_caught_error)
     try:
-        decoded = _decode_sample(sample, continuation, encoding="gb18030")
+        _decode_sample(sample, continuation, encoding="gb18030")
     except UnicodeDecodeError as error:
         capture_exception(error, persist=False)
         raise TextEncodingError("无法可靠识别 TXT 编码") from error
-    if decoded.count("�") / max(1, len(decoded)) > 0.001:
-        raise TextEncodingError("无法可靠识别 TXT 编码")
     return "gb18030"
 
 

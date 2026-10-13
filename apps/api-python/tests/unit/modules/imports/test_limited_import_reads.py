@@ -100,6 +100,43 @@ def test_txt_encoding_does_not_verify_nul_tail(tmp_path, monkeypatch):
     assert sum(reads) == TXT_ENCODING_SAMPLE_BYTES + 3
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "gb18030"])
+def test_txt_encoding_completes_boundary_character_without_reading_tail(
+    tmp_path: Path, monkeypatch, encoding: str
+) -> None:
+    path = tmp_path / "boundary.txt"
+    prefix = b"A" * (TXT_ENCODING_SAMPLE_BYTES - 1) + "𠀀".encode(encoding)
+    path.write_bytes(prefix + b"\xff" * 100)
+    original = Path.open
+    reads = []
+
+    class ObservedFile:
+        def __init__(self, source):
+            self.source = source
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.source.close()
+
+        def read(self, size=-1):
+            assert size == TXT_ENCODING_SAMPLE_BYTES + 3
+            data = self.source.read(size)
+            reads.append(len(data))
+            return data
+
+    def opened(self, *args, **kwargs):
+        source = original(self, *args, **kwargs)
+        return ObservedFile(source) if self == path else source
+
+    monkeypatch.setattr(Path, "open", opened)
+    result = inspect_reflowable_book(path, "TXT")
+
+    assert result.raw_metadata["inputEncoding"] == encoding
+    assert reads == [TXT_ENCODING_SAMPLE_BYTES + 3]
+
+
 def test_fb2_stops_before_body(tmp_path, monkeypatch):
     path = tmp_path / "book.fb2"
     description = b"<FictionBook><description><title-info><book-title>Title</book-title></title-info></description>"
