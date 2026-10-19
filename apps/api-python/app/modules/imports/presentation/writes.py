@@ -45,6 +45,7 @@ from app.modules.imports.presentation.schemas import (
     ImportForbiddenError,
     ImportInternalError,
     ImportNotFoundError,
+    ImportPayloadTooLargeError,
     ImportUploadPayload,
     ImportUploadResponse,
 )
@@ -58,7 +59,6 @@ from app.modules.imports.public import (
     safe_upload_filename,
     target_directory_from_path,
 )
-from app.services.audio_metadata import is_supported_audio_file
 from app.services.import_preferences import (
     extension_is_allowed,
     load_raw_import_preferences_projection,
@@ -84,6 +84,8 @@ def _raise_import_error(
         error = ImportForbiddenError(body)
     elif status_code == 404:
         error = ImportNotFoundError(body)
+    elif status_code == 413:
+        error = ImportPayloadTooLargeError(body)
     elif status_code == 500:
         error = ImportInternalError(body)
     else:
@@ -122,6 +124,7 @@ def import_book_files(
         ImportBadRequestError,
         ImportForbiddenError,
         ImportNotFoundError,
+        ImportPayloadTooLargeError,
         ImportInternalError,
     ),
 ]:
@@ -203,12 +206,7 @@ def import_book_files(
         UploadSource(
             filename=name,
             stream=upload.file,
-            is_audio=is_supported_audio_file(name),
-            max_bytes=(
-                settings.audiobook_max_file_bytes
-                if is_supported_audio_file(name)
-                else None
-            ),
+            size_bytes=upload.size,
         )
         for upload, name in zip(uploads, upload_names, strict=True)
     )
@@ -221,7 +219,6 @@ def import_book_files(
             SaveUploadedFilesCommand(
                 target_directory=upload_directory,
                 sources=sources,
-                audio_bundle_max_bytes=settings.audiobook_max_bundle_bytes,
             )
         )
     except UploadPublicationError as error:
@@ -242,7 +239,13 @@ def import_book_files(
                     scan_error,
                 )
         if isinstance(error, UploadFileTooLargeError):
-            _raise_import_error("上传文件超过允许的大小", cause=error)
+            _raise_import_error(
+                "单个文件不能超过 2 GiB（2,147,483,648 字节） / "
+                "Each file must be no larger than 2 GiB (2,147,483,648 bytes).",
+                status_code=413,
+                code=error.code,
+                cause=error,
+            )
         _raise_import_error("保存上传文件失败", status_code=500, cause=error)
 
     persist_system_setting_values(

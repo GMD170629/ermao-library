@@ -14,13 +14,12 @@ from PIL import Image, UnidentifiedImageError
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.imports.application.readable_resource.ports import PreparedLocalCover
 
-_MAX_COVER_BYTES = 20 * 1024 * 1024
 _SUFFIXES = {"GIF": ".gif", "JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
 
 def validated_cover_suffix(content: bytes) -> str:
-    if not 0 < len(content) <= _MAX_COVER_BYTES:
-        raise ValueError("local cover exceeds the supported size")
+    if not content:
+        raise ValueError("local cover is empty")
     try:
         with Image.open(BytesIO(content)) as image:
             image_format = str(image.format or "").upper()
@@ -83,8 +82,8 @@ class FilesystemLocalCoverPublication:
         # album artwork shares one file; batches retain paths rather than bytes.
         if not resource_id or Path(resource_id).name != resource_id:
             raise ValueError("invalid resource identifier")
-        if not 0 < len(content) <= _MAX_COVER_BYTES:
-            raise ValueError("local cover exceeds the supported size")
+        if not content:
+            raise ValueError("local cover is empty")
         prepared = self.prepare(resource_id=resource_id, content=content)
         self.publish(prepared)
         return prepared.stored_path
@@ -94,8 +93,6 @@ class FilesystemLocalCoverPublication:
         if not target.is_relative_to(self._storage_root):
             return None
         try:
-            if target.stat().st_size > _MAX_COVER_BYTES:
-                return None
             return target.read_bytes()
         except OSError as error:
             capture_exception(error, persist=False)

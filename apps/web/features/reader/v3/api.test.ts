@@ -359,3 +359,39 @@ test('rejects a non-null legacy or malformed progress snapshot instead of treati
     globalThis.fetch = originalFetch;
   }
 });
+
+test('comic manifests, page counts and page sizes above former ceilings stay readable', async () => {
+  const originalFetch = globalThis.fetch;
+  const pageCount = 10_001;
+  const sizeBytes = 2_147_483_649;
+  const pages = Array.from({ length: pageCount }, (_, pageIndex) => ({
+    pageIndex, resourceHref: `pages/${pageIndex}`, title: '长标题'.repeat(40),
+    mediaType: 'image/jpeg', sizeBytes: 32 * 1024 * 1024 + 1
+  }));
+  const manifest = { ok: true, data: {
+    schemaVersion: 2, kind: 'comic', resourceId: 'resource-1', sourceFormat: 'cbz',
+    revision: `sha256:${'a'.repeat(64)}`, pageCount, readingOrder: pages
+  } };
+  assert.ok(Buffer.byteLength(JSON.stringify(manifest)) > 2 * 1024 * 1024);
+  try {
+    globalThis.fetch = async (input) => String(input).endsWith('/comic/manifest')
+      ? Response.json(manifest)
+      : Response.json({ ok: true, data: {
+        ...bootstrapPayload('cbz').data,
+        readerType: 'comic',
+        resource: { ...bootstrapPayload('cbz').data.resource, readerType: 'comic' },
+        assets: [{ id: 'asset-1', role: 'PRIMARY', mimeType: 'application/vnd.comicbook+zip',
+          sizeBytes, sortOrder: 0, url: '/api/assets/asset-1' }],
+        publication: {
+          kind: 'comic', manifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+          pageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
+          imageVariants: ['original', 'data-saver']
+        }
+      } });
+    const result = await fetchReaderBootstrap('resource-1', new AbortController().signal);
+    assert.equal(result.pages.length, pageCount);
+    assert.equal(result.pages.at(-1)?.resourceHref, `pages/${pageCount - 1}`);
+    assert.ok(result.pages.every((page) => page.safetyError === undefined));
+    assert.equal(result.primaryAsset?.sizeBytes, sizeBytes);
+  } finally { globalThis.fetch = originalFetch; }
+});

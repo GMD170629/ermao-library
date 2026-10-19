@@ -1,11 +1,13 @@
 """Stable public surface of the readable-resource import capability."""
 
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
+from app.modules.imports.application.errors import ImportFileTooLargeError
 from app.modules.imports.application.file_types import is_supported_import_filename
 from app.modules.imports.application.identity_policy import (
     UNKNOWN_AUTHOR,
     normalize_identity_part,
 )
+from app.modules.imports.application.import_file_size import validate_import_file_size
 from app.modules.imports.application.library_paths import (
     InvalidTargetDirectory,
     LibraryPathError,
@@ -54,6 +56,7 @@ __all__ = [
     "ContinueImportResult",
     "ContinueLibraryImport",
     "ContinueSourceImport",
+    "ImportFileTooLargeError",
     "InvalidTargetDirectory",
     "LibraryPathError",
     "LibraryScanSettings",
@@ -78,4 +81,5 @@ __all__ = [
     "parse_release_title",
     "safe_upload_filename",
     "target_directory_from_path",
+    "validate_import_file_size",
 ]

@@ -7,11 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.contracts.reader_safety_policy_generated import (
-    ReaderSafetyBudgetName,
-    reader_safety_budget,
-)
-from app.modules.publications.domain.model import PublicationResourceTooLargeError
+from app.modules.publications.domain.model import PublicationParserError
 from app.modules.publications.infrastructure import mobi_adapter
 
 
@@ -25,7 +21,10 @@ class _NativeOptions(ctypes.Structure):
     ]
 
 
-def test_open_supplies_native_defaults_and_finite_generated_budget() -> None:
+def test_open_supplies_native_defaults_and_observed_large_source(tmp_path: Path) -> None:
+    source = tmp_path / "book.mobi"
+    with source.open("wb") as stream:
+        stream.truncate(2 * 1024**3 + 1)
     library = MagicMock()
     library.ermao_mobi_abi_version.return_value = 1
     observed: list[tuple[int, int, int]] = []
@@ -39,7 +38,7 @@ def test_open_supplies_native_defaults_and_finite_generated_budget() -> None:
         options.max_file_bytes = 0
 
     def native_open(path: bytes, address: object, output: object) -> int:
-        assert path == b"book.mobi"
+        assert path == bytes(source)
         assert address is not None, "native open requires explicit bounded options"
         options = ctypes.cast(
             cast(ctypes.c_void_p, address), ctypes.POINTER(_NativeOptions)
@@ -57,10 +56,10 @@ def test_open_supplies_native_defaults_and_finite_generated_budget() -> None:
     with patch.object(mobi_adapter.ctypes, "CDLL", return_value=library):
         core = mobi_adapter._MobiCore("test-native")
     for _ in range(2):
-        assert core.open(Path("book.mobi")).value == 1
+        assert core.open(source).value == 1
 
-    budget = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
-    assert 0 < budget < 2**64 - 1
+    budget = source.stat().st_size
+    assert budget > 2 * 1024**3
     assert (
         observed
         == [(ctypes.sizeof(_NativeOptions), mobi_adapter._MAX_READ_BYTES, budget)] * 2
@@ -76,14 +75,16 @@ def test_open_supplies_native_defaults_and_finite_generated_budget() -> None:
     assert library.ermao_mobi_default_options.restype is None
 
 
-def test_open_preserves_native_limit_failure() -> None:
+def test_open_preserves_native_limit_failure(tmp_path: Path) -> None:
+    source = tmp_path / "book.mobi"
+    source.write_bytes(b"book")
     library = MagicMock()
     library.ermao_mobi_abi_version.return_value = 1
     library.ermao_mobi_open.return_value = 9
     library.ermao_mobi_status_name.return_value = b"limit_exceeded"
     with patch.object(mobi_adapter.ctypes, "CDLL", return_value=library):
         core = mobi_adapter._MobiCore("test-native")
-    with pytest.raises(PublicationResourceTooLargeError):
-        core.open(Path("book.mobi"))
+    with pytest.raises(PublicationParserError):
+        core.open(source)
     library.ermao_mobi_open.assert_called_once()
     library.ermao_mobi_close.assert_not_called()

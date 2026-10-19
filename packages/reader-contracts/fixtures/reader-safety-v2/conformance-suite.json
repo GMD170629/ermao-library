@@ -2,8 +2,8 @@
   "$schema": "../../schemas/reader-safety-conformance-suite-v2.schema.json",
   "schemaVersion": 1,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 4,
-  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "policyVersion": 5,
+  "policyDigest": "3dc406a17303ec05476fddca6c161f2213494e8901ab00ffd145441428f5d79a",
   "fixtureManifest": "manifest.json",
   "cases": [
     {
@@ -165,8 +165,6 @@
       "evaluator": "ORIGINAL_BYTES",
       "semanticProjection": "INPUT",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -178,8 +176,6 @@
       "evaluator": "ORIGINAL_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -191,8 +187,6 @@
       "evaluator": "FB2_STRUCTURE",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -215,7 +209,6 @@
       "evaluator": "PDF_PAGE_GEOMETRY",
       "semanticProjection": "NONE",
       "consumers": [
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -252,8 +245,6 @@
       "evaluator": "COMIC_PAGE_COUNT",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -312,8 +303,6 @@
       "evaluator": "AUDIO_CHAPTER_BOUNDS",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -363,8 +352,6 @@
       "evaluator": "BINARY_RESOURCE_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -402,8 +389,6 @@
       "evaluator": "XML_CONTROL_DOCUMENT_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -415,8 +400,6 @@
       "evaluator": "REFLOWABLE_MARKUP_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -428,8 +411,6 @@
       "evaluator": "EPUB_ARCHIVE_ENTRY_COUNT",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -440,8 +421,6 @@
       "evaluator": "EPUB_ARCHIVE_EXPANDED_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -452,8 +431,6 @@
       "evaluator": "EPUB_ARCHIVE_ENTRY_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -464,8 +441,6 @@
       "evaluator": "EPUB_ARCHIVE_COMPRESSION_RATIO",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -476,8 +451,6 @@
       "evaluator": "FB2_IMAGE_BUDGET",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -489,8 +462,6 @@
       "evaluator": "TXT_MEMORY_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -502,8 +473,6 @@
       "evaluator": "TXT_CHUNK_CHARACTERS",
       "semanticProjection": "INPUT",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -538,8 +507,6 @@
       "evaluator": "COMIC_ARCHIVE_BUDGET",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -551,8 +518,6 @@
       "evaluator": "COMIC_PAGE_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -564,8 +529,6 @@
       "evaluator": "COMIC_MANIFEST_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -577,8 +540,6 @@
       "evaluator": "AUDIO_ORIGINAL_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -589,8 +550,6 @@
       "evaluator": "AUDIO_METADATA_BUDGET",
       "semanticProjection": "NONE",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ]
@@ -834,8 +793,6 @@
       "evaluator": "FB2_IMAGE_BUDGET",
       "semanticProjection": "INPUT",
       "consumers": [
-        "BACKEND",
-        "WEB",
         "KMP",
         "ANDROID",
         "IOS"
@@ -863,9 +820,46 @@
       "id": "parser-snapshot-memory-over-limit",
       "ruleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
       "evaluator": "PARSER_SNAPSHOT_MEMORY",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND"
+      ]
+    },
+    {
+      "id": "import-source-at-limit",
+      "ruleId": "IMPORT.SOURCE_MAX_BYTES",
+      "evaluator": "ORIGINAL_BYTES",
+      "semanticProjection": "INPUT",
+      "consumers": [
+        "BACKEND"
+      ]
+    },
+    {
+      "id": "import-source-over-limit",
+      "ruleId": "IMPORT.SOURCE_MAX_BYTES",
+      "evaluator": "ORIGINAL_BYTES",
       "semanticProjection": "NONE",
       "consumers": [
         "BACKEND"
+      ]
+    },
+    {
+      "id": "web-backend-audio-invalid-chapter",
+      "ruleId": "AUDIO.TRACK_AND_CHAPTER_VALIDITY",
+      "evaluator": "AUDIO_CHAPTER_BOUNDS",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "BACKEND",
+        "WEB"
+      ]
+    },
+    {
+      "id": "web-pdf-invalid-geometry",
+      "ruleId": "PDF.PAGE_VALIDITY",
+      "evaluator": "PDF_PAGE_GEOMETRY",
+      "semanticProjection": "NONE",
+      "consumers": [
+        "WEB"
       ]
     }
   ]

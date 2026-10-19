@@ -13,7 +13,7 @@ from app.modules.automation.application.runtime import (
     AutomationRuntime,
     UploadInvocation,
 )
-from app.modules.automation.application.uploads import BOOK_BYTES, CHUNK_BYTES
+from app.modules.automation.application.uploads import CHUNK_BYTES
 from app.modules.automation.domain.access import Scope
 
 Identifier = Annotated[str, Field(min_length=1, max_length=191)]
@@ -43,7 +43,7 @@ def register_uploads(
     async def begin_upload(
         purpose: Literal["book", "cover", "replace"],
         filename: Annotated[str, Field(min_length=1, max_length=255)],
-        size_bytes: Annotated[int, Field(strict=True, gt=0, le=BOOK_BYTES)],
+        size_bytes: Annotated[int, Field(strict=True, gt=0)],
         sha256: Annotated[str, Field(pattern=r"^[a-fA-F0-9]{64}$")],
         request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")],
         library_id: Identifier | None = None,

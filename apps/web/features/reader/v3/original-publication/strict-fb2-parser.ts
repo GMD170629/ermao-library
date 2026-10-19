@@ -1,11 +1,9 @@
 import {
-  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
   type ReaderSafetyRuleId
 } from '@shuku/reader-core';
 import {
-  preflightReflowableXml,
-  rejectReaderSafety
+  preflightReflowableXml
 } from '../security/reader-safety-policy';
 import type { ChapterXmlEvent } from './chapter-core';
 
@@ -39,30 +37,6 @@ export type StrictFb2Document = Readonly<{
     ruleId: ReaderSafetyRuleId;
   }>[];
 }>;
-
-type ParserLimits = Readonly<{
-  maxDepth: number;
-  maxNodes: number;
-  maxTextChars: number;
-}>;
-
-type ImageLimits = Readonly<{
-  maxEncodedBytes: number;
-  maxDecodedBytes: number;
-  maxDecodedTotalBytes: number;
-}>;
-
-const DEFAULT_LIMITS: ParserLimits = {
-  maxDepth: READER_SAFETY_BUDGETS.fb2MaxDepth,
-  maxNodes: READER_SAFETY_BUDGETS.fb2MaxNodes,
-  maxTextChars: READER_SAFETY_BUDGETS.fb2TextMaxCharacters
-};
-
-const DEFAULT_IMAGE_LIMITS: ImageLimits = {
-  maxEncodedBytes: READER_SAFETY_BUDGETS.fb2EncodedImageMaxBytes,
-  maxDecodedBytes: READER_SAFETY_BUDGETS.fb2DecodedImageMaxBytes,
-  maxDecodedTotalBytes: READER_SAFETY_BUDGETS.fb2DecodedImagesTotalMaxBytes
-};
 
 type SectionAccumulator = {
   titleParts: string[];
@@ -123,7 +97,7 @@ function decodeXmlEntities(value: string): string {
     if (ampersand < 0) return decoded + value.slice(offset);
     decoded += value.slice(offset, ampersand);
     const semicolon = value.indexOf(';', ampersand + 1);
-    if (semicolon < 0 || semicolon - ampersand > 32) throw new Error('PUBLICATION_MARKUP_INVALID');
+    if (semicolon < 0) throw new Error('PUBLICATION_MARKUP_INVALID');
     const entity = value.slice(ampersand + 1, semicolon);
     const named: Readonly<Record<string, string>> = {
       amp: '&', lt: '<', gt: '>', quot: '"', apos: "'"
@@ -271,18 +245,8 @@ function decodedBase64Length(value: string): number | null {
   return (compact.length / 4) * 3 - padding;
 }
 
-export function parseStrictFb2(
-  source: string,
-  limits: ParserLimits = DEFAULT_LIMITS,
-  imageLimits: ImageLimits = DEFAULT_IMAGE_LIMITS
-): StrictFb2Document {
-  source = preflightReflowableXml(
-    source,
-    READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes
-  );
-  if (limits.maxDepth < 1 || limits.maxNodes < 1 || limits.maxTextChars < 1) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
-  }
+export function parseStrictFb2(source: string): StrictFb2Document {
+  source = preflightReflowableXml(source);
 
   const stack: Array<Readonly<{
     qName: string;
@@ -298,8 +262,6 @@ export function parseStrictFb2(
   let rootSeen = false;
   let rootClosed = false;
   let nodeCount = 0;
-  let textChars = 0;
-  let decodedImagesTotalBytes = 0;
   let currentBinary: BinaryAccumulator | null = null;
   const events: ChapterXmlEvent[] = [];
   const blockedResources: Array<Readonly<{
@@ -321,10 +283,6 @@ export function parseStrictFb2(
     if (!rootSeen || rootClosed) {
       if (value.trim()) throw new Error('PUBLICATION_MARKUP_INVALID');
       return;
-    }
-    textChars += value.length;
-    if (textChars > limits.maxTextChars) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     }
     for (const capture of captures) capture.parts.push(value);
     const event: ChapterXmlEvent = { kind: 'text', text: value };
@@ -357,10 +315,8 @@ export function parseStrictFb2(
     }
     const sourceOrdinal = nodeCount;
     nodeCount += 1;
-    if (nodeCount > limits.maxNodes) rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     const namespaces = namespacesForElement(stack.at(-1)?.namespaces, qName, attributes);
     stack.push({ qName, local, namespaces });
-    if (stack.length > limits.maxDepth) rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     const depth = stack.length;
 
     if (currentBinary && local !== 'binary') {
@@ -453,17 +409,11 @@ export function parseStrictFb2(
       }
       const encoded = currentBinary.encodedParts.join('');
       const decodedBytes = decodedBase64Length(encoded);
-      const exceedsBudget = encoded.length > imageLimits.maxEncodedBytes
-        || decodedBytes === null
-        || decodedBytes > imageLimits.maxDecodedBytes
-        || decodedImagesTotalBytes + decodedBytes > imageLimits.maxDecodedTotalBytes;
-      if (exceedsBudget) {
+      if (decodedBytes === null) {
         blockedResources.push({
           id: currentBinary.id,
-          ruleId: READER_SAFETY_RULE_IDS.FB2_IMAGE_BUDGET
+          ruleId: READER_SAFETY_RULE_IDS.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE
         });
-      } else {
-        decodedImagesTotalBytes += decodedBytes;
       }
       currentBinary = null;
     } else if (current.local === 'section' && currentBody) {

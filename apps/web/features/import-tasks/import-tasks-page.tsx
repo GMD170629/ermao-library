@@ -7,6 +7,7 @@ import type { BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/feedback';
 import { I18nText, useI18n } from '../../i18n/provider';
+import { importFailureMessage } from '../imports/public';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import {
@@ -334,7 +335,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                       {task.sourceNodeId ? <><br />source: {task.sourceNodeId}</> : null}
                     </div>
                   </details>
-                  {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span data-i18n-skip className="min-w-0 whitespace-pre-wrap break-words">{task.errorSummary}</span></div> : null}
+                  {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span data-i18n-skip className="min-w-0 whitespace-pre-wrap break-words">{task.errorSummary === 'IMPORT_FILE_TOO_LARGE' ? t(importFailureMessage(task.errorSummary)) : task.errorSummary}</span></div> : null}
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2 text-sm text-slate-500">

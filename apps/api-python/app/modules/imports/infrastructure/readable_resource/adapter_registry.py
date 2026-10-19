@@ -22,8 +22,6 @@ from app.core.exception_diagnostics import (
     record_exception,
 )
 from app.infrastructure.bounded_inspection import (
-    COVER_BYTES,
-    METADATA_BYTES,
     InspectionLimitReached,
     ZipInspectionReader,
 )
@@ -70,8 +68,6 @@ from app.modules.metadata.public import (
     parse_opf_metadata,
     resolve_local_metadata,
 )
-
-_MAX_COVER_BYTES = 20 * 1024 * 1024
 
 
 class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
@@ -472,10 +468,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 candidate = LocalMetadataCandidate(
                     source="EMBEDDED", metadata=metadata, cover=None
                 )
-                with source.independent_read(METADATA_BYTES + 65558):
-                    units = self._epub_navigation(archive, opf_name, opf_content)
-                with source.independent_read(COVER_BYTES + 65558):
-                    cover = self._epub_cover(archive, opf_name, metadata.cover_href)
+                units = self._epub_navigation(archive, opf_name, opf_content)
+                cover = self._epub_cover(archive, opf_name, metadata.cover_href)
         except (BadZipFile, KeyError, OSError, ValueError, ElementTree.ParseError) as error:
             capture_exception(error, persist=False)
             record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.readable_resource.adapter_registry._inspect_epub_details.failed", error)
@@ -660,7 +654,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             return None
         try:
             info = archive.getinfo(member)
-            if not 0 < info.file_size <= _MAX_COVER_BYTES:
+            if info.file_size <= 0:
                 return None
             content = archive.read(info)
         except (KeyError, OSError, BadZipFile) as error:

@@ -1,9 +1,11 @@
+import { translateMessage } from '../../../i18n/messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   allImportExtensions,
   commonAudiobookExtensions,
   compatibilityAudiobookExtensions,
+  importFailureMessage,
   importFileInputAccept
 } from './import-formats';
 
@@ -34,4 +36,12 @@ test('exposes the unified reader formats including comic archive aliases', () =>
     assert.equal(supported.includes(extension), true);
   }
   assert.equal(supported.includes('.image-dir'), false);
+});
+
+
+test('the shared file-size import error has Chinese and English copy', () => {
+  const message = importFailureMessage('IMPORT_FILE_TOO_LARGE');
+  assert.equal(translateMessage('zh-CN', message), '单个文件不能超过 2 GiB（2,147,483,648 字节）');
+  assert.equal(translateMessage('en-US', message), 'Each file must be no larger than 2 GiB (2,147,483,648 bytes).');
+  assert.equal(importFailureMessage('an authored filename.txt'), 'an authored filename.txt');
 });

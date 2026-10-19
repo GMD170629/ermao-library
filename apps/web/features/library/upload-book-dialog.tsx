@@ -8,7 +8,7 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { saveSelectedFiles } from './application/save-selected-files';
 import { I18nText } from '@/i18n/provider';
-import { importFileInputAccept } from '../imports/public';
+import { importFileInputAccept, importFailureMessage } from '../imports/public';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type UploadBookDialogProps = {
@@ -66,9 +66,11 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
     }
 
     const message = result.kind === 'rejected'
-      ? result.code === 'UPLOAD_TARGET_OUTSIDE_LIBRARY'
-        ? i18nAttribute('上传目录必须位于已启用的书库中')
-        : result.message
+      ? result.code === 'IMPORT_FILE_TOO_LARGE'
+        ? i18nAttribute(importFailureMessage(result.code))
+        : result.code === 'UPLOAD_TARGET_OUTSIDE_LIBRARY'
+          ? i18nAttribute('上传目录必须位于已启用的书库中')
+          : result.message
       : result.kind === 'transport-failed'
         ? i18nAttribute('网络连接失败，请检查后重试')
         : i18nAttribute('服务返回了无法识别的响应');

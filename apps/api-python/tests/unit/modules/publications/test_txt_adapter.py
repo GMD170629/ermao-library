@@ -69,7 +69,7 @@ def test_txt_adapter_has_fixed_encoding_and_newline_policy(
     resource = adapter.read_resource(_source(path), "text/chapter-0001.xhtml")
 
     assert publication.revision.parser == "ermao-chapters:1"
-    assert publication.revision.normalization == "shuku-txt-publication-v3"
+    assert publication.revision.normalization == "shuku-txt-publication-v4"
     assert publication.reading_order[0].href == "text/chapter-0001.xhtml"
     assert publication.toc[0].href == ("text/chapter-0001.xhtml#heading-000001")
     assert marker in resource.content.decode("utf-8")
@@ -190,3 +190,19 @@ def test_txt_parser_failures_have_stable_codes_without_changing_the_source(
             assert isinstance(caught.value.__cause__, UnicodeDecodeError)
     finally:
         adapter.close()
+
+
+def test_txt_decoding_accepts_more_than_former_64_mib_limit() -> None:
+    content = b"x" * (64 * 1024 * 1024 + 1)
+    assert len(_decode_txt(content)) == len(content)
+
+
+def test_txt_navigation_opens_source_above_former_snapshot_gate(tmp_path: Path) -> None:
+    path = tmp_path / "large.txt"
+    path.write_bytes(b"Chapter 1\n" + b"Readable text " * (1_200_000))
+    assert path.stat().st_size > 16 * 1024 * 1024
+    adapter = TxtPublicationAdapter(tmp_path)
+    publication = adapter.open(_source(path))
+    assert len(publication.toc) == 1
+    assert publication.toc[0].title == "Chapter 1"
+    adapter.close()

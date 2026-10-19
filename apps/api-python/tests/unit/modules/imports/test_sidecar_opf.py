@@ -140,3 +140,17 @@ def test_parser_rejects_entities_invalid_xml_and_oversized_input(
 ) -> None:
     with pytest.raises(OpfMetadataError):
         parse_opf_metadata(payload)
+
+
+def test_large_opf_metadata_is_not_discarded(tmp_path: Path) -> None:
+    source = tmp_path / "book.txt"
+    source.write_text("Body", encoding="utf-8")
+    source.with_suffix(".opf").write_bytes(
+        b'<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>'
+        b'<dc:title>Large metadata</dc:title>' + b" " * (2 * 1024 * 1024 + 1)
+        + b'</metadata></package>'
+    )
+    from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
+    resolved = discover_sidecar_opf(source)
+    assert resolved is not None
+    assert resolved.metadata.title == "Large metadata"

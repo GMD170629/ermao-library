@@ -19,6 +19,8 @@ from app.contracts.local_metadata_snapshot import (
     merge_observations,
 )
 from app.core.exception_diagnostics import capture_exception, exception_message
+from app.modules.imports.application.errors import ImportFileTooLargeError
+from app.modules.imports.application.import_file_size import validate_import_file_size
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
@@ -377,6 +379,10 @@ class ProcessReadableResourceImportTask:
         }
         if resource_is_directory:
             return self._execute_directory(task_id, context, run=run)
+        # Rescans invalidate state but retain the last successful source version.
+        previously_imported = self._books_resources.asset_was_imported(
+            resource_id=resource_id, source_node_id=source_node_id
+        )
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
         resource_absolute = self._filesystem.resolve_under_root(
@@ -395,13 +401,29 @@ class ProcessReadableResourceImportTask:
                 return self._refresh_single_file_metadata(
                     task_id, context, resource_absolute, run=run
                 )
-        parsed = self._adapters.parse_file(
-            absolute_path=absolute,
-            resource_absolute_path=resource_absolute,
-            adapter=adapter,
-            role=role,
-            local_metadata_priority=local_metadata_priority,
-        )
+        # Admission applies only to new source files. Existing imported originals
+        # remain readable and may refresh metadata even when above today's limit.
+        try:
+            if observation is not None and not previously_imported:
+                validate_import_file_size(observation.observed_size_bytes)
+        except ImportFileTooLargeError as error:
+            capture_exception(error)
+            parsed = FileParseResult(
+                ok=False,
+                adapter=adapter,
+                resource_title=None,
+                asset=None,
+                error_code=error.code,
+                error_summary=error.code,
+            )
+        else:
+            parsed = self._adapters.parse_file(
+                absolute_path=absolute,
+                resource_absolute_path=resource_absolute,
+                adapter=adapter,
+                role=role,
+                local_metadata_priority=local_metadata_priority,
+            )
         resource_metadata = (
             self._adapters.inspect_resource_metadata(
                 resource_absolute_path=resource_absolute,
@@ -749,6 +771,10 @@ class ProcessReadableResourceImportTask:
             observations: tuple[LocalMetadataObservation, ...] = ()
             candidate_path = None
             try:
+                if before is not None and not (
+                    member.ready or member.processed_version is not None
+                ):
+                    validate_import_file_size(before.observed_size_bytes)
                 parsed = self._adapters.parse_file(
                     absolute_path=path,
                     resource_absolute_path=absolute,
@@ -815,6 +841,9 @@ class ProcessReadableResourceImportTask:
                         outcome="failed",
                     )
                     error = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
+            except ImportFileTooLargeError as size_error:
+                capture_exception(size_error)
+                error = size_error.code
             except OSError as io_error:
                 capture_exception(io_error)
                 self._log.emit(

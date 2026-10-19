@@ -19,7 +19,9 @@ class UploadPublicationError(RuntimeError):
 
 
 class UploadFileTooLargeError(UploadPublicationError):
-    """An upload exceeded its configured safety limit."""
+    """An upload exceeded the shared single-file import allowance."""
+
+    code = "IMPORT_FILE_TOO_LARGE"
 
 
 def safe_upload_filename(value: str) -> str:
@@ -36,15 +38,13 @@ class UploadSource:
 
     filename: str
     stream: BinaryIO
-    is_audio: bool
-    max_bytes: int | None
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
 class SaveUploadedFilesCommand:
     target_directory: Path
     sources: tuple[UploadSource, ...]
-    audio_bundle_max_bytes: int
 
 
 @dataclass(frozen=True)

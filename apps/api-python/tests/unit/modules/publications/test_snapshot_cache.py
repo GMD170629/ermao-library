@@ -3,7 +3,6 @@ from threading import Barrier
 
 import pytest
 
-from app.modules.publications.domain.model import PublicationResourceTooLargeError
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
     SnapshotKey,
@@ -63,15 +62,57 @@ def test_versions_capacity_and_expiration_release_owned_snapshots() -> None:
     assert released[-1] == "d"
 
 
-def test_oversized_parser_budget_fails_before_loading_and_never_reparses() -> None:
-    cache: PublicationSnapshotCache[str] = PublicationSnapshotCache(maximum_weight=10)
+def test_oversized_snapshots_are_usable_and_disposed_after_last_nested_lease() -> None:
+    released: list[object] = []
+    cache: PublicationSnapshotCache[object] = PublicationSnapshotCache(
+        maximum_weight=10, dispose=released.append
+    )
+    parsed: list[object] = []
 
-    def parse() -> str:
-        pytest.fail("An over-budget parse must not start")
+    def parse() -> object:
+        value = object()
+        parsed.append(value)
+        return value
 
-    for _ in range(3):
-        with pytest.raises(PublicationResourceTooLargeError):
-            cache.get(key("large"), parse, 11)
+    for _ in range(2):
+        with cache.lease(key("large"), parse, 11) as outer:
+            with cache.lease(key("large"), parse, 11) as inner:
+                assert inner is outer
+            assert outer not in released
+        assert released[-1] is outer
+    assert len(parsed) == 2
+    assert released == parsed
+
+
+def test_nested_eviction_and_close_do_not_dispose_live_snapshots() -> None:
+    released: list[str] = []
+    cache: PublicationSnapshotCache[str] = PublicationSnapshotCache(
+        maximum_entries=1, maximum_weight=10, dispose=released.append
+    )
+    with cache.lease(key("a"), lambda: "a", 10):
+        with cache.lease(key("b"), lambda: "b", 10):
+            cache.close()
+            assert released == []
+        assert released == ["b"]
+    assert released == ["b", "a"]
+    cache.close()
+    assert released == ["b", "a"]
+
+
+def test_exception_disposes_oversized_snapshot_and_allows_retry() -> None:
+    released: list[str] = []
+    cache: PublicationSnapshotCache[str] = PublicationSnapshotCache(
+        maximum_weight=10, dispose=released.append
+    )
+    with (
+        pytest.raises(RuntimeError, match="cancel"),
+        cache.lease(key("large"), lambda: "first", 11),
+    ):
+        raise RuntimeError("cancel")
+    assert released == ["first"]
+    with cache.lease(key("large"), lambda: "retry", 11) as value:
+        assert value == "retry"
+    assert released == ["first", "retry"]
 
 
 def test_failed_parse_can_be_retried_without_publishing_partial_state() -> None:

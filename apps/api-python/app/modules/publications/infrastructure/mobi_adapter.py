@@ -15,9 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from app.contracts.reader_safety_policy_generated import (
-    ReaderSafetyBudgetName,
     ReaderSafetyRuleId,
-    reader_safety_budget,
 )
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.modules.publications.application.ports import (
@@ -27,8 +25,6 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.application.safety_policy import (
     publication_integrity_failure,
     publication_native_parser_rejection,
-    publication_parser_limit,
-    publication_resource_limit,
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -65,15 +61,8 @@ _INDEX_NONE = 2**32 - 1
 _MARKUP_CATEGORY = 1
 _SVG_MEDIA_TYPE = "image/svg+xml"
 _MAX_READ_BYTES = 256 * 1024
-_MAX_RESOURCE_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.BINARY_RESOURCE_MAX_BYTES
-)
-_MAX_MARKUP_RESOURCE_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES
-)
-_MAX_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
 _MOBI_FORMATS = frozenset({"mobi", "azw", "azw3", "prc"})
-MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v4"
+MOBI_NORMALIZATION_IDENTIFIER = "ermao-mobi-core-v1+shuku-locator-dom-v5"
 
 
 def _base_media_type(value: str | None) -> str:
@@ -268,7 +257,7 @@ class _MobiCore:
     def open(self, path: Path) -> ctypes.c_void_p:
         options = _OpenOptions()
         self._library.ermao_mobi_default_options(ctypes.byref(options))
-        options.max_file_bytes = _MAX_SOURCE_BYTES
+        options.max_file_bytes = path.stat().st_size
         book = ctypes.c_void_p()
         status = self._library.ermao_mobi_open(
             os.fsencode(path),
@@ -291,11 +280,6 @@ class _MobiCore:
                 parser="libmobi",
                 operation=operation,
                 reason=name,
-            )
-        if name in {"limit_exceeded", "out_of_memory"}:
-            raise publication_resource_limit(
-                ReaderSafetyRuleId.COMMON_PARSER_SNAPSHOT_MEMORY,
-                f"libmobi parser memory reservation failed: {name}",
             )
         if name == "unsupported":
             raise publication_native_parser_rejection(
@@ -404,11 +388,6 @@ class _MobiCore:
         book: ctypes.c_void_p,
         descriptor: _MobiResourceDescriptor,
     ) -> bytes:
-        if descriptor.decoded_length > _MAX_RESOURCE_BYTES:
-            raise publication_resource_limit(
-                ReaderSafetyRuleId.COMMON_BINARY_RESOURCE_MAX_BYTES,
-                "MOBI-family resource exceeds the runtime limit",
-            )
         output = bytearray()
         buffer = ctypes.create_string_buffer(_MAX_READ_BYTES)
         offset = 0
@@ -587,17 +566,6 @@ class MobiPublicationAdapter(PublicationAdapter):
             if descriptor is None:
                 raise PublicationResourceNotFoundError
             is_markup = _is_markup_resource(descriptor)
-            limit = _MAX_MARKUP_RESOURCE_BYTES if is_markup else _MAX_RESOURCE_BYTES
-            if descriptor.decoded_length > limit:
-                if is_markup:
-                    raise publication_parser_limit(
-                        ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-                        "MOBI-family markup exceeds the size limit",
-                    )
-                raise publication_resource_limit(
-                    ReaderSafetyRuleId.COMMON_BINARY_RESOURCE_MAX_BYTES,
-                    "MOBI-family resource exceeds the size limit",
-                )
             content = core.read_resource(snapshot.book, descriptor)
             if is_markup:
                 # MOBI's native decoder returns authored HTML in memory. Run
@@ -640,11 +608,6 @@ class MobiPublicationAdapter(PublicationAdapter):
             select_publication_source_root(source.library_root, self._storage_root),
         )
         stat = path.stat()
-        if stat.st_size > _MAX_SOURCE_BYTES:
-            raise publication_resource_limit(
-                ReaderSafetyRuleId.COMMON_ORIGINAL_MAX_BYTES,
-                "MOBI-family source exceeds the size limit",
-            )
         key = (str(path), stat.st_size, stat.st_mtime_ns)
         with self._cache.lease(
             key,

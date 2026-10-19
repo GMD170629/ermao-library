@@ -1,7 +1,6 @@
-import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import { withBasePath } from '../../../../lib/base-path';
 import { privateCacheNamespace } from '../../../../lib/pwa/private-cache-namespace';
-import { ReaderSafetyPolicyError, rejectReaderSafety } from '../security/reader-safety-policy';
+import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 import { ORIGINAL_CHUNK_BYTES, OriginalPublicationStoreError, type OriginalDownloadProgress, type OriginalDownloadTransport,
   type OriginalPublicationDescriptor, type OriginalStoragePort, type OriginalStoreSession } from './original-store-contract';
 export { OriginalPublicationStoreError, type OriginalDownloadProgress, type OriginalDownloadTransport,
@@ -33,9 +32,6 @@ function assertDescriptor(descriptor: OriginalPublicationDescriptor, origin: str
   }
   if (!Number.isSafeInteger(descriptor.sizeBytes) || descriptor.sizeBytes < 0) {
     throw new OriginalPublicationStoreError('ORIGINAL_DESCRIPTOR_INVALID');
-  }
-  if (descriptor.sizeBytes > READER_SAFETY_BUDGETS.originalMaxBytes) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
   }
   if (!Number.isSafeInteger(descriptor.mtimeMs) || descriptor.mtimeMs < 0) {
     throw new OriginalPublicationStoreError('ORIGINAL_VERSION_INVALID');

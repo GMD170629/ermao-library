@@ -11,6 +11,7 @@ import {
   Uint8ArrayReader,
   ZipWriter
 } from '@zip.js/zip.js';
+import { READER_SAFETY_BUDGETS } from '@shuku/reader-core';
 import type { MobiOpenResult } from '../original-publication/mobi-worker-protocol';
 
 type EsbuildBuildOptions = Readonly<{
@@ -77,12 +78,16 @@ const webRoot = path.resolve(import.meta.dirname, '../../../..');
 const chapterArtifactRoot = path.resolve(webRoot, 'public/vendor/chapter-core');
 const testRequire = createRequire(import.meta.url);
 
-async function buildReaderBundle(): Promise<string> {
+async function buildReaderBundle(kind: 'publication' | 'text-worker' | 'mobi-worker' = 'publication'): Promise<string> {
   const esbuildPath = testRequire.resolve('esbuild', { paths: [testRequire.resolve('tsx')] });
   const esbuild = await import(pathToFileURL(esbuildPath).href) as unknown as EsbuildModule;
   const result = await esbuild.build({
     stdin: {
-      contents: [
+      contents: kind === 'text-worker'
+        ? "import './features/reader/v3/original-publication/text-publication.worker';"
+        : kind === 'mobi-worker'
+          ? "import './features/reader/v3/original-publication/mobi-core.worker';"
+          : [
         "import { openReadiumPublication } from './features/reader/v3/adapters/readium-publication';",
         '(globalThis as unknown as { __openReadiumPublication: typeof openReadiumPublication }).__openReadiumPublication = openReadiumPublication;'
       ].join('\n'),
@@ -487,4 +492,124 @@ test('real engines ignore landmark NAV and parse the declared unfamiliar-MIME NC
       }]
     }]);
   }
+});
+
+
+test('real Chromium reads EPUB control/body resources and TXT/FB2 sources beyond former limits', { timeout: 180_000 }, async () => {
+  const block = 'x'.repeat(1024 * 1024);
+  const markupPadding = `<!--${block}-->`.repeat(65);
+  const controlPadding = `<!--${block}-->`.repeat(17);
+  const chapter = `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Large chapter remains readable</p>${markupPadding}<p>Last paragraph</p><script>window.__quotaScriptRan=true</script></body></html>`;
+  const opf = `<package><metadata><title>Large EPUB</title></metadata>${controlPadding}<manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>`;
+  assert.ok(Buffer.byteLength(chapter) > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes);
+  assert.ok(Buffer.byteLength(opf) > READER_SAFETY_BUDGETS.xmlControlDocumentMaxBytes);
+  const writer = new ZipWriter(new BlobWriter('application/epub+zip'), { useWebWorkers: false });
+  await writer.add('mimetype', new TextReader('application/epub+zip'), { level: 0 });
+  await writer.add('META-INF/container.xml', new TextReader('<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>'));
+  await writer.add('OPS/content.opf', new TextReader(opf));
+  await writer.add('OPS/chapter.xhtml', new TextReader(chapter));
+  const epub = await writer.close();
+  assert.ok((Buffer.byteLength(chapter) + Buffer.byteLength(opf)) / epub.size > READER_SAFETY_BUDGETS.archiveCompressionRatioMax);
+  const [bundle, workerBundle] = await Promise.all([buildReaderBundle(), buildReaderBundle('text-worker')]);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route('http://localhost/**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/text-publication.worker.ts') {
+        return route.fulfill({ contentType: 'text/javascript', body: workerBundle });
+      }
+      if (pathname === '/large.epub') {
+        return route.fulfill({ contentType: 'application/epub+zip', body: Buffer.from(await epub.arrayBuffer()) });
+      }
+      const artifact = pathname.split('/vendor/chapter-core/')[1];
+      if (artifact && ['artifact-manifest.json', 'ermao-chapters.mjs', 'ermao-chapters.wasm'].includes(artifact)) {
+        return route.fulfill({
+          contentType: artifact.endsWith('.json') ? 'application/json' : artifact.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+          body: await readFile(path.join(chapterArtifactRoot, artifact))
+        });
+      }
+      return route.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' });
+    });
+    await page.goto('http://localhost/');
+    await page.addScriptTag({ content: bundle, type: 'module' });
+    await page.waitForFunction('typeof globalThis.__openReadiumPublication === "function"');
+    const report: unknown = await page.evaluate(`(async () => {
+      const open = globalThis.__openReadiumPublication;
+      const results = [];
+      for (const format of ['txt', 'fb2', 'epub']) {
+        const blob = format === 'epub'
+          ? await (await fetch('/large.epub')).blob()
+          : format === 'txt'
+            ? new Blob(['Chapter 1\\n', ' '.repeat(64 * 1024 * 1024 + 1), 'Large TXT remains readable'])
+            : new Blob(['<FictionBook><body><p>Large FB2 remains readable</p></body><binary id="large">', 'QUJD'.repeat(16 * 1024 * 1024 + 1), '</binary></FictionBook>']);
+        const publication = await open(blob, format, 'Large book', 'ltr', 'horizontal');
+        try {
+          const link = publication.publication.readingOrder.items[0];
+          if (!link) throw new Error('TEST_READING_ORDER_MISSING');
+          const bytes = await publication.publication.get(link).read();
+          const markup = new TextDecoder().decode(bytes);
+          const document = new DOMParser().parseFromString(markup, 'application/xhtml+xml');
+          results.push({ format, text: document.documentElement.textContent, scripts: document.querySelectorAll('script').length });
+        } finally { publication.close(); }
+      }
+      return results;
+    })()`);
+    assert.ok(Array.isArray(report));
+    assert.equal(report.length, 3);
+    assert.match(String(Reflect.get(report[0], 'text')), /Large TXT remains readable/);
+    assert.match(String(Reflect.get(report[1], 'text')), /Large FB2 remains readable/);
+    assert.match(String(Reflect.get(report[2], 'text')), /Large chapter remains readable[\s\S]*Last paragraph/);
+    for (const result of report) assert.equal(Reflect.get(result, 'scripts'), 0);
+  } finally { await browser.close(); }
+});
+
+
+test('real Chromium reads and reopens MOBI family originals through the production WASM worker', async () => {
+  const [bundle, workerBundle] = await Promise.all([buildReaderBundle(), buildReaderBundle('mobi-worker')]);
+  const formats = [
+    ['mobi', '01-basic-mobi6.mobi'], ['azw', '13-basic.azw'],
+    ['azw3', '03-css.azw3'], ['prc', '12-basic.prc']
+  ];
+  const originals = new Map<string, Buffer>(await Promise.all(formats.map(async ([format, name]) => [
+    `/original.${format}`, await readFile(path.resolve(webRoot, '../../test-data/library/mobi', name))
+  ] as const)));
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route('http://localhost/**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/mobi-core.worker.ts') return route.fulfill({ contentType: 'text/javascript', body: workerBundle });
+      const original = originals.get(pathname);
+      if (original) return route.fulfill({ contentType: 'application/octet-stream', body: original });
+      const match = /^\/vendor\/(mobi-core|chapter-core)\/(artifact-manifest\.json|ermao-(?:mobi|chapters)\.(?:mjs|wasm))$/.exec(pathname);
+      if (match) return route.fulfill({
+        contentType: pathname.endsWith('.json') ? 'application/json' : pathname.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+        body: await readFile(path.join(webRoot, 'public', pathname))
+      });
+      return route.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' });
+    });
+    await page.goto('http://localhost/');
+    await page.addScriptTag({ content: bundle, type: 'module' });
+    await page.waitForFunction('typeof globalThis.__openReadiumPublication === "function"');
+    const report: unknown = await page.evaluate(`(async () => {
+      const results = [];
+      for (const format of ['mobi', 'azw', 'azw3', 'prc', 'azw3']) {
+        const blob = await (await fetch('/original.' + format)).blob();
+        const publication = await globalThis.__openReadiumPublication(blob, format, 'Original', 'ltr', 'horizontal');
+        try {
+          const link = publication.publication.readingOrder.items[0];
+          if (!link) throw new Error('TEST_READING_ORDER_MISSING');
+          const bytes = await publication.publication.get(link).read();
+          const document = new DOMParser().parseFromString(new TextDecoder().decode(bytes), 'text/html');
+          results.push({ format, text: document.body.textContent.trim() });
+        } finally { publication.close(); }
+      }
+      return results;
+    })()`);
+    assert.ok(Array.isArray(report));
+    assert.deepEqual(report.map((item) => Reflect.get(item, 'format')), ['mobi', 'azw', 'azw3', 'prc', 'azw3']);
+    for (const item of report) assert.ok(String(Reflect.get(item, 'text')).length > 0);
+    assert.deepEqual(report[2], report[4]);
+  } finally { await browser.close(); }
 });

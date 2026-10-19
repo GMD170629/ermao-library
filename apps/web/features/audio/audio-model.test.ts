@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeAudioBootstrap } from './api';
+import { READER_SAFETY_BUDGETS } from '@shuku/reader-core';
+import { fetchAudioBootstrap, normalizeAudioBootstrap } from './api';
 import { absolutePositionForTrack, beginAudioResourceSwitch, cancelAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
@@ -130,4 +131,39 @@ test('resource switching keeps the previous playback until the request commits o
   assert.equal(canceled.lifecycle, 'paused');
   assert.equal(canceled.error, 'local-save-failed');
   assert.equal(cancelAudioResourceSwitch({ ...loading, bootstrap: null }).lifecycle, 'idle');
+});
+
+
+test('audio accepts large existing tracks and queues beyond former track, chapter and metadata limits', async () => {
+  const count = Math.max(READER_SAFETY_BUDGETS.audioTrackMaxCount, READER_SAFETY_BUDGETS.audioChapterMaxCount) + 1;
+  const assets = Array.from({ length: count }, (_, index) => ({
+    id: `track-${index}`, title: `Track ${index} ${'long title '.repeat(10)}`, mimeType: 'audio/mpeg',
+    durationMs: 1000, sizeBytes: READER_SAFETY_BUDGETS.originalMaxBytes + 1,
+    sortOrder: index, url: `/api/assets/track-${index}`
+  }));
+  const units = assets.map((asset, index) => ({
+    id: `chapter-${index}`, assetId: asset.id, startMs: 0, endMs: 1000, sortOrder: index
+  }));
+  const originalFetch = globalThis.fetch;
+  try {
+    const data = { ...payload, data: { ...payload.data, assets, units, progressSnapshot: null } };
+    const body = JSON.stringify(data);
+    assert.ok(Buffer.byteLength(body) > READER_SAFETY_BUDGETS.audioMetadataMaxBytes);
+    globalThis.fetch = async () => new Response(body, { headers: { 'Content-Type': 'application/json' } });
+    const bootstrap = await fetchAudioBootstrap('resource-1');
+    assert.equal(bootstrap.tracks.length, count);
+    assert.equal(bootstrap.chapters.length, count);
+    assert.equal(bootstrap.totalDurationMs, count * 1000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('audio still rejects duplicate tracks and chapters outside their track duration', () => {
+  assert.throws(() => normalizeAudioBootstrap({ ...payload, data: {
+    ...payload.data, assets: [payload.data.assets[0], payload.data.assets[0]]
+  } }), /AUDIO_DURATION_INVALID/);
+  assert.throws(() => normalizeAudioBootstrap({ ...payload, data: {
+    ...payload.data, units: [{ ...payload.data.units[0], endMs: 10_001 }]
+  } }), /AUDIO_DURATION_INVALID/);
 });

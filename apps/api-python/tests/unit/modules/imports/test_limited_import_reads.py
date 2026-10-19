@@ -17,15 +17,14 @@ from app.modules.imports.infrastructure.text_encoding import TXT_ENCODING_SAMPLE
 from app.services.audio_metadata import parse_audio_metadata
 
 
-def test_reader_budget_counts_repeated_reads_and_rejects_read_all(tmp_path: Path):
+def test_reader_allows_repeated_selective_reads_and_rejects_read_all(tmp_path: Path):
     path = tmp_path / "source"
     path.write_bytes(b"123456789")
-    with LimitedReader(path, budget=5) as source:
+    with LimitedReader(path) as source:
         assert source.read(3) == b"123"
         source.seek(0)
         assert source.read(2) == b"12"
-        with pytest.raises(InspectionLimitReached):
-            source.read(1)
+        assert source.read(7) == b"3456789"
     with LimitedReader(path) as source, pytest.raises(InspectionLimitReached):
         source.read()
 

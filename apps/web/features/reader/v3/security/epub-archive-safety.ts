@@ -8,7 +8,6 @@ import {
 import {
   evaluateReaderSafety,
   readerSafetyRule,
-  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS
 } from '@shuku/reader-core';
 import {
@@ -171,16 +170,12 @@ export async function preflightEpubArchiveEntries(
   void signal;
   if (rawEntries.length === 0) throw new Error('PUBLICATION_STRUCTURE_INVALID');
   const isolateOptionalResources = optionalResourceCanBeIsolated();
-  if (rawEntries.length > READER_SAFETY_BUDGETS.archiveEntryMaxCount) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_ENTRY_MAX_COUNT);
-  }
   const byPath = new Map<string, FileEntry>();
   const unreadablePaths = new Set<string>();
   const duplicatePaths = new Set<string>();
   const canonicalPaths = new Set<string>();
   const isolateUnsafeEntries = archiveEntryCanBeIsolated();
   let fileEntryCount = 0;
-  let totalExpanded = 0;
   for (const entry of rawEntries) {
     let path: string | null = null;
     try {
@@ -189,25 +184,9 @@ export async function preflightEpubArchiveEntries(
       if (!(cause instanceof ReaderSafetyPolicyError)
         || cause.ruleId !== READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE
         || !isolateUnsafeEntries) throw cause;
-      // Keep scanning to preserve archive budgets and allow required-resource
+      // Keep scanning to allow required-resource
       // lookup to reject explicitly when it asks for this unreadable entry.
       if (fileEntry(entry)) fileEntryCount += 1;
-    }
-    if (entry.uncompressedSize > READER_SAFETY_BUDGETS.archiveEntryMaxBytes) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_ENTRY_MAX_BYTES);
-    }
-    if (
-      entry.uncompressedSize > 0
-      && (
-        entry.compressedSize <= 0
-        || entry.uncompressedSize / entry.compressedSize > READER_SAFETY_BUDGETS.archiveCompressionRatioMax
-      )
-    ) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_COMPRESSION_RATIO);
-    }
-    totalExpanded += entry.uncompressedSize;
-    if (totalExpanded > READER_SAFETY_BUDGETS.archiveExpandedMaxBytes) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_EXPANDED_MAX_BYTES);
     }
     if (entry.symlink) {
       if (!isolateUnsafeEntries) rejectReaderSafety(READER_SAFETY_RULE_IDS.EPUB_ARCHIVE_STRUCTURE);

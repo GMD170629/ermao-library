@@ -17,8 +17,6 @@ from lxml import etree  # type: ignore[import-untyped]
 
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import (
-    COVER_BYTES,
-    METADATA_BYTES,
     read_optional_file,
 )
 from app.modules.imports.application.reflowable_types import (
@@ -34,7 +32,6 @@ from app.modules.imports.infrastructure.text_encoding import (
 )
 
 _MOBI_FAMILY_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
-_MAX_COVER_BYTES = 20 * 1024 * 1024
 
 
 class ReflowableMetadataError(ValueError):
@@ -102,7 +99,7 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         no_network=True,
         recover=False,
         remove_comments=True,
-        huge_tree=False,
+        huge_tree=True,
     )
     try:
         # Description precedes body. Stop at its closing tag, never seek a
@@ -110,7 +107,7 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
         prefix = bytearray()
         match = None
         with path.open("rb") as source:
-            while len(prefix) < METADATA_BYTES:
+            while True:
                 chunk = source.read(1)
                 if not chunk:
                     break
@@ -204,8 +201,6 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
             offsets.append(path.stat().st_size)
             if offsets != sorted(offsets) or offsets[0] < 78 + count * 8:
                 raise ReflowableMetadataError("Invalid PDB offsets")
-            if offsets[1] - offsets[0] > METADATA_BYTES:
-                raise ReflowableMetadataError("MOBI metadata exceeds inspection budget")
             source.seek(offsets[0])
             header_bytes = source.read(offsets[1] - offsets[0])
             records = (header_bytes,)
@@ -261,7 +256,7 @@ def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetada
         index = resource_start + int(raw_cover_offset)
         if (
             0 <= index < count
-            and 0 < offsets[index + 1] - offsets[index] <= COVER_BYTES
+            and 0 < offsets[index + 1] - offsets[index]
         ):
             with path.open("rb") as source:
                 source.seek(offsets[index])
@@ -321,7 +316,7 @@ def _parse_exth(
 
 
 def _image_cover(content: bytes) -> EmbeddedBookCover | None:
-    if not content or len(content) > _MAX_COVER_BYTES:
+    if not content:
         return None
     if content.startswith(b"\xff\xd8\xff"):
         return EmbeddedBookCover(content, "image/jpeg", ".jpg")
@@ -351,8 +346,8 @@ def _sidecar_cover(path: Path) -> EmbeddedBookCover | None:
     )
     for candidate in candidates:
         try:
-            if candidate.is_file() and candidate.stat().st_size <= _MAX_COVER_BYTES:
-                content = read_optional_file(candidate, COVER_BYTES)
+            if candidate.is_file():
+                content = read_optional_file(candidate)
                 cover = _image_cover(content) if content else None
                 if cover is not None:
                     return cover

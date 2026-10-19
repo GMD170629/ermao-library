@@ -20,6 +20,8 @@ from app.infrastructure.copied_file_attributes import (
 )
 from app.infrastructure.exclusive_rename import exclusive_rename
 from app.infrastructure.file_identity import file_identity
+from app.modules.imports.application.errors import ImportFileTooLargeError
+from app.modules.imports.application.import_file_size import validate_import_file_size
 from app.modules.imports.application.save_uploaded_files import (
     SavedUploadFile,
     SaveUploadedFilesCommand,
@@ -49,7 +51,6 @@ class AtomicUploadedFilePublisher:
 
         reserved_paths: set[Path] = set()
         saved_files: list[SavedUploadFile] = []
-        remaining_audio_bytes = command.audio_bundle_max_bytes
         nonce = self._nonce_factory()
 
         try:
@@ -57,24 +58,13 @@ class AtomicUploadedFilePublisher:
                 target = self._unique_target(directory, source.filename, reserved_paths)
                 reserved_paths.add(target)
                 staged = directory / f".upload-{nonce}-{index}.part"
-                copied = self._copy_stream(
-                    source.stream,
-                    staged,
-                    max_bytes=(
-                        min(source.max_bytes, remaining_audio_bytes)
-                        if source.is_audio and source.max_bytes is not None
-                        else remaining_audio_bytes
-                        if source.is_audio
-                        else source.max_bytes
-                    ),
-                )
-                if source.is_audio:
-                    remaining_audio_bytes -= copied
-                    if remaining_audio_bytes < 0:
-                        raise UploadFileTooLargeError(
-                            "audio batch exceeds configured size"
-                        )
-                staged.replace(target)
+                if source.size_bytes is not None:
+                    validate_import_file_size(source.size_bytes)
+                try:
+                    copied = self._copy_stream(source.stream, staged)
+                    staged.replace(target)
+                finally:
+                    staged.unlink(missing_ok=True)
                 saved_files.append(
                     SavedUploadFile(
                         filename=target.name,
@@ -82,6 +72,11 @@ class AtomicUploadedFilePublisher:
                         size_bytes=copied,
                     )
                 )
+        except ImportFileTooLargeError as exc:
+            capture_exception(exc, persist=False)
+            raise UploadFileTooLargeError(
+                exc.code, saved_files=tuple(saved_files)
+            ) from exc
         except OSError as exc:
             capture_exception(exc, persist=False)
             raise UploadPublicationError(
@@ -97,6 +92,7 @@ class AtomicUploadedFilePublisher:
         self, upload_id: str, target: UploadTarget, source: Path, size: int
     ) -> UploadPublication:
         """Stage one exact name without changing the browser's auto-rename policy."""
+        validate_import_file_size(size)
         if self._directories is None:
             raise RuntimeError("anchored upload directories are required")
         parent, _, name = target.relative_path.rpartition("/")
@@ -246,10 +242,10 @@ class AtomicUploadedFilePublisher:
             index += 1
 
     @staticmethod
-    def _copy_stream(source: BinaryIO, target: Path, *, max_bytes: int | None) -> int:
+    def _copy_stream(source: BinaryIO, target: Path) -> int:
         with target.open("xb") as handle:
             copied = AtomicUploadedFilePublisher._copy_contents(
-                source, handle, max_bytes=max_bytes
+                source, handle, max_bytes=None
             )
             os.fsync(handle.fileno())
         return copied
@@ -265,7 +261,7 @@ class AtomicUploadedFilePublisher:
 
 
 class _LimitedUploadReader:
-    """Enforce the existing upload quota while stdlib performs stream copying."""
+    """Check observed bytes through the same admission used by discovery."""
 
     def __init__(self, source: BinaryIO, max_bytes: int | None) -> None:
         self.source, self.max_bytes, self.copied = source, max_bytes, 0
@@ -276,6 +272,7 @@ class _LimitedUploadReader:
             size = remaining if size < 0 else min(size, remaining)
         value = self.source.read(size)
         self.copied += len(value)
+        validate_import_file_size(self.copied)
         if self.max_bytes is not None and self.copied > self.max_bytes:
-            raise UploadFileTooLargeError("upload exceeds configured size")
+            raise UploadError("UPLOAD_SIZE_MISMATCH")
         return value

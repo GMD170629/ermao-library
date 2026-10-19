@@ -1,10 +1,8 @@
-"""Read budgets shared by local metadata inspection, never publication admission limits."""
+"""Selective local metadata I/O without file-size admission quotas."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 from io import FileIO, UnsupportedOperation
 from typing import TYPE_CHECKING
 
@@ -14,41 +12,21 @@ if TYPE_CHECKING:
     from _typeshed import WriteableBuffer
 from pathlib import Path
 
-from app.modules.metadata.public import MAX_OPF_BYTES
-
-STRUCTURE_BYTES = 8 * 1024 * 1024
-METADATA_BYTES = MAX_OPF_BYTES
-COVER_BYTES = 20 * 1024 * 1024
-
 
 class InspectionLimitReached(ValueError):
     """Optional inspection stopped without rejecting the source."""
 
 
 class LimitedReader(FileIO):
-    """Count actual parser reads; prohibit unbounded read-all requests."""
+    """Allow requested metadata reads; prohibit whole-publication read-all requests."""
 
-    def __init__(self, path: Path | int, budget: int = STRUCTURE_BYTES) -> None:
+    def __init__(self, path: Path | int) -> None:
         super().__init__(path, "rb")
-        self.remaining = budget
-
-    @contextmanager
-    def independent_read(self, limit: int) -> Iterator[None]:
-        """A located cover/navigation document has its own bounded allowance."""
-        structure_remaining = self.remaining
-        self.remaining = limit
-        try:
-            yield
-        finally:
-            self.remaining = structure_remaining
 
     def read(self, size: int | None = -1) -> bytes:
         if size is None or size < 0:
             raise InspectionLimitReached("read-all is not an import operation")
-        if size > self.remaining:
-            raise InspectionLimitReached("import read budget exceeded")
         data = super().read(size)
-        self.remaining -= len(data)
         return data
 
     def readinto(self, buffer: WriteableBuffer) -> int:
@@ -57,13 +35,9 @@ class LimitedReader(FileIO):
         return len(data)
 
     def readline(self, size: int | None = -1) -> bytes:
-        limit = (
-            self.remaining if size is None or size < 0 else min(size, self.remaining)
-        )
-        if limit == 0:
-            raise InspectionLimitReached("import read budget exceeded")
+        limit = size if size is not None and size >= 0 else None
         data = bytearray()
-        while len(data) < limit:
+        while limit is None or len(data) < limit:
             char = self.read(1)
             if not char:
                 break
@@ -76,16 +50,13 @@ class LimitedReader(FileIO):
         raise InspectionLimitReached("read-all is not an import operation")
 
     def fileno(self) -> int:
-        raise UnsupportedOperation("import parsers must use counted reads")
+        raise UnsupportedOperation("import parsers must use selective reads")
 
 
-def read_optional_file(path: Path, limit: int) -> bytes | None:
+def read_optional_file(path: Path) -> bytes | None:
     try:
         with path.open("rb") as source:
-            if path.stat().st_size > limit:
-                return None
-            content = source.read(limit + 1)
-            return content if len(content) <= limit else None
+            return source.read()
     except FileNotFoundError as _caught_error:
         # diagnostics-control-flow: An optional sidecar is permitted to be absent; no read operation is required.
         capture_exception(_caught_error, level="debug")

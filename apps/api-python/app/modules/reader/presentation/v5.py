@@ -36,7 +36,6 @@ from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.media.public import comic_manifest_policy_failure
 from app.modules.publications.public import (
     PublicationCorruptError,
     PublicationNotFoundError,
@@ -982,14 +981,6 @@ def get_comic_manifest_v5(
     db.expunge_all()
     db.close()
     index = media_page_index.resolve_read_only(projection)
-    policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
-    if policy_failure is not None:
-        raise ReaderV5ValidationError(
-            ReaderV5ErrorBody(
-                message="漫画清单超过安全策略限制",
-                code=policy_failure.error_code,
-            )
-        )
     etag = f'"comic-manifest-{index.revision.removeprefix("sha256:")}"'
     headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie"}
     if request.headers.get("if-none-match") == etag:
@@ -1028,16 +1019,6 @@ def get_comic_manifest_v5(
             readingOrder=pages,
         )
     )
-    policy_failure = comic_manifest_policy_failure(
-        page_count=len(index.pages),
-        serialized_size_bytes=len(result.model_dump_json(by_alias=True).encode()),
-    )
-    if policy_failure is not None:
-        raise ReaderV5ValidationError(
-            ReaderV5ErrorBody(
-                message="漫画清单超过安全策略限制", code=policy_failure.error_code
-            )
-        )
     return result
 
 

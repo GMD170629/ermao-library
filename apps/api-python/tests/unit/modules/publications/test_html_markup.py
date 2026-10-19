@@ -4,11 +4,9 @@ from xml.etree import ElementTree
 
 import pytest
 
-from app.contracts.reader_safety_policy_generated import ReaderSafetyRuleId
 from app.modules.publications.domain.model import (
     PublicationMarkupError,
     PublicationParserError,
-    PublicationParserLimitError,
 )
 from app.modules.publications.infrastructure.locator_dom import (
     MAXIMUM_MARKUP_BYTES,
@@ -162,16 +160,10 @@ def test_html_rejects_empty_or_undecodable_input(content: bytes) -> None:
         sanitize_markup_resource(content, syntax="html")
 
 
-def test_html_budget_fails_before_parser() -> None:
-    with (
-        patch(f"{_OWNER}.prepare_html_markup") as range_detector,
-        patch(f"{_OWNER}.html5lib.parse") as html_parser,
-        pytest.raises(PublicationParserLimitError) as failure,
-    ):
-        sanitize_markup_resource(b"x" * (MAXIMUM_MARKUP_BYTES + 1), syntax="html")
-    range_detector.assert_not_called()
-    html_parser.assert_not_called()
-    assert failure.value.rule_id == ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES.value
+def test_html_source_size_does_not_consume_entity_expansion_budget(monkeypatch) -> None:
+    monkeypatch.setattr("app.modules.publications.infrastructure.locator_dom.MAXIMUM_MARKUP_BYTES", 4)
+    result = sanitize_markup_resource(b"<p>Ordinary readable text</p>", syntax="html")
+    assert b"Ordinary readable text" in result
 
 
 def test_preparation_failure_never_reaches_html_parser() -> None:
@@ -493,7 +485,7 @@ def test_html_reference_projection_keeps_sdk_duplicate_and_foreign_attributes() 
     }
 
 
-def test_html_attribute_projection_and_literal_body_share_the_owner_budget() -> None:
+def test_html_entity_expansion_budget_excludes_literal_source() -> None:
     import html5lib
 
     from app.modules.publications.infrastructure.html_syntax import prepare_html_markup
@@ -506,42 +498,27 @@ def test_html_attribute_projection_and_literal_body_share_the_owner_budget() -> 
     )
     projection = prepare_xml(
         source.encode(),
-        expansion_limit_bytes=len(source),
+        expansion_limit_bytes=160,
         prepare_markup=prepare_html_markup,
     )
     root = html5lib.parse(projection.parser_source, scripting=True)
     paragraph = root.find(".//{http://www.w3.org/1999/xhtml}p")
-    assert paragraph.attrib == {"a": "E" * 80, "b": "&e;"}
+    assert paragraph.attrib == {"a": "E" * 80, "b": "E" * 80}
     assert paragraph.text == "&e;"
     assert [
         node.text for node in root.findall(".//{http://www.w3.org/1999/xhtml}xmp")
     ] == ["A" * 60, "B" * 60]
-    assert len(projection.parser_source.encode()) <= len(source)
 
 
-@pytest.mark.parametrize("budget_delta", [0, -1])
-def test_html_sdk_attribute_quotes_are_charged_to_existing_output_budget(
-    budget_delta: int,
-) -> None:
+@pytest.mark.parametrize("budget", [0, 1])
+def test_html_attribute_serialization_has_no_document_size_cap(budget: int) -> None:
     from app.modules.publications.infrastructure.html_syntax import prepare_html_markup
-    from app.modules.publications.infrastructure.xml_policy import (
-        XmlPolicyExpansionLimitError,
-        prepare_xml,
-    )
+    from app.modules.publications.infrastructure.xml_policy import prepare_xml
 
     source = b"<p a=&amp;>Readable</p>"
-    expected = '<p a="&amp;">Readable</p>'
-    budget = len(expected.encode()) + budget_delta
-    if budget_delta < 0:
-        with pytest.raises(XmlPolicyExpansionLimitError):
-            prepare_xml(
-                source, expansion_limit_bytes=budget, prepare_markup=prepare_html_markup
-            )
-    else:
-        projection = prepare_xml(
-            source, expansion_limit_bytes=budget, prepare_markup=prepare_html_markup
-        )
-        assert projection.parser_source == expected
+    projection = prepare_xml(source, expansion_limit_bytes=budget, prepare_markup=prepare_html_markup)
+    assert "Readable" in projection.parser_source
+    assert 'a="' in projection.parser_source
 
 
 @pytest.mark.parametrize("chunk", [2, 7])

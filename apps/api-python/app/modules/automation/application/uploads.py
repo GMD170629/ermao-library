@@ -25,9 +25,12 @@ from app.modules.automation.application.receipts import (
     request_fingerprint,
 )
 from app.modules.automation.domain.access import EffectiveAccess, Scope
+from app.modules.imports.public import (
+    ImportFileTooLargeError,
+    validate_import_file_size,
+)
 
 CHUNK_BYTES = 256 * 1024
-BOOK_BYTES = 8 * 1024**3
 COVER_BYTES = 12 * 1024**2
 UPLOAD_COUNT = 20
 LIFETIME_MS = 24 * 60 * 60 * 1000
@@ -185,11 +188,16 @@ class AutomationUploads:
             or spec.filename in {".", ".."}
             or any(ord(c) < 32 or c in "/\\" for c in spec.filename)
             or not re.fullmatch(r"[a-fA-F0-9]{64}", spec.sha256)
-            or not 0
-            < spec.size_bytes
-            <= (BOOK_BYTES if spec.purpose != "cover" else COVER_BYTES)
+            or spec.size_bytes <= 0
+            or (spec.purpose == "cover" and spec.size_bytes > COVER_BYTES)
         ):
             raise UploadError("INVALID_UPLOAD")
+        if spec.purpose != "cover":
+            try:
+                validate_import_file_size(spec.size_bytes)
+            except ImportFileTooLargeError as error:
+                capture_exception(error, persist=False)
+                raise UploadError(error.code) from error
         if spec.purpose == "replace":
             if (
                 not spec.library_id
@@ -241,8 +249,8 @@ class AutomationUploads:
             actor = self._actor(access, spec)
             if target.library_id not in actor.library_ids:
                 raise UploadError("RESOURCE_NOT_FOUND")
-            count, size = self.store.capacity(access.grant_id)
-            if count >= UPLOAD_COUNT or size + spec.size_bytes > BOOK_BYTES:
+            count, _ = self.store.capacity(access.grant_id)
+            if count >= UPLOAD_COUNT:
                 raise UploadError("UPLOAD_QUOTA_EXCEEDED")
             record = UploadRecord(
                 self.new_id(),
@@ -422,8 +430,7 @@ class AutomationUploads:
                 record = replace(
                     record,
                     status="RECOVERY_REQUIRED"
-                    if record.spec.purpose != "cover"
-                    and record.publication is not None
+                    if record.spec.purpose != "cover" and record.publication is not None
                     else "FAILED",
                     error_code=str(error)
                     if isinstance(error, UploadError)

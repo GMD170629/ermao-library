@@ -4,28 +4,21 @@ import json
 import logging
 import os
 import re
-import selectors
 import shutil
 import subprocess
-import threading
-import time
 import unicodedata
 from pathlib import Path
 from typing import Any
 
 from app.contracts.reader_safety_policy_generated import (
     ReaderSafetyAction,
-    ReaderSafetyBudgetName,
     ReaderSafetyRule,
     ReaderSafetyRuleId,
-    reader_safety_budget,
     reader_safety_rule,
 )
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.audio_types import (
-    MAX_AUDIO_BUNDLE_TRACKS,
-    MAX_AUDIO_CHAPTERS,
     AudioBundleStructure,
     AudioChapterMetadata,
     AudioFileMetadata,
@@ -34,19 +27,10 @@ from app.modules.imports.application.audio_types import (
 )
 from app.modules.imports.application.errors import (
     AudioInspectionError,
-    AudioTrackLimitExceededError,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
 
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
-MAX_EMBEDDED_COVER_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.AUDIO_ARTWORK_MAX_BYTES
-)
-MAX_FFPROBE_STDOUT_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.AUDIO_METADATA_MAX_BYTES
-)
-MAX_AUDIO_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
-MAX_FFPROBE_STDERR_BYTES = 256 * 1024
 _FFPROBE_RAW_INPUT_OPTIONS: dict[str, tuple[str, ...]] = {
     ".g726": ("-f", "g726", "-code_size", "4", "-ar", "8000"),
 }
@@ -90,30 +74,6 @@ def _audio_policy_error(
     )
 
 
-class _AudioTrackCounter:
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.count = 0
-
-    def add(self, path: Path) -> Path:
-        self.count += 1
-        if self.count > MAX_AUDIO_BUNDLE_TRACKS:
-            rule = _audio_policy_failure_rule(
-                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS
-            )
-            error_code = rule.error_code
-            if error_code is None:  # Guarded by _audio_policy_failure_rule.
-                raise RuntimeError("generated audio track rule has no error code")
-            raise AudioTrackLimitExceededError(
-                path=str(self.root),
-                limit=MAX_AUDIO_BUNDLE_TRACKS,
-                observed_count=self.count,
-                code=error_code.value,
-                rule_id=rule.id.value,
-            )
-        return path.resolve()
-
-
 def _iter_directory_entries(path: Path):
     iterator = os.scandir(path)
     try:
@@ -124,9 +84,9 @@ def _iter_directory_entries(path: Path):
             close()
 
 
-def _direct_audio_files(path: Path, counter: _AudioTrackCounter) -> list[Path]:
+def _direct_audio_files(path: Path) -> list[Path]:
     return [
-        counter.add(Path(entry.path))
+        Path(entry.path).resolve()
         for entry in _iter_directory_entries(path)
         if entry.is_file(follow_symlinks=False) and is_supported_audio_file(entry.name)
     ]
@@ -134,12 +94,11 @@ def _direct_audio_files(path: Path, counter: _AudioTrackCounter) -> list[Path]:
 
 def _directory_audio_files(
     path: Path,
-    counter: _AudioTrackCounter,
 ) -> list[Path]:
     return sorted(
-        _direct_audio_files(path, counter),
+        _direct_audio_files(path),
         key=lambda audio_path: natural_sort_key(
-            audio_path.relative_to(counter.root).as_posix()
+            audio_path.name
         ),
     )
 
@@ -160,14 +119,13 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
     if not root.is_dir():
         return None
 
-    counter = _AudioTrackCounter(root)
-    direct_files = _directory_audio_files(root, counter)
+    direct_files = _directory_audio_files(root)
     child_volumes: list[AudioVolumeDirectory] = []
     for entry in _iter_directory_entries(root):
         if not entry.is_dir(follow_symlinks=False):
             continue
         child = Path(entry.path)
-        child_files = _directory_audio_files(child, counter)
+        child_files = _directory_audio_files(child)
         if not child_files:
             continue
         child_volumes.append(
@@ -223,12 +181,6 @@ def parse_audio_metadata(
     source = Path(path).expanduser().resolve()
     if not source.is_file() or not is_supported_audio_file(source):
         raise ValueError("音频文件不存在或格式不受支持")
-    if source.stat().st_size > MAX_AUDIO_SOURCE_BYTES:
-        raise _audio_policy_error(
-            ReaderSafetyRuleId.AUDIO_ORIGINAL_MAX_BYTES,
-            "音频文件超过安全大小限制",
-        )
-
     # Import never invokes a media-stream probe. Unsupported bounded tag
     # readers leave optional values unknown and the source remains importable.
     try:
@@ -246,11 +198,6 @@ def parse_audio_metadata(
         if isinstance(raw_chapters, list)
         else []
     )
-    if len(chapter_items) > MAX_AUDIO_CHAPTERS:
-        raise _audio_policy_error(
-            ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
-            f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常",
-        )
     chapters: list[AudioChapterMetadata] = []
     for index, item in enumerate(chapter_items):
         try:
@@ -259,12 +206,12 @@ def parse_audio_metadata(
         except (TypeError, ValueError, OverflowError) as error:
             capture_exception(error, persist=False)
             raise _audio_policy_error(
-                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
+                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_VALIDITY,
                 "音频章节时间范围无效",
             ) from error
         if start_ms < 0 or end_ms <= start_ms or (duration_ms is not None and end_ms > duration_ms):
             raise _audio_policy_error(
-                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
+                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_VALIDITY,
                 "音频章节时间范围超出音轨时长",
             )
         chapters.append(
@@ -322,7 +269,7 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         *_FFPROBE_RAW_INPUT_OPTIONS.get(path.suffix.lower(), ()),
         str(path),
     ]
-    returncode, stdout, stderr = _run_process_with_output_limit(
+    returncode, stdout, stderr = _run_process(
         command, timeout_seconds=max(1, timeout_seconds)
     )
     if returncode != 0:
@@ -453,11 +400,9 @@ def _raw_audio_duration_ms(
         "json",
         str(path),
     ]
-    returncode, stdout, _stderr = _run_process_with_output_limit(
+    returncode, stdout, _stderr = _run_process(
         command,
         timeout_seconds=max(1, timeout_seconds),
-        max_stdout_bytes=64 * 1024,
-        max_stderr_bytes=MAX_FFPROBE_STDERR_BYTES,
     )
     if returncode != 0:
         failure = subprocess.CalledProcessError(returncode, "ffprobe", stderr=_stderr)
@@ -479,156 +424,29 @@ def _raw_audio_duration_ms(
     return max(0, round(packet_count * 40 * 1000 / sample_rate)) if packet_count else 0
 
 
-def _run_process_with_output_limit(
+def _run_process(
     command: list[str],
     *,
     timeout_seconds: int,
-    max_stdout_bytes: int = MAX_FFPROBE_STDOUT_BYTES,
-    max_stderr_bytes: int = MAX_FFPROBE_STDERR_BYTES,
 ) -> tuple[int, bytes, bytes]:
-    """Run ffprobe without allowing a malformed file to exhaust RAM."""
-
+    """Drain probe output while preserving timeout and process cleanup."""
     try:
-        process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-    except OSError as exc:
-        capture_exception(exc, persist=False)
-        raise ValueError(f"ffprobe 读取音频失败：{exc}") from exc
-    stdout_pipe = process.stdout
-    stderr_pipe = process.stderr
-    if stdout_pipe is None or stderr_pipe is None:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as error:
+        capture_exception(error, persist=False)
+        raise ValueError(f"ffprobe 读取音频失败：{error}") from error
+    try:
+        stdout, stderr = process.communicate(timeout=max(1, timeout_seconds))
+    except subprocess.TimeoutExpired as error:
+        capture_exception(error)
         process.kill()
-        process.wait()
-        raise ValueError("ffprobe 读取音频失败：无法捕获子进程输出")
-
-    if os.name == "nt":
-        return _communicate_with_output_limit_on_windows(
-            process,
-            timeout_seconds=timeout_seconds,
-            max_stdout_bytes=max_stdout_bytes,
-            max_stderr_bytes=max_stderr_bytes,
-        )
-
-    selector = selectors.DefaultSelector()
-    selector.register(stdout_pipe, selectors.EVENT_READ, ("stdout", max_stdout_bytes))
-    selector.register(stderr_pipe, selectors.EVENT_READ, ("stderr", max_stderr_bytes))
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    deadline = time.monotonic() + max(1, timeout_seconds)
-    try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                process.kill()
-                process.wait()
-                raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）")
-            events = selector.select(timeout=min(0.25, remaining))
-            if not events and process.poll() is not None:
-                # Pipes can still contain buffered bytes after process exit.
-                events = [
-                    (key, selectors.EVENT_READ) for key in selector.get_map().values()
-                ]
-            for key, _mask in events:
-                stream_name, limit = key.data
-                chunk = os.read(key.fd, 64 * 1024)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                buffer = buffers[stream_name]
-                if len(buffer) + len(chunk) > limit:
-                    process.kill()
-                    process.wait()
-                    raise ValueError(
-                        f"ffprobe {stream_name} 输出超过 {limit} bytes，文件元数据异常"
-                    )
-                buffer.extend(chunk)
-        remaining = max(0.01, deadline - time.monotonic())
-        try:
-            returncode = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired as exc:
-            capture_exception(exc)
-            process.kill()
-            process.wait()
-            raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）") from exc
-        return returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"])
-    finally:
-        selector.close()
-        stdout_pipe.close()
-        stderr_pipe.close()
-
-
-def _communicate_with_output_limit_on_windows(
-    process: subprocess.Popen[bytes],
-    *,
-    timeout_seconds: int,
-    max_stdout_bytes: int,
-    max_stderr_bytes: int,
-) -> tuple[int, bytes, bytes]:
-    """Drain Windows anonymous pipes concurrently with explicit byte limits."""
-
-    stdout_pipe = process.stdout
-    stderr_pipe = process.stderr
-    if stdout_pipe is None or stderr_pipe is None:
-        process.kill()
-        process.wait()
-        raise ValueError("ffprobe 读取音频失败：无法捕获子进程输出")
-    buffers = {"stdout": bytearray(), "stderr": bytearray()}
-    overflow = threading.Event()
-
-    def drain(name: str, limit: int) -> None:
-        stream = stdout_pipe if name == "stdout" else stderr_pipe
-        while not overflow.is_set():
-            chunk = stream.read(64 * 1024)
-            if not chunk:
-                return
-            if len(buffers[name]) + len(chunk) > limit:
-                overflow.set()
-                return
-            buffers[name].extend(chunk)
-
-    threads = (
-        threading.Thread(
-            target=drain,
-            args=("stdout", max_stdout_bytes),
-            name="ffprobe-stdout",
-            daemon=True,
-        ),
-        threading.Thread(
-            target=drain,
-            args=("stderr", max_stderr_bytes),
-            name="ffprobe-stderr",
-            daemon=True,
-        ),
-    )
-    for thread in threads:
-        thread.start()
-    deadline = time.monotonic() + max(1, timeout_seconds)
-    try:
-        while process.poll() is None:
-            if overflow.is_set():
-                process.kill()
-                process.wait()
-                raise ValueError("ffprobe 输出超过安全上限")
-            if time.monotonic() >= deadline:
-                process.kill()
-                process.wait()
-                raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）")
-            time.sleep(0.01)
-        for thread in threads:
-            thread.join(timeout=1)
-        if overflow.is_set():
-            raise ValueError("ffprobe 输出超过安全上限")
-        if any(thread.is_alive() for thread in threads):
-            process.kill()
-            process.wait()
-            raise ValueError("ffprobe 读取音频失败：子进程输出未正常结束")
-        return process.returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"])
+        process.communicate()
+        raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）") from error
     finally:
         if process.poll() is None:
             process.kill()
-            process.wait()
-        stdout_pipe.close()
-        stderr_pipe.close()
+            process.communicate()
+    return process.returncode, stdout, stderr
 
 
 def _read_with_mutagen(path: Path) -> dict[str, Any]:
@@ -710,12 +528,6 @@ def _read_with_mutagen(path: Path) -> dict[str, Any]:
                 }
             )
     cover_data, cover_extension = _mutagen_cover(tags)
-    if cover_data and len(cover_data) > MAX_EMBEDDED_COVER_BYTES:
-        raw_tags["coverWarning"] = (
-            f"embedded cover ignored: {len(cover_data)} bytes exceeds {MAX_EMBEDDED_COVER_BYTES}"
-        )
-        cover_data = None
-        cover_extension = None
     if encoding_repairs:
         raw_tags["encodingRepairs"] = encoding_repairs
     return {

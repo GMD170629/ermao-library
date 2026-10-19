@@ -148,8 +148,8 @@ def _boolean(value: str | None) -> bool | None:
 
 
 def parse_opf_metadata(content: bytes) -> PublicationMetadata:
-    if not content or len(content) > MAX_OPF_BYTES:
-        raise OpfMetadataError("OPF 文件为空或超过 2 MiB")
+    if not content:
+        raise OpfMetadataError("OPF 文件为空")
     if b"<!DOCTYPE" in content.upper() or b"<!ENTITY" in content.upper():
         raise OpfMetadataError("OPF 不允许文档类型或实体声明")
     parser = etree.XMLParser(
@@ -157,7 +157,7 @@ def parse_opf_metadata(content: bytes) -> PublicationMetadata:
         no_network=True,
         recover=False,
         remove_comments=True,
-        huge_tree=False,
+        huge_tree=True,
     )
     try:
         root = etree.fromstring(content, parser)

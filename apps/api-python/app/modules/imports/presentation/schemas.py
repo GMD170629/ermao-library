@@ -221,6 +221,11 @@ class ImportBadRequestError(HttpContractError[ImportErrorBody]):
     body_model = ImportErrorBody
 
 
+class ImportPayloadTooLargeError(HttpContractError[ImportErrorBody]):
+    status_code = 413
+    body_model = ImportErrorBody
+
+
 class ImportForbiddenError(HttpContractError[ImportErrorBody]):
     status_code = 403
     body_model = ImportErrorBody

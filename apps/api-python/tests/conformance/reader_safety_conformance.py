@@ -43,9 +43,12 @@ from app.infrastructure.archive_integrity import (
     UnsafeArchivePathError,
     normalize_archive_path,
 )
+from app.modules.imports.public import (
+    ImportFileTooLargeError,
+    validate_import_file_size,
+)
 from app.modules.publications.domain.model import (
     PublicationResourceBlockedError,
-    PublicationResourceTooLargeError,
     PublicationSecurityError,
 )
 from app.modules.publications.infrastructure.epub_adapter import (
@@ -275,16 +278,10 @@ def _evaluate_fact(
             cache.get(
                 ("synthetic", 1, 1), load_snapshot, _integer_fact(facts, "weightBytes")
             )
-        except PublicationResourceTooLargeError as failure:
-            if loaded or failure.rule_id != rule_id.value:
-                raise AssertionError(
-                    "snapshot memory guard did not run before loading"
-                ) from failure
-            return _generated_decision(rule_id)
         finally:
             cache.close()
         if not loaded:
-            raise AssertionError("in-budget snapshot was not loaded")
+            raise AssertionError("snapshot retention incorrectly prevented parsing")
         return _allowed_decision(
             rule_id, event="BOUNDARY_ALLOW", semantic_projection=source
         )
@@ -323,9 +320,12 @@ def _evaluate_fact(
             return _generated_decision(rule_id)
         raise AssertionError("corrupt optional EPUB resource was not blocked")
     elif evaluator == "ORIGINAL_BYTES":
-        detected = _integer_fact(facts, "sizeBytes") > reader_safety_budget(
-            ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES
-        )
+        try:
+            validate_import_file_size(_integer_fact(facts, "sizeBytes"))
+        except ImportFileTooLargeError:
+            detected = True
+        else:
+            detected = False
         if not detected:
             return _allowed_decision(
                 rule_id,

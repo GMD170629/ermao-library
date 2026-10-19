@@ -75,12 +75,22 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
             set(self.expected), {case.case_id for case in self.suite_cases}
         )
         self.assertEqual(
-            {"BACKEND", "WEB", "KMP", "ANDROID", "IOS"},
+            {"KMP", "ANDROID", "IOS"},
             set(
                 next(
                     case
                     for case in self.suite_cases
                     if case.case_id == "original-at-limit"
+                ).consumers
+            ),
+        )
+        self.assertEqual(
+            {"BACKEND"},
+            set(
+                next(
+                    case
+                    for case in self.suite_cases
+                    if case.case_id == "import-source-at-limit"
                 ).consumers
             ),
         )

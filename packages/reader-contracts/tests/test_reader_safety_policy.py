@@ -50,22 +50,22 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
 
     def test_future_policy_version_validates_and_generates_bindings(self) -> None:
         future = copy.deepcopy(self.source)
-        future["policyVersion"] = 5
+        future["policyVersion"] = 6
         future["policyDigest"] = self.generator.policy_digest(future)
 
         validated = self.generator.validate_policy(future)
 
-        self.assertEqual(5, validated["policyVersion"])
+        self.assertEqual(6, validated["policyVersion"])
         self.assertIn(
-            "READER_SAFETY_POLICY_VERSION = 5 as const",
+            "READER_SAFETY_POLICY_VERSION = 6 as const",
             self.generator.render_typescript(validated, future["policyDigest"]),
         )
         self.assertIn(
-            "const val policyVersion: Int = 5",
+            "const val policyVersion: Int = 6",
             self.generator.render_kotlin(validated, future["policyDigest"]),
         )
         self.assertIn(
-            "READER_SAFETY_POLICY_VERSION: Final = 5",
+            "READER_SAFETY_POLICY_VERSION: Final = 6",
             self.generator.render_python(validated, future["policyDigest"]),
         )
 
@@ -146,6 +146,37 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             if reference.startswith("budgets.")
         }
         self.assertEqual(set(budgets), references)
+
+    def test_web_backend_quotas_only_gate_new_imports(self) -> None:
+        rules = {rule["id"]: rule for rule in self.policy["rules"]}
+        operational_rules = {
+            "COMMON.PARSER_SNAPSHOT_MEMORY",
+            "PDF.RENDER_BUDGET",
+            "PDF.RANGE_PROTOCOL",
+        }
+        for rule in self.policy["rules"]:
+            if (
+                rule["classification"] == "RESOURCE_LIMIT"
+                and rule["id"] not in operational_rules | {"IMPORT.SOURCE_MAX_BYTES"}
+            ):
+                self.assertEqual(["ANDROID", "IOS"], rule["requiredConsumers"])
+        admission = rules["IMPORT.SOURCE_MAX_BYTES"]
+        self.assertEqual(["BACKEND"], admission["requiredConsumers"])
+        self.assertEqual("IMPORT_FILE_TOO_LARGE", admission["errorCode"])
+        self.assertEqual(["budgets.originalMaxBytes"], admission["parameterRefs"])
+        retention = rules["COMMON.PARSER_SNAPSHOT_MEMORY"]
+        for action in ("action", "isolatedAction", "optionalResourceAction"):
+            self.assertEqual("ALLOW", retention[action])
+        self.assertIsNone(retention["errorCode"])
+        self.assertNotIn(
+            "budgets.pdfPageMaxCount", rules["PDF.PAGE_VALIDITY"]["parameterRefs"]
+        )
+        self.assertFalse(
+            any(
+                reference.startswith("budgets.")
+                for reference in rules["AUDIO.TRACK_AND_CHAPTER_VALIDITY"]["parameterRefs"]
+            )
+        )
 
     def test_standard_doctype_is_allowed_without_external_resolution(self) -> None:
         profile = self.policy["profiles"]["reflowable"]

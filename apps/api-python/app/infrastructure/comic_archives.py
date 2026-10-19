@@ -19,14 +19,12 @@ import rarfile  # type: ignore[import-not-found,import-untyped]
 from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_FORMATS,
     ReaderSafetyAction,
-    ReaderSafetyBudgetName,
     ReaderSafetyDecision,
     ReaderSafetyDecisionContext,
     ReaderSafetyFormat,
     ReaderSafetyResourceRole,
     ReaderSafetyRuleId,
     evaluate_reader_safety,
-    reader_safety_budget,
     reader_safety_comic_page_mime_type,
     reader_safety_rule,
 )
@@ -37,7 +35,6 @@ from app.infrastructure.archive_integrity import (
     normalize_archive_path,
 )
 from app.infrastructure.bounded_inspection import (
-    COVER_BYTES,
     ZipInspectionReader,
 )
 from app.modules.imports.application.comic_types import (
@@ -229,23 +226,7 @@ def _parse_resource_index(value: object | None) -> float | None:
     return None
 
 
-MAX_COMIC_INFO_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.COMIC_MANIFEST_MAX_BYTES
-)
-MAX_COMIC_PAGES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT)
-MAX_COMIC_PAGE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES)
-MAX_COMIC_UNCOMPRESSED_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.COMIC_EXPANDED_MAX_BYTES
-)
-MAX_COMIC_COMPRESSION_RATIO = reader_safety_budget(
-    ReaderSafetyBudgetName.COMIC_COMPRESSION_RATIO_MAX
-)
 
-
-def comic_page_exceeds_limit(size: int) -> bool:
-    """Return whether a comic page must be blocked before its body is read."""
-
-    return size > MAX_COMIC_PAGE_BYTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,11 +522,6 @@ def inspect_comic_archive(
             raise _comic_integrity_error(
                 "漫画压缩包没有可读取的完整页面", optional=False
             )
-        if len(images) > MAX_COMIC_PAGES:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT,
-                "漫画压缩包页数超过安全限制",
-            )
         # Findings already proven by the directory need no payload reads.
         images = [
             info
@@ -556,19 +532,6 @@ def inspect_comic_archive(
             raise _comic_integrity_error(
                 "漫画压缩包没有可读取的完整页面", optional=False
             )
-        bounded_images = [
-            info
-            for info in images
-            if info.file_size
-            <= reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES)
-        ]
-        if not bounded_images:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
-                "漫画页面超过阅读器的资源限制。",
-                optional=True,
-            )
-        images = bounded_images
         images.sort(key=lambda item: natural_sort_key(item.filename))
         # Index declared pages without touching their payload. Resource integrity
         # and decoder failures belong to on-demand reading, preserving page numbers.
@@ -577,7 +540,6 @@ def inspect_comic_archive(
                 info
                 for info in entries
                 if info.filename.lower().endswith("comicinfo.xml")
-                and info.file_size <= MAX_COMIC_INFO_BYTES
             ),
             None,
         )
@@ -640,18 +602,12 @@ def inspect_comic_archive(
             cover_entry = next(
                 info for info in images if info.filename == cover["entryPath"]
             )
-            if cover_entry.file_size <= COVER_BYTES:
-                try:
-                    with (
-                        source.independent_read(COVER_BYTES + 65558),
-                        archive.open(cover_entry) as stream,
-                    ):
-                        candidate = stream.read(COVER_BYTES + 1)
-                    if len(candidate) <= COVER_BYTES:
-                        cover_content = candidate
-                except (ComicArchiveError, OSError, ValueError) as error:
-                    capture_exception(error, persist=False)
-                    record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error)
+            try:
+                with archive.open(cover_entry) as stream:
+                    cover_content = stream.read()
+            except (ComicArchiveError, OSError, ValueError) as error:
+                capture_exception(error, persist=False)
+                record_exception(logging.getLogger(__name__), "infrastructure.comic_archives.inspect_comic_archive.failed", error)
         return {
             "coverContent": cover_content,
             "title": (comic_info or {}).get("title")
@@ -676,35 +632,18 @@ def _comic_page_mime_type(filename: str) -> str | None:
 def _validate_comic_entries(
     entries: list[ComicArchiveEntry],
 ) -> _ComicArchiveValidation:
-    """Validate whole-archive bounds and classify entry-level findings."""
+    """Classify entry integrity, encryption and path findings."""
 
     names: set[str] = set()
     integrity_entries: set[str] = set()
     encrypted_entries: set[str] = set()
     quarantined_entries: set[str] = set()
-    total_size = 0
     for entry in entries:
-        total_size += entry.file_size
-        if total_size > MAX_COMIC_UNCOMPRESSED_BYTES:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_BUDGET,
-                "漫画压缩包超过展开大小限制",
-            )
-        unsafe_ratio = (entry.file_size > 0 and entry.compressed_size == 0) or (
-            entry.compressed_size > 0
-            and entry.file_size / entry.compressed_size > MAX_COMIC_COMPRESSION_RATIO
-        )
-        if unsafe_ratio:
-            raise _comic_policy_error(
-                ReaderSafetyRuleId.COMIC_ARCHIVE_BUDGET,
-                "漫画压缩包压缩比超过安全限制",
-            )
         try:
             canonical_name = _canonical_entry_name(entry.filename)
         except UnsafeArchivePathError as _caught_error:
-            # No member is extracted. An unaddressable entry is isolated while
-            # its declared bytes still count toward the archive-wide budgets.
-            # diagnostics-control-flow: Unused unsafe archive members are quarantined; budgets still count them.
+            # No member is extracted. Unaddressable entries are isolated.
+            # diagnostics-control-flow: Unused unsafe archive members are quarantined.
             capture_exception(_caught_error)
             continue
         if canonical_name in names:
@@ -737,12 +676,6 @@ def extract_comic_cover(
     try:
         with open_comic_archive(source_path) as archive:
             info = archive.getinfo(entry_name)
-            if comic_page_exceeds_limit(info.file_size):
-                raise _comic_policy_error(
-                    ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
-                    "漫画封面超过阅读器的资源限制",
-                    optional=True,
-                )
             target.parent.mkdir(parents=True, exist_ok=True)
             with (
                 archive.open(info, "r") as source,

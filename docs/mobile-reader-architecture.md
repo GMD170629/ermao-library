@@ -230,7 +230,7 @@ generated PDF policy; SDK defaults may not silently enable actions forbidden by
 `PDF.DISABLE_ACTIVE_CONTENT`.
 
 Native Reader uses `ReaderLaunchCoordinator` for verified-local, required-download,
-stream and unavailable decisions. Admission uses
+stream and unavailable decisions. Native admission uses
 `COMMON.ORIGINAL_MAX_BYTES`; IMAGE_DIR member totals use the applicable comic
 budget rules. This is not a guarantee that every admitted file can open. Whole-array
 platform limits, XML/decompression/image safety limits and engine failures remain
@@ -602,3 +602,7 @@ device conformance demonstrates the required generated action.
 - 章节／音轨 Sheet 选择后保持展开并更新位置；倍速 Menu 为 0.75/1/1.25/1.5/1.75/2/2.5/3。睡眠 Sheet 为关闭、15/30/45/60分钟、本章／本音轨结束；无章节时本章等于音轨，计时器进程死亡不恢复。
 - 本地媒体匹配 serverIdentity/userId/authzVersion/bookId/resourceId/assetId、completed 和原始长度。缺失／损坏／身份不符停在暂停或重试，不自动重下载、不伪装在线播放成功；安全、DRM、codec 错误不回退其他 parser 或转码。网络失败仅有精确匹配完整工件时可切本地。
 - 可访问顺序为标题、身份、章节、时间轴、主控、次级；按钮随状态命名，缓冲单独播报不抢焦点，seek 提供当前／总时长及调整动作，边界章节禁用。大字体允许换行，Reduced Motion 无装饰动画；后台、锁屏、通知、恢复与设备运行单独验收。
+
+## Web/backend import-only quota (policy v5)
+
+Web and backend enforce the 2 GiB per-file quota only for newly imported sources through `IMPORT.SOURCE_MAX_BYTES`. Existing resources remain readable, and document/resource byte counts, archive ratios/expanded sizes, structural counts and manifest sizes do not gate their parsers. Android/iOS retain their existing quotas and generated consumer obligations. Cache retention, range/chunk transport, PDF canvas scaling, authorization and content defenses remain operational; backend snapshots larger than the retention budget are used within leases and released after the final lease. Runtime engine allocation failures are still real failures, not policy quota rejections.

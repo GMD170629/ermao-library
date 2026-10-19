@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
   readerSafetyRule
 } from '@shuku/reader-core';
@@ -67,24 +68,17 @@ test('a long malformed ampersand suffix is copied in one bounded scan', () => {
   assert.equal(preflightReflowableXml(source), source);
 });
 
-test('an expansion beyond the role budget is literalized without truncating the document', () => {
-  const source = '<!DOCTYPE r [<!ENTITY huge "12345678901234567890">]><r>&huge;</r>';
-  const preflight = preflightReflowableXml(source, 17);
-  assert.equal(preflight, '<r>&amp;huge;</r>');
+test('custom entity amplification remains bounded without restricting authored document bytes', () => {
+  const chunk = 'x'.repeat(READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes / 2 + 1);
+  const source = `<!DOCTYPE r [<!ENTITY chunk "${chunk}">]><r>&chunk;&chunk;</r>`;
+  const prepared = preflightReflowableXml(source);
+  assert.equal(prepared, `<r>${chunk}&amp;chunk;</r>`);
 });
 
-test('repeated entity references share the role budget instead of accumulating unbounded expansions', () => {
-  const source = '<!DOCTYPE r [<!ENTITY chunk "12345678901234567890">]><r>&chunk;&chunk;</r>';
-  const preflight = preflightReflowableXml(source, 40);
-  assert.equal(preflight, '<r>12345678901234567890&amp;chunk;</r>');
-});
-
-test('control-document expansion uses the generated control-document budget rule', () => {
-  assert.throws(
-    () => preflightReflowableXml('<container>oversized</container>', 10, READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES),
-    (reason: unknown) => reason instanceof ReaderSafetyPolicyError
-      && reason.ruleId === READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES
-  );
+test('control and body XML beyond former document limits remain complete', () => {
+  const text = 'x'.repeat(READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes + 1);
+  const source = `<container>${text}</container>`;
+  assert.equal(preflightReflowableXml(source), source);
 });
 
 test('generated URI policy keeps local/user navigation and removes authored active or remote subresources', () => {

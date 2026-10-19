@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  READER_SAFETY_BUDGETS,
   PDF_RANGE_CHUNK_BYTES,
   PDF_RANGE_MAX_REQUEST_BYTES,
   READER_SAFETY_RULE_IDS,
@@ -209,4 +210,20 @@ test('closing a session cancels access and reopening cannot use its body cache',
   const reopened = new PdfRangeByteSource(access(bytes), fetcher);
   await reopened.prepare(new AbortController().signal);
   assert.equal(requests, 2);
+});
+
+
+test('existing PDFs above the import ceiling can request their first range', async () => {
+  const length = READER_SAFETY_BUDGETS.originalMaxBytes + 1;
+  const bytes = new Uint8Array(PDF_RANGE_CHUNK_BYTES);
+  const source = new PdfRangeByteSource({ url: '/api/assets/large-pdf', length }, async (_input, init) => {
+    const headers = new Headers({ ETag: ETAG, 'Accept-Ranges': 'bytes', 'Content-Length': String(length) });
+    if (init?.method === 'HEAD') return new Response(null, { headers });
+    headers.set('Content-Range', `bytes 0-${bytes.length - 1}/${length}`);
+    headers.set('Content-Length', String(bytes.length));
+    return new Response(bytes, { status: 206, headers });
+  });
+  try {
+    assert.equal((await source.prepare(new AbortController().signal)).length, bytes.length);
+  } finally { source.abort(); }
 });

@@ -138,7 +138,7 @@ def test_pdf_range_rejects_missing_revision_and_oversized_request(
         )
 
 
-def test_comic_page_size_limit_is_enforced_without_mime_admission(
+def test_comic_page_size_no_longer_limits_delivery(
     tmp_path: Path,
     test_settings: Settings,
 ) -> None:
@@ -167,10 +167,8 @@ def test_comic_page_size_limit_is_enforced_without_mime_admission(
 
     assert wrong_mime.status_code == 200
     assert wrong_mime.headers["content-type"] == "image/avif"
-    assert too_large.status_code == 413
-    assert _error_params(too_large)["ruleId"] == (
-        ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES.value
-    )
+    assert too_large.status_code == 200
+    assert int(too_large.headers["content-length"]) == oversized.stat().st_size
 
 
 class _FakeArchiveEntry:
@@ -178,7 +176,7 @@ class _FakeArchiveEntry:
     checksum = 0
 
 
-class _UnreadableArchive:
+class _ReadableArchive:
     def __enter__(self) -> Self:
         return self
 
@@ -189,10 +187,15 @@ class _UnreadableArchive:
         return _FakeArchiveEntry()
 
     def read(self, _entry_name: str) -> bytes:
-        raise AssertionError("the page body must not be read after the budget check")
+        import io
+
+        from PIL import Image
+        output = io.BytesIO()
+        Image.new("RGB", (1, 1)).save(output, format="PNG")
+        return output.getvalue()
 
 
-def test_pse_comic_page_budget_is_checked_before_archive_read(
+def test_pse_comic_page_above_former_limit_reaches_decoder(
     tmp_path: Path,
     test_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -202,7 +205,7 @@ def test_pse_comic_page_budget_is_checked_before_archive_read(
     monkeypatch.setattr(
         http_streaming,
         "open_comic_archive",
-        lambda _path: _UnreadableArchive(),
+        lambda _path: _ReadableArchive(),
     )
 
     response = send_pse_page_zip_entry(
@@ -216,10 +219,8 @@ def test_pse_comic_page_budget_is_checked_before_archive_read(
         output_media_type="image/future",
     )
 
-    assert response.status_code == 413
-    assert _error_params(response)["ruleId"] == (
-        ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES.value
-    )
+    assert response.status_code == 200
+    assert int(response.headers["content-length"]) > 0
 
 
 class _CorruptArchive:

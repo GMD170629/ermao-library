@@ -226,11 +226,9 @@ def test_audio_format_catalog_admits_every_declared_extension() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows pipe regression")
 def test_ffprobe_output_reader_supports_windows_anonymous_pipes() -> None:
-    returncode, stdout, stderr = audio_metadata_module._run_process_with_output_limit(
+    returncode, stdout, stderr = audio_metadata_module._run_process(
         [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'probe-ok')"],
         timeout_seconds=2,
-        max_stdout_bytes=64,
-        max_stderr_bytes=64,
     )
 
     assert returncode == 0
@@ -238,15 +236,14 @@ def test_ffprobe_output_reader_supports_windows_anonymous_pipes() -> None:
     assert stderr == b""
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows pipe regression")
-def test_ffprobe_output_reader_enforces_windows_stdout_limit() -> None:
-    with pytest.raises(ValueError, match="输出超过安全上限"):
-        audio_metadata_module._run_process_with_output_limit(
-            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1024)"],
-            timeout_seconds=2,
-            max_stdout_bytes=64,
-            max_stderr_bytes=64,
-        )
+def test_ffprobe_output_reader_accepts_large_metadata() -> None:
+    returncode, stdout, stderr = audio_metadata_module._run_process(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * (1024 * 1024 + 1))"],
+        timeout_seconds=5,
+    )
+    assert returncode == 0
+    assert len(stdout) == 1024 * 1024 + 1
+    assert stderr == b""
 
 
 def test_missing_audio_metadata_is_unknown_without_ffprobe(tmp_path, monkeypatch) -> None:
@@ -283,7 +280,7 @@ def test_raw_aptx_duration_is_recovered_from_fixed_bitrate(
     monkeypatch.setattr(audio_metadata_module.shutil, "which", lambda _name: "/ffprobe")
     monkeypatch.setattr(
         audio_metadata_module,
-        "_run_process_with_output_limit",
+        "_run_process",
         lambda *_args, **_kwargs: (0, json.dumps(payload).encode(), b""),
     )
 
@@ -315,7 +312,7 @@ def test_g726_probe_supplies_required_raw_demuxer_options(
         observed.extend(command)
         return 0, json.dumps(payload).encode(), b""
 
-    monkeypatch.setattr(audio_metadata_module, "_run_process_with_output_limit", run)
+    monkeypatch.setattr(audio_metadata_module, "_run_process", run)
 
     parsed = audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)
 
@@ -350,7 +347,7 @@ def test_ffprobe_rejects_video_but_allows_attached_cover(
     monkeypatch.setattr(audio_metadata_module.shutil, "which", lambda _name: "/ffprobe")
     monkeypatch.setattr(
         audio_metadata_module,
-        "_run_process_with_output_limit",
+        "_run_process",
         lambda *_args, **_kwargs: (0, json.dumps(payload).encode(), b""),
     )
 
@@ -409,3 +406,23 @@ def test_audiobook_resource_is_published_through_canonical_book_api(
     assert book["resources"][0]["durationMs"] == 3_600_000
     assert book["resources"][0]["assets"][0]["trackNumber"] == 1
     assert client.get("/api/works/audio-book").status_code == 404
+
+
+def test_audio_metadata_accepts_large_existing_source_and_many_chapters(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "existing.m4b"
+    with source.open("wb") as stream:
+        stream.truncate(2 * 1024**3 + 1)
+    chapters = [{"start_ms": index, "end_ms": index + 1, "title": str(index)} for index in range(10_001)]
+    monkeypatch.setattr(audio_metadata_module, "_read_with_mutagen", lambda _path: {
+        "duration_ms": 10_001, "chapters": chapters,
+    })
+    metadata = parse_audio_metadata(source)
+    assert len(metadata.chapters) == 10_001
+    assert metadata.chapters[-1].end_ms == 10_001
+
+
+def test_probe_timeout_terminates_the_child() -> None:
+    with pytest.raises(ValueError, match="超时"):
+        audio_metadata_module._run_process(
+            [sys.executable, "-c", "import time; time.sleep(10)"], timeout_seconds=1,
+        )

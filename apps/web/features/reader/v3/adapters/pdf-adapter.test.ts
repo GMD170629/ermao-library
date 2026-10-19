@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
+import { DEFAULT_READER_PREFERENCES, READER_SAFETY_BUDGETS } from '@shuku/reader-core';
 import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
@@ -152,7 +152,7 @@ class FakeElement {
   setAttribute() {}
 }
 
-test('PDF page navigation resets a zoomed document to the top', async () => {
+test('PDF above the former page count limit opens and resets a zoomed document on navigation', async () => {
   const originalResizeObserver = globalThis.ResizeObserver;
   const originalWindow = globalThis.window;
   const ownerDocument = new FakeDocument();
@@ -165,7 +165,7 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
   } as unknown as PDFPageProxy;
   const document = {
     setReadingWindow: async () => undefined,
-    numPages: 2,
+    numPages: READER_SAFETY_BUDGETS.pdfPageMaxCount + 1,
     getPage: async () => page
   } as unknown as PDFDocumentProxy;
   const loadingTask = {

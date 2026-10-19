@@ -27,7 +27,6 @@ from app.modules.publications.application.safety_policy import (
     publication_integrity_failure,
     publication_native_parser_implementation_failure,
     publication_optional_resource_failure,
-    publication_parser_limit,
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -59,30 +58,14 @@ from app.modules.publications.infrastructure.source_files import (
 )
 from app.modules.publications.infrastructure.xml_policy import (
     XmlPolicyDecodeError,
-    XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
     parse_xml,
 )
 
 FB2_PARSER_IDENTIFIER = "shuku-fb2-parser-v1"
-FB2_NORMALIZATION_IDENTIFIER = "shuku-fb2-publication-v3"
-MAX_FB2_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.FB2_TEXT_MAX_BYTES)
+FB2_NORMALIZATION_IDENTIFIER = "shuku-fb2-publication-v4"
 MAX_FB2_XML_EXPANSION_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES
-)
-MAX_ENCODED_BINARY_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES
-)
-MAX_BINARY_RESOURCE_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.FB2_DECODED_IMAGE_MAX_BYTES
-)
-MAX_TOTAL_BINARY_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.FB2_DECODED_IMAGES_TOTAL_MAX_BYTES
-)
-MAX_XML_ELEMENTS = reader_safety_budget(ReaderSafetyBudgetName.FB2_MAX_NODES)
-MAX_XML_DEPTH = reader_safety_budget(ReaderSafetyBudgetName.FB2_MAX_DEPTH)
-MAX_TEXT_CHARACTERS = reader_safety_budget(
-    ReaderSafetyBudgetName.FB2_TEXT_MAX_CHARACTERS
 )
 _XLINK_NAMESPACE_DECLARATION = re.compile(
     rb"\bxmlns:xlink\s*=\s*(['\"])http://www\.w3\.org/1999/xlink\1"
@@ -112,7 +95,7 @@ class _Fb2Section:
 class _Fb2ResourceMarker:
     """Deferred optional-resource decision retained in the publication index.
 
-    FB2 image budgets are enforced when the resource is first requested.  The
+    Invalid FB2 image data is reported when the resource is first requested. The
     marker keeps the original encoded text and digest for provenance while
     avoiding a speculative base64 decode during publication construction.
     """
@@ -169,11 +152,6 @@ def _normalized_text(element: ElementTree.Element | None) -> str:
 
 
 def _xml_root(content: bytes) -> ElementTree.Element:
-    if len(content) > MAX_FB2_SOURCE_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-            "FB2 source exceeds the size limit",
-        )
     content = _normalize_legacy_link_prefix(content)
     try:
         _projection, root = parse_xml(
@@ -183,12 +161,6 @@ def _xml_root(content: bytes) -> ElementTree.Element:
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("FB2 XML is invalid") from error
-    except XmlPolicyExpansionLimitError as error:
-        capture_exception(error, persist=False)
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-            "FB2 XML entity expansion exceeds the size limit",
-        ) from error
     except XmlPolicyDecodeError as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("FB2 XML encoding is invalid") from error
@@ -202,7 +174,6 @@ def _xml_root(content: bytes) -> ElementTree.Element:
         ) from error
     if _local_name(root.tag) != "FictionBook":
         raise PublicationStructureError("FB2 root element is invalid")
-    _validate_tree_shape(root)
     return root
 
 
@@ -223,32 +194,6 @@ def _normalize_legacy_link_prefix(content: bytes) -> bytes:
     ):
         return content
     return _LEGACY_L_HREF_ATTRIBUTE.sub(rb"\g<spacing>xlink:href\g<equals>", content)
-
-
-def _validate_tree_shape(root: ElementTree.Element) -> None:
-    count = 0
-    text_characters = 0
-    stack = [(root, 1)]
-    while stack:
-        element, depth = stack.pop()
-        count += 1
-        if count > MAX_XML_ELEMENTS:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 contains too many XML elements",
-            )
-        if depth > MAX_XML_DEPTH:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 XML nesting is too deep",
-            )
-        text_characters += len(element.text or "") + len(element.tail or "")
-        if text_characters > MAX_TEXT_CHARACTERS:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 text exceeds the character limit",
-            )
-        stack.extend((child, depth + 1) for child in element)
 
 
 def _person_name(person: ElementTree.Element) -> str:
@@ -288,7 +233,6 @@ def _binary_resources(
     resources: dict[str, tuple[str, bytes | str | _Fb2ResourceMarker | None]] = {}
     href_by_identifier: dict[str, str] = {}
     seen_identifiers: set[str] = set()
-    total_size = 0
     for binary in (item for item in root if _local_name(item.tag) == "binary"):
         identifier = (_attribute(binary, "id") or "").strip()
         media_type = (_attribute(binary, "content-type") or "").strip().lower()
@@ -329,12 +273,6 @@ def _binary_resources(
             )
             href_by_identifier[resource_identifier] = resource_href
 
-        if len(encoded) > MAX_ENCODED_BINARY_BYTES:
-            mark(
-                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
-                "FB2 encoded image exceeds the generated resource budget",
-            )
-            continue
         estimated_size = (len(encoded) // 4) * 3 - (
             len(encoded) - len(encoded.rstrip("="))
         )
@@ -344,19 +282,6 @@ def _binary_resources(
                 "FB2 binary resource has no valid encoded content",
             )
             continue
-        if estimated_size > MAX_BINARY_RESOURCE_BYTES:
-            mark(
-                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
-                "FB2 decoded image exceeds the generated resource budget",
-            )
-            continue
-        if total_size + estimated_size > MAX_TOTAL_BINARY_BYTES:
-            mark(
-                ReaderSafetyRuleId.FB2_IMAGE_BUDGET,
-                "FB2 decoded images exceed the generated aggregate budget",
-            )
-            continue
-        total_size += estimated_size
         resources[href] = (media_type, encoded)
         href_by_identifier[identifier] = href
     return resources, href_by_identifier
@@ -740,11 +665,6 @@ class Fb2PublicationAdapter(PublicationAdapter):
             select_publication_source_root(source.library_root, self._storage_root),
         )
         stat_result = source_path.stat()
-        if stat_result.st_size > MAX_FB2_SOURCE_BYTES:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET,
-                "FB2 source exceeds the size limit",
-            )
         key = (
             str(source_path),
             stat_result.st_size,

@@ -17,7 +17,6 @@ from app.modules.publications.infrastructure import xml_policy
 from app.modules.publications.infrastructure.xml_policy import (
     MarkupPreparationSession,
     MarkupSourceRange,
-    XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
     parse_xml,
     prepare_xml,
@@ -157,7 +156,7 @@ def test_repeated_entity_references_are_bounded_as_one_prepared_document() -> No
     assert expected == "".join(root.itertext())
 
 
-def test_entity_expansion_reserves_space_for_remaining_readable_xml() -> None:
+def test_original_xml_does_not_consume_entity_expansion_budget() -> None:
     source = (
         b'<!DOCTYPE root [<!ENTITY payload "0123456789abcdef0123456789abcdef">]>'
         b"<root>&payload;</root>"
@@ -165,8 +164,8 @@ def test_entity_expansion_reserves_space_for_remaining_readable_xml() -> None:
 
     projection, root = parse_xml(source, expansion_limit_bytes=40)
 
-    assert "&payload;" == "".join(root.itertext())
-    assert len(projection.parser_source.encode("utf-8")) <= 40
+    assert "0123456789abcdef0123456789abcdef" == "".join(root.itertext())
+    assert len(projection.parser_source.encode("utf-8")) > 40
 
 
 def test_deep_entity_chain_uses_bounded_iterative_resolution() -> None:
@@ -219,7 +218,7 @@ def test_syntax_ranges_preserve_literal_declarations_and_share_the_entity_owner(
     )
 
 
-def test_syntax_literals_and_entity_expansion_use_one_document_budget() -> None:
+def test_entity_expansion_budget_is_shared_but_excludes_literal_source() -> None:
     declaration = '<!DOCTYPE html [<!ENTITY e "' + "E" * 80 + '">]>'
     source = (
         declaration
@@ -238,7 +237,7 @@ def test_syntax_literals_and_entity_expansion_use_one_document_budget() -> None:
             )
 
     projection = prepare_xml(
-        source.encode(), expansion_limit_bytes=len(source), prepare_markup=prepare
+        source.encode(), expansion_limit_bytes=80, prepare_markup=prepare
     )
     assert projection.parser_source == (
         "<xmp>"
@@ -249,7 +248,6 @@ def test_syntax_literals_and_entity_expansion_use_one_document_budget() -> None:
         + "B" * 60
         + "</xmp>"
     )
-    assert len(projection.parser_source.encode()) <= len(source)
 
 
 def test_syntax_literal_xml_comment_does_not_hide_following_ordinary_entities() -> None:
@@ -264,25 +262,15 @@ def test_syntax_literal_xml_comment_does_not_hide_following_ordinary_entities() 
     assert projection.parser_source == "<xmp><!-- &copy;</xmp><p>©</p><!-- end -->"
 
 
-@pytest.mark.parametrize("budget_delta", [0, -1])
-def test_literal_bytes_obey_the_existing_exact_output_budget(budget_delta: int) -> None:
+@pytest.mark.parametrize("budget", [0, 1])
+def test_literal_source_has_no_document_size_cap(budget: int) -> None:
     content = b"<xmp>&unknown;</xmp>"
 
     def prepare(session: MarkupPreparationSession) -> None:
         session.literal(MarkupSourceRange(len("<xmp>"), session.source.index("</xmp>")))
 
-    if budget_delta < 0:
-        with pytest.raises(XmlPolicyExpansionLimitError):
-            prepare_xml(
-                content,
-                expansion_limit_bytes=len(content) + budget_delta,
-                prepare_markup=prepare,
-            )
-    else:
-        projection = prepare_xml(
-            content, expansion_limit_bytes=len(content), prepare_markup=prepare
-        )
-        assert projection.parser_source.encode() == content
+    projection = prepare_xml(content, expansion_limit_bytes=budget, prepare_markup=prepare)
+    assert projection.parser_source.encode() == content
 
 
 @pytest.mark.parametrize(

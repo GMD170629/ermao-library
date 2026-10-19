@@ -14,7 +14,6 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.contracts.reader_safety_policy_generated import (
-    ReaderSafetyBudgetName,
     ReaderSafetyRuleId,
 )
 from app.core.config import Settings
@@ -336,70 +335,28 @@ def test_cbz_isolates_unused_escapes_and_links_and_normalizes_ordinary_paths(
     assert not (tmp_path / "outside.png").exists()
 
 
-def test_cbz_page_budget_is_checked_before_resource_read(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    archive = tmp_path / "page-budget.cbz"
-    with zipfile.ZipFile(archive, "w") as output:
-        output.writestr("readable.future", b"okay")
-        output.writestr("oversized.future", b"too-large")
-    original_budget = comic_archives_module.reader_safety_budget
-    original_read = comic_archives_module.ComicArchive.open
-    reads: list[str] = []
-
-    def budget(name: ReaderSafetyBudgetName) -> int:
-        return (
-            4
-            if name is ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES
-            else original_budget(name)
-        )
-
-    def read(
-        container: comic_archives_module.ComicArchive,
-        entry: str | comic_archives_module.ComicArchiveEntry,
-        mode="r",
-    ):
-        reads.append(entry if isinstance(entry, str) else entry.filename)
-        return original_read(container, entry, mode)
-
-    monkeypatch.setattr(comic_archives_module, "reader_safety_budget", budget)
-    monkeypatch.setattr(comic_archives_module.ComicArchive, "open", read)
+def test_cbz_retains_large_pages_and_extracts_large_cover(tmp_path: Path) -> None:
+    archive = tmp_path / "large.cbz"
+    content = b"x" * (32 * 1024 * 1024 + 1)
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        output.writestr("001.future", content)
+        output.writestr("002.future", b"readable")
     parsed = inspect_comic_archive(archive)
-    assert [page["entryPath"] for page in parsed["pages"]] == ["readable.future"]
-    assert reads == ["readable.future"]
+    assert [page["entryPath"] for page in parsed["pages"]] == ["001.future", "002.future"]
+    assert parsed["coverContent"] == content
+    cover = extract_comic_cover(
+        tmp_path / "storage", archive, "book-1", "resource-1", "asset-1", "001.future"
+    )
+    assert Path(cover).read_bytes() == content
 
 
-def test_comic_cover_page_budget_is_checked_before_archive_read(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    archive = tmp_path / "cover-budget.cbz"
+def test_comic_index_accepts_more_than_ten_thousand_pages(tmp_path: Path) -> None:
+    archive = tmp_path / "many.cbz"
     with zipfile.ZipFile(archive, "w") as output:
-        output.writestr("cover.future", b"too-large")
-    monkeypatch.setattr(comic_archives_module, "MAX_COMIC_PAGE_BYTES", 4)
-
-    with pytest.raises(ComicArchiveInvalidError) as raised:
-        extract_comic_cover(
-            tmp_path / "storage",
-            archive,
-            "book-1",
-            "resource-1",
-            "asset-1",
-            "cover.future",
-        )
-
-    assert raised.value.rule_id == ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES.value
-    assert raised.value.code == "COMIC_PAGE_BLOCKED"
-    assert not (
-        tmp_path
-        / "storage"
-        / "books"
-        / "book-1"
-        / "resource-1"
-        / "asset-1"
-        / "cover.future"
-    ).exists()
+        for index in range(10_001):
+            output.writestr(f"{index:05}.jpg", b"page")
+    parsed = inspect_comic_archive(archive, include_cover=False)
+    assert parsed["pageCount"] == 10_001
 
 
 class _RejectedRarArchive:

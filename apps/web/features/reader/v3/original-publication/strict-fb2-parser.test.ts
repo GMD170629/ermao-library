@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
-import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
+import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import { parseStrictFb2 } from './strict-fb2-parser';
 
 test('strict FB2 parsing preserves metadata, sections and text', () => {
@@ -41,19 +40,27 @@ test('strict FB2 parsing preserves loose body runs and emits canonical section t
   ), false);
 });
 
-test('strict FB2 parsing blocks only an embedded image that exceeds generated budgets', () => {
+test('strict FB2 parsing keeps images beyond former encoded and decoded image limits', () => {
+  const encoded = 'QUJD'.repeat(Math.floor(READER_SAFETY_BUDGETS.fb2EncodedImageMaxBytes / 4) + 1);
   const parsed = parseStrictFb2(
     '<FictionBook><body><section><p>Readable text</p></section></body>'
-      + '<binary id="large-cover" content-type="image/jpeg">QUJDRA==</binary></FictionBook>',
-    { maxDepth: 20, maxNodes: 100, maxTextChars: 100 },
-    { maxEncodedBytes: 4, maxDecodedBytes: 20, maxDecodedTotalBytes: 20 }
+      + `<binary id="large-cover" content-type="image/jpeg">${encoded}</binary></FictionBook>`
   );
-
   assert.equal(parsed.chapters[0]?.text, 'Readable text');
+  assert.deepEqual(parsed.blockedResources, []);
+});
+
+test('strict FB2 parsing isolates malformed image data as resource integrity', () => {
+  const parsed = parseStrictFb2('<FictionBook><body><p>Readable</p></body><binary id="broken">%%%broken</binary></FictionBook>');
   assert.deepEqual(parsed.blockedResources, [{
-    id: 'large-cover',
-    ruleId: READER_SAFETY_RULE_IDS.FB2_IMAGE_BUDGET
+    id: 'broken', ruleId: READER_SAFETY_RULE_IDS.REFLOWABLE_OPTIONAL_RESOURCE_FAILURE
   }]);
+});
+
+test('strict FB2 parsing accepts structures beyond the former nesting limit', () => {
+  const depth = READER_SAFETY_BUDGETS.fb2MaxDepth + 1;
+  const parsed = parseStrictFb2(`<FictionBook><body>${'<section>'.repeat(depth)}<p>Deep text</p>${'</section>'.repeat(depth)}</body></FictionBook>`);
+  assert.equal(parsed.chapters[0]?.text, 'Deep text');
 });
 
 test('strict FB2 parsing preserves an unfamiliar image MIME for the decoder boundary', () => {
@@ -73,7 +80,7 @@ test('strict FB2 parsing accepts bounded internal text entities and literalizes 
   assert.equal(parsed.chapters[0]?.text, 'boom &external;');
 });
 
-test('strict FB2 parsing fails closed for malformed and parser-budget inputs', () => {
+test('strict FB2 parsing fails closed for malformed inputs', () => {
   for (const source of [
     '<FictionBook><body><section></body></FictionBook>',
     '<FictionBook><body><p>&broken</p></body></FictionBook>',
@@ -82,14 +89,17 @@ test('strict FB2 parsing fails closed for malformed and parser-budget inputs', (
     '<FictionBook xmlns:xml="urn:not-xml"><body><p>text</p></body></FictionBook>',
     '<FictionBook xmlns:a="urn:same" xmlns:b="urn:same"><body a:id="one" b:id="two"><p>text</p></body></FictionBook>'
   ]) assert.throws(() => parseStrictFb2(source), /PUBLICATION_(?:MARKUP_INVALID|SECURITY_REJECTED)/);
-  assert.throws(
-    () => parseStrictFb2('<FictionBook><body><section><p>x</p></section></body></FictionBook>', { maxDepth: 2, maxNodes: 100, maxTextChars: 100 }),
-    /PUBLICATION_PARSER_LIMIT/
-  );
-  assert.throws(
-    () => parseStrictFb2('<FictionBook><body><p>excess</p></body></FictionBook>', { maxDepth: 20, maxNodes: 100, maxTextChars: 3 }),
-    (reason: unknown) => reason instanceof ReaderSafetyPolicyError
-      && reason.code === 'PUBLICATION_PARSER_LIMIT'
-      && reason.ruleId === READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET
-  );
+});
+
+
+test('strict FB2 accepts long valid numeric character references', () => {
+  const parsed = parseStrictFb2(`<FictionBook><body><p>&#${'0'.repeat(40)}65;</p></body></FictionBook>`);
+  assert.equal(parsed.chapters[0]?.text, 'A');
+});
+
+test('strict FB2 parsing accepts more nodes than the former structure ceiling', () => {
+  const count = READER_SAFETY_BUDGETS.fb2MaxNodes + 1;
+  const parsed = parseStrictFb2(`<FictionBook>${'<empty/>'.repeat(count)}<body><p>Complete body</p></body></FictionBook>`);
+  assert.equal(parsed.events.filter((event) => event.kind === 'start' && event.name === 'empty').length, count);
+  assert.equal(parsed.chapters[0]?.text, 'Complete body');
 });

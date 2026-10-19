@@ -17,8 +17,7 @@ export {
   type ReaderSafetyFailure
 } from '@shuku/reader-core';
 import {
-  readerSafetyPlatformAlgorithmUnsupported,
-  rejectReaderSafety
+  readerSafetyPlatformAlgorithmUnsupported
 } from '@shuku/reader-core';
 
 type DoctypeDeclaration = Readonly<{
@@ -243,9 +242,9 @@ function escapeXmlText(value: string): string {
 function rewriteReferences(
   source: string,
   definitions: EntityTable,
-  maxCharacters: number,
-  maxBytesRuleId: ReaderSafetyRuleId
+  entityExpansionMaxBytes: number
 ): string {
+  if (!source.includes('&')) return source;
   const generatedEntities = READER_SAFETY_PROFILES.reflowable.namedEntityCodepoints as Readonly<Record<string, number>>;
   class ExpansionLimitExceeded extends Error {}
   type ExpansionFrame = {
@@ -373,8 +372,8 @@ function rewriteReferences(
         return literalReference(name);
       } catch (cause) {
         if (!(cause instanceof ExpansionLimitExceeded)) throw cause;
-        // Literalize only the reference whose expansion crossed the existing
-        // role budget. If its parent cannot retain that literal either, walk up
+        // Literalize only the reference whose expansion crossed the generated
+        // entity-expansion budget. If its parent cannot retain that literal either, walk up
         // the explicit stack; the rest of the document remains readable.
         const literal = literalizeOverflowingFrame();
         if (literal !== null) return literal;
@@ -384,17 +383,10 @@ function rewriteReferences(
     }
   };
 
-  const sourceTotalBytes = encoder.encode(source).byteLength;
-  let sourceBytesConsumed = 0;
   let rewritten = '';
-  let rewrittenBytes = 0;
+  let entityExpansionBytes = 0;
   const appendRewritten = (value: string): void => {
-    const valueBytes = encoder.encode(value).byteLength;
-    if (rewrittenBytes + valueBytes > maxCharacters) {
-      rejectReaderSafety(maxBytesRuleId);
-    }
     rewritten += value;
-    rewrittenBytes += valueBytes;
   };
   let offset = 0;
   while (offset < source.length) {
@@ -402,7 +394,6 @@ function rewriteReferences(
     if (skipped !== null) {
       const lexical = source.slice(offset, skipped);
       appendRewritten(lexical);
-      sourceBytesConsumed += encoder.encode(lexical).byteLength;
       offset = skipped;
       continue;
     }
@@ -415,7 +406,6 @@ function rewriteReferences(
       if (nextBoundary > offset) {
         const plain = source.slice(offset, nextBoundary);
         appendRewritten(plain);
-        sourceBytesConsumed += encoder.encode(plain).byteLength;
         offset = nextBoundary;
         continue;
       }
@@ -423,7 +413,6 @@ function rewriteReferences(
       // the text after it on the next iteration so entity scanning never
       // processes ordinary Unicode text one code point at a time.
       appendRewritten('<');
-      sourceBytesConsumed += 1;
       offset += 1;
       continue;
     }
@@ -431,12 +420,10 @@ function rewriteReferences(
     if (semicolon < 0) {
       const remainder = source.slice(offset);
       appendRewritten(remainder);
-      sourceBytesConsumed += encoder.encode(remainder).byteLength;
       break;
     }
     const name = source.slice(offset + 1, semicolon);
     const rawReference = source.slice(offset, semicolon + 1);
-    sourceBytesConsumed += encoder.encode(rawReference).byteLength;
     if (!XML_NUMERIC_ENTITY.test(name) && !XML_ENTITY_NAME.test(name)) {
       appendRewritten(rawReference);
     } else if (XML_NUMERIC_ENTITY.test(name)) {
@@ -444,9 +431,10 @@ function rewriteReferences(
     } else {
       const definition = definitions.get(name);
       if (definition) {
-        const remainingSourceBytes = Math.max(0, sourceTotalBytes - sourceBytesConsumed);
-        const expansionBudget = Math.max(0, maxCharacters - rewrittenBytes - remainingSourceBytes);
-        appendRewritten(expandEntity(name, expansionBudget));
+        const expansionBudget = Math.max(0, entityExpansionMaxBytes - entityExpansionBytes);
+        const expanded = expandEntity(name, expansionBudget);
+        if (expanded !== literalReference(name)) entityExpansionBytes += encoder.encode(expanded).byteLength;
+        appendRewritten(expanded);
       } else {
         const codePoint = Reflect.get(generatedEntities, name);
         appendRewritten(typeof codePoint === 'number'
@@ -460,29 +448,19 @@ function rewriteReferences(
 }
 
 /**
- * Removes any authored DTD dependency from an in-memory XML copy. Internal
- * literal entities are expanded as text within the existing publication budget;
- * external, cyclic, parameter and unknown references are escaped so the parser
- * renders the original reference literally. Original publication bytes remain
- * untouched and no external resource is resolved. The caller supplies the
- * existing role budget and its generated limit rule.
+ * Removes authored DTD dependencies from an in-memory XML copy. The generated
+ * expansion budget limits custom entity amplification only: authored document
+ * bytes are never rejected or truncated. External, cyclic, parameter and unknown
+ * references remain literal; original bytes and external resources are untouched.
  */
-export function preflightReflowableXml(
-  source: string,
-  maxBytes: number = READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes,
-  maxBytesRuleId: ReaderSafetyRuleId = READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES
-): string {
+export function preflightReflowableXml(source: string): string {
   ensureXmlPreparationContract();
   const declaration = findDoctype(source);
   const definitions = parseEntityDefinitions(declaration?.internalSubset ?? null);
   const parserSource = declaration
     ? `${source.slice(0, declaration.start)}${source.slice(declaration.end)}`
     : source;
-  const prepared = rewriteReferences(parserSource, definitions, maxBytes, maxBytesRuleId);
-  if (new TextEncoder().encode(prepared).byteLength > maxBytes) {
-    rejectReaderSafety(maxBytesRuleId);
-  }
-  return prepared;
+  return rewriteReferences(parserSource, definitions, READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes);
 }
 
 function lowerSet(values: readonly string[]): ReadonlySet<string> {

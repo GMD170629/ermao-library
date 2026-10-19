@@ -11,12 +11,9 @@ from app.core.exception_diagnostics import capture_exception, record_exception
 from app.infrastructure.bounded_inspection import read_optional_file
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
 from app.modules.metadata.public import (
-    MAX_OPF_BYTES,
     OpfMetadataError,
     parse_opf_metadata,
 )
-
-MAX_SIDECAR_COVER_BYTES = 20 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +35,7 @@ def _discover_candidates(candidates: tuple[Path, ...]) -> SidecarOpfResult | Non
         if not candidate.is_file() or candidate.is_symlink():
             continue
         try:
-            if candidate.stat().st_size > MAX_OPF_BYTES:
-                continue
-            content = read_optional_file(candidate, MAX_OPF_BYTES)
+            content = read_optional_file(candidate)
             if content is None:
                 continue
             metadata = parse_opf_metadata(content)
@@ -82,14 +77,14 @@ def _safe_cover_content(opf_path: Path, href: str | None) -> bytes | None:
     if candidate is None:
         return None
     try:
-        content = read_optional_file(candidate, MAX_SIDECAR_COVER_BYTES)
+        content = read_optional_file(candidate)
     except (OSError, ValueError) as error:
         capture_exception(error, persist=False)
         record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.sidecar_opf._safe_cover_content.failed", error)
         return None
     if (
         content is None
-        or not 0 < len(content) <= MAX_SIDECAR_COVER_BYTES
+        or not content
         or not _image_signature(content)
     ):
         return None

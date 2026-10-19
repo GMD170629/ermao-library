@@ -8,7 +8,6 @@ from app.modules.media.application.page_index import (
     ResourcePageIndexProjection,
     ResourcePageSource,
     ResourcePageUnit,
-    comic_manifest_policy_failure,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "ResourcePageIndexProjection",
     "ResourcePageSource",
     "ResourcePageUnit",
-    "comic_manifest_policy_failure",
 ]

@@ -30,7 +30,7 @@ from app.infrastructure.epub_metadata import read_epub_package, read_zip_metadat
 from app.infrastructure.pdf_embedded_metadata import read_pdf_embedded_metadata
 from app.infrastructure.pdf_metadata_reader import StrictMetadataPdfReader
 from app.infrastructure.sidecar_paths import sidecar_opf_paths
-from app.modules.metadata.application.opf import MAX_OPF_BYTES, parse_opf_metadata
+from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.application.standard_files import (
     MetadataFileSource,
     StandardMetadataError,
@@ -199,8 +199,6 @@ class AnchoredStandardMetadataReader:
                 )
                 with reader(os.dup(descriptor)) as stream:
                     if suffix in {".opf", ".xml"}:
-                        if before.st_size > MAX_OPF_BYTES:
-                            raise StandardMetadataError("METADATA_TOO_LARGE")
                         content = stream.read(before.st_size)
                         metadata = (
                             parse_opf_metadata(content)

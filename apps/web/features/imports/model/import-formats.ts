@@ -22,3 +22,10 @@ export const importFormatGroups = [
 export const allImportExtensions = importFormatGroups.flatMap((group) => [...group.formats]);
 
 export const importFileInputAccept = allImportExtensions.join(',');
+
+/** Stable import failures map to catalogued copy; authored filenames stay untouched. */
+export function importFailureMessage(code: string): string {
+  return code === 'IMPORT_FILE_TOO_LARGE'
+    ? '单个文件不能超过 2 GiB（2,147,483,648 字节）'
+    : code;
+}

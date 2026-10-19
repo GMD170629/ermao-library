@@ -13,9 +13,7 @@ from app.contracts.reader_safety_policy_generated import (
 from app.modules.publications.domain.model import (
     PublicationIntegrityError,
     PublicationParserError,
-    PublicationParserLimitError,
     PublicationResourceBlockedError,
-    PublicationResourceTooLargeError,
     PublicationSecurityError,
 )
 
@@ -44,47 +42,6 @@ def publication_security_rejection(
         error_codes=(ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED,),
     )
     return PublicationSecurityError(message, rule_id=rule_id.value)
-
-
-def publication_parser_limit(
-    rule_id: ReaderSafetyRuleId,
-    message: str,
-) -> PublicationParserLimitError:
-    """Create a parser-budget failure from the generated policy decision."""
-
-    _checked_rule(
-        rule_id,
-        actions=(ReaderSafetyAction.REJECT_PUBLICATION,),
-        error_codes=(ReaderSafetyErrorCode.PUBLICATION_PARSER_LIMIT,),
-    )
-    return PublicationParserLimitError(message, rule_id=rule_id.value)
-
-
-def publication_resource_limit(
-    rule_id: ReaderSafetyRuleId,
-    message: str,
-) -> PublicationResourceTooLargeError:
-    """Create an admission/resource limit failure from the generated policy."""
-
-    rule = _checked_rule(
-        rule_id,
-        actions=(
-            ReaderSafetyAction.BLOCK_RESOURCE,
-            ReaderSafetyAction.REJECT_PUBLICATION,
-        ),
-        error_codes=(
-            ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED,
-            ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE,
-        ),
-    )
-    error_code = rule.error_code
-    if error_code is None:  # Guarded by _checked_rule; keeps the boundary explicit.
-        raise ValueError(f"{rule_id.value} has no generated error code")
-    return PublicationResourceTooLargeError(
-        message,
-        code=error_code.value,
-        rule_id=rule_id.value,
-    )
 
 
 def publication_integrity_failure(
@@ -169,7 +126,5 @@ __all__ = [
     "publication_native_parser_implementation_failure",
     "publication_native_parser_rejection",
     "publication_optional_resource_failure",
-    "publication_parser_limit",
-    "publication_resource_limit",
     "publication_security_rejection",
 ]

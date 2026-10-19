@@ -10,6 +10,7 @@ import { useToast } from '../../../components/ui/feedback';
 import { useI18n } from '../../../i18n/provider';
 import type { UpdateGrantRequest, CreateGrantRequest, GrantView, Scope } from '../../../generated/automation';
 import { SettingsCenterShell, SettingsTabs } from '../../settings/public';
+import { importFailureMessage } from '../../imports/public';
 import { revealGrant } from '../api/client';
 import { useAutomation } from '../application/use-automation';
 import { canCancelOperation, operationStatusLabel, clientTemplate, connectionUrl, scopeLabels, scopes, selectedScopes, type LibraryChoice, type ServiceSettings, type McpClient } from '../model/configuration';
@@ -229,7 +230,7 @@ export function AutomationSettingsPage() {
             <p className="mt-2 break-all text-xs text-[#77716A]" data-i18n-skip>{operation.operation_id}</p>
             {operation.status === 'RECOVERY_REQUIRED' ? <p role="alert" className="mt-2 text-sm text-amber-800">{t('任务未完成，需要核对文件和书库记录。请保留任务标识，不要重复提交相同操作。')}</p> : null}
             <details className="mt-3 text-sm"><summary className="cursor-pointer">{t('查看逐项结果（最多 50 项）')}</summary><ul className="mt-2 space-y-2">{operation.targets.map((target, index) => <li key={`${target.relative_path}:${index}`} className="rounded-lg bg-[#F7F5F2] p-3">
-              <p className="break-all" data-i18n-skip>{target.relative_path}{target.destination_relative_path ? ` → ${target.destination_relative_path}` : ''}</p><p className="mt-1 text-xs">{t(operationStatusLabel(target.stage))}{target.error_code ? <span data-i18n-skip>{` · ${target.error_code}`}</span> : null}</p>
+              <p className="break-all" data-i18n-skip>{target.relative_path}{target.destination_relative_path ? ` → ${target.destination_relative_path}` : ''}</p><p className="mt-1 text-xs">{t(operationStatusLabel(target.stage))}{target.error_code ? <span data-i18n-skip>{` · ${t(importFailureMessage(target.error_code))}`}</span> : null}</p>
             </li>)}</ul></details>
           </li>)}</ul>}
         </section>

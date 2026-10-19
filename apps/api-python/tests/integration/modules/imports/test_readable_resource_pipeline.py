@@ -4547,3 +4547,67 @@ def test_resource_change_after_asset_commit_is_not_consumed_by_completion(
             ).processed_source_version.startswith("[7,")
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("filename", ["book.epub", "book.txt", "book.azw3", "book.pdf", "album/track.mp3", "comic/page.png"])
+def test_scan_import_enforces_two_gib_per_member_and_preserves_good_files(tmp_path, filename):
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            path = root / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            names = {}
+            for name, size in (("below", 2**31 - 1), ("equal", 2**31), ("over", 2**31 + 1)):
+                member = path.with_name(name + path.suffix)
+                with member.open("wb") as file:
+                    file.truncate(size)
+                names[name] = member
+            pipeline, _ = _pipeline(db)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            rows = db.execute(
+                select(LibrarySourceNode.name, LibraryResourceAsset.import_state, LibraryResourceAsset.failure_reason)
+                .join(LibraryResourceAsset, LibraryResourceAsset.source_node_id == LibrarySourceNode.id)
+            ).all()
+            assert sorted(rows) == [
+                (names["below"].name, "READY", None),
+                (names["equal"].name, "READY", None),
+                (names["over"].name, "FAILED", "IMPORT_FILE_TOO_LARGE"),
+            ]
+            assert names["over"].stat().st_size == 2**31 + 1
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("name", ["book.epub", "album/track.mp3", "comic/page.png"])
+def test_rescan_does_not_reject_previously_imported_large_sources(tmp_path, monkeypatch, name):
+    from app.modules.imports.application import import_file_size
+
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("wb") as file:
+                file.truncate(2**31 + 1)
+            pipeline, _ = _pipeline(db)
+            with monkeypatch.context() as previous_policy:
+                previous_policy.setattr(import_file_size, "reader_safety_budget", lambda _: 2**33)
+                pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+                _drain(pipeline)
+            assert db.scalar(select(LibraryResourceAsset.import_state)) == "READY"
+            os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1))
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+            db.expire_all()
+            assert db.scalar(select(LibraryResourceAsset.import_state)) == "READY"
+            assert db.scalar(select(LibraryReadableResource.import_state)) == "READY"
+            assert path.stat().st_size == 2**31 + 1
+    finally:
+        engine.dispose()

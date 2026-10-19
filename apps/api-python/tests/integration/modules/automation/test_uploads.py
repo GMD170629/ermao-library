@@ -313,9 +313,9 @@ def test_unacknowledged_bytes_retry_and_expiry_cleanup(uploads):
 
 def test_quota_limits_symlinks_and_changed_target(uploads, db_session, tmp_path):
     commands, access, root = uploads
-    with pytest.raises(UploadError, match="INVALID_UPLOAD"):
+    with pytest.raises(UploadError, match="IMPORT_FILE_TOO_LARGE"):
         commands.begin_upload(
-            access, replace(spec(b"a"), size_bytes=8 * 1024**3 + 1), "big"
+            access, replace(spec(b"a"), size_bytes=2 * 1024**3 + 1), "big"
         )
     with pytest.raises(UploadError, match="INVALID_UPLOAD"):
         commands.begin_upload(access, spec(b"a", "../escape.epub"), "escape")
@@ -668,13 +668,13 @@ def test_partial_browser_upload_keeps_files_requests_existing_scan_and_reports_f
     copy = AtomicUploadedFilePublisher._copy_stream
     calls = 0
 
-    def fail_second(source, target, *, max_bytes):
+    def fail_second(source, target):
         nonlocal calls
         calls += 1
         if calls == 2:
             target.write_bytes(b"partial")
             raise OSError(errno.ENOSPC, "injected storage failure")
-        return copy(source, target, max_bytes=max_bytes)
+        return copy(source, target)
 
     monkeypatch.setattr(
         AtomicUploadedFilePublisher, "_copy_stream", staticmethod(fail_second)
@@ -699,7 +699,7 @@ def test_partial_browser_upload_keeps_files_requests_existing_scan_and_reports_f
     assert response.status_code == 500, response.text
     assert (root / "saved.txt").read_bytes() == b"Saved readable text."
     assert not (root / "failed.txt").exists()
-    assert next(root.glob(".upload-*.part")).read_bytes() == b"partial"
+    assert list(root.glob(".upload-*.part")) == []
     primary = next(iter([row for row in log_records() if row.action == 'modules.imports.presentation.writes.import_book_files.failed']), None)
     assert primary.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.ENOSPC
     assert "X-Error-Id" not in response.headers
@@ -724,3 +724,18 @@ def test_partial_browser_upload_keeps_files_requests_existing_scan_and_reports_f
                 LibrarySourceNode.relative_path == "saved.txt"
             )
         ) is not None
+
+
+@pytest.mark.parametrize("filename", ["book.epub", "track.mp3", "comic.cbz"])
+def test_upload_admission_uses_two_gib_per_file_without_batch_quota(uploads, filename):
+    commands, access, _ = uploads
+    for index, size in enumerate((2**31 - 1, 2**31, 2**31)):
+        initial = commands.begin_upload(
+            access, replace(spec(b"x", f"{index}-{filename}"), size_bytes=size),
+            f"boundary-{index}",
+        )
+        assert initial["size_bytes"] == size
+    with pytest.raises(UploadError, match="IMPORT_FILE_TOO_LARGE"):
+        commands.begin_upload(
+            access, replace(spec(b"x", filename), size_bytes=2**31 + 1), "over-limit",
+        )

@@ -1,5 +1,4 @@
 import {
-  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
   normalizeReaderPreferences,
   parseSupportedReaderSourceFormat,
@@ -11,14 +10,12 @@ import {
   type ReflowableFormat,
   type SupportedReaderSourceFormat
 } from '@shuku/reader-core';
-import { readBoundedResponse, ResponseLimitError } from '../../../shared/api/bounded-response';
 import { withBasePath } from '../../../lib/base-path';
 import type { ReaderAssetSummary } from '../../../generated/reader-v5';
 import { fetchLibraryResource } from '../../books/public';
 import { parseReaderV5PositionReport, parseReaderV5ProgressSnapshot, type ReaderV5ProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
 import {
-  readerSafetyFailure,
   rejectReaderSafety,
   type ReaderSafetyFailure
 } from './security/reader-safety-policy';
@@ -210,15 +207,7 @@ async function fetchComicManifest(
   signal: AbortSignal
 ): Promise<Readonly<{ revision: string; pages: ReaderPage[] }>> {
   const response = await fetch(withBasePath(manifestUrl), { credentials: 'same-origin', cache: 'no-cache', signal });
-  let bytes: Uint8Array<ArrayBuffer>;
-  try {
-    bytes = await readBoundedResponse(response, READER_SAFETY_BUDGETS.comicManifestMaxBytes);
-  } catch (reason) {
-    if (reason instanceof ResponseLimitError && reason.code === 'RESPONSE_TOO_LARGE') {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMIC_MANIFEST_MAX_BYTES, { cause: reason });
-    }
-    throw reason;
-  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
   const payload: unknown = (() => {
     try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
     catch { return null; }
@@ -239,9 +228,6 @@ async function fetchComicManifest(
     || readingOrder.length === 0) {
     throw new ReaderBootstrapError('READER_COMIC_MANIFEST_INVALID', '漫画页面清单无效');
   }
-  if (readingOrder.length > READER_SAFETY_BUDGETS.comicPageMaxCount) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_COUNT);
-  }
   const pages = readingOrder.map((raw, index) => {
     const page = record(raw);
     const resourceHref = stringValue(page.resourceHref);
@@ -253,9 +239,6 @@ async function fetchComicManifest(
     if (size === null || !Number.isSafeInteger(size) || size < 0) {
       throw new ReaderBootstrapError('READER_COMIC_MANIFEST_INVALID', '漫画页面清单包含无效的页面大小');
     }
-    const safetyError = size > READER_SAFETY_BUDGETS.comicPageMaxBytes
-        ? readerSafetyFailure(READER_SAFETY_RULE_IDS.COMIC_PAGE_MAX_BYTES)
-        : undefined;
     return {
       pageIndex: index,
       resourceHref,
@@ -263,8 +246,7 @@ async function fetchComicManifest(
       mimeType,
       width: nullableNumber(page.width),
       height: nullableNumber(page.height),
-      size,
-      ...(safetyError ? { safetyError } : {})
+      size
     };
   });
   return { revision, pages };
@@ -325,9 +307,6 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
   if (contentAsset && requiresContentAsset) {
     if (!Number.isSafeInteger(contentAsset.sizeBytes) || contentAsset.sizeBytes <= 0) {
       throw new ReaderBootstrapError('READER_BOOTSTRAP_INVALID', '阅读资产大小无效');
-    }
-    if (contentAsset.sizeBytes > READER_SAFETY_BUDGETS.originalMaxBytes) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
     }
   }
   const capabilities = record(data.capabilities);

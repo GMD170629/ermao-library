@@ -85,7 +85,7 @@ def test_optional_attributes_keep_actual_errno_and_continue(
 
 def test_optional_missing_sidecar_still_returns_none_and_records_the_probe(tmp_path, events, caplog):
     caplog.set_level(logging.DEBUG)
-    assert read_optional_file(tmp_path / "missing.opf", 100) is None
+    assert read_optional_file(tmp_path / "missing.opf") is None
     with events() as _db:
         assert log_records() == []
     assert "FileNotFoundError" in caplog.text
@@ -104,7 +104,7 @@ def test_optional_sidecar_io_failure_is_not_missing(
         return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", fail)
-    assert read_optional_file(tmp_path / "metadata.opf", 100) is None
+    assert read_optional_file(tmp_path / "metadata.opf") is None
     with events() as _db:
         row = one_log(log_records())
     assert row.metadata_json["diagnostics"]["rootCause"]["errno"] == errno.EIO

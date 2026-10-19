@@ -1,3 +1,4 @@
+import { READER_SAFETY_BUDGETS } from '@shuku/reader-core';
 import { ORIGINAL_CHUNK_BYTES } from './original-store-contract';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -259,4 +260,18 @@ test('cancellation before publication leaves the previous successful concurrent 
   await assert.rejects(storage.complete(pending, abort.signal), { name: 'AbortError' });
   await storage.discard(pending);
   assert.deepEqual(new Uint8Array(await (await store.ensure(descriptor, options())).blob.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
+});
+
+
+test('existing originals above the import ceiling reach transfer and still enforce actual length', async () => {
+  const sizeBytes = READER_SAFETY_BUDGETS.originalMaxBytes + 1;
+  const large: OriginalPublicationDescriptor = { ...descriptor, sizeBytes, assetVersion: `${sizeBytes}:1234` };
+  let requested = false;
+  const { store, factory } = await setup(async () => {
+    requested = true;
+    return response(new Uint8Array([1, 2, 3, 4]), large);
+  });
+  await assert.rejects(store.ensure(large, options()), code('ORIGINAL_LENGTH_INVALID'));
+  assert.equal(requested, true);
+  assert.deepEqual(await records(factory, 'chunks'), []);
 });

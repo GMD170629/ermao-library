@@ -8,12 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from app.contracts.reader_safety_policy_generated import (
-    ReaderSafetyBudgetName,
-    ReaderSafetyRuleId,
-    reader_safety_budget,
-    reader_safety_rule,
-)
 from app.core.natural_sort import natural_sort_key
 
 
@@ -88,42 +82,10 @@ class ResolvedResourcePageIndex:
         return next((source for source in self.sources if source.id == asset_id), None)
 
 
-@dataclass(frozen=True, slots=True)
-class ComicManifestPolicyFailure:
-    rule_id: str
-    error_code: str
-
-
 class ComicArchivePageReader(Protocol):
     def read(
         self, resource_id: str, source: ResourcePageSource
     ) -> tuple[tuple[ResourcePageUnit, ...], ResourcePageSource]: ...
-
-
-def comic_manifest_policy_failure(
-    *,
-    page_count: int,
-    serialized_size_bytes: int | None = None,
-) -> ComicManifestPolicyFailure | None:
-    """Evaluate manifest facts against the generated Reader safety policy."""
-
-    if page_count > reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT):
-        rule_id = ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT
-    elif (
-        serialized_size_bytes is not None
-        and serialized_size_bytes
-        > reader_safety_budget(ReaderSafetyBudgetName.COMIC_MANIFEST_MAX_BYTES)
-    ):
-        rule_id = ReaderSafetyRuleId.COMIC_MANIFEST_MAX_BYTES
-    else:
-        return None
-    rule = reader_safety_rule(rule_id)
-    if rule.error_code is None:
-        raise RuntimeError(f"generated Reader safety rule {rule_id.value} has no error")
-    return ComicManifestPolicyFailure(
-        rule_id=rule.id.value,
-        error_code=rule.error_code.value,
-    )
 
 
 class ReadOnlyResourcePageIndex:
@@ -137,9 +99,7 @@ class ReadOnlyResourcePageIndex:
         projection: ResourcePageIndexProjection,
     ) -> ResolvedResourcePageIndex:
         sources = projection.sources
-        if projection.persisted_pages:
-            pages = projection.persisted_pages
-        elif (
+        if (
             projection.resource_format in {"CBZ", "ZIP", "CBR", "RAR"}
             and (archive_source := projection.comic_source()) is not None
             and self._archive_pages is not None
@@ -151,6 +111,8 @@ class ReadOnlyResourcePageIndex:
                 current_source if source.id == current_source.id else source
                 for source in sources
             )
+        elif projection.persisted_pages:
+            pages = projection.persisted_pages
         else:
             page_sources = sorted(
                 (source for source in projection.sources if source.role == "PAGE"),
@@ -198,7 +160,7 @@ def _page_index_revision(
     """Return the strong identity for one immutable comic page session."""
 
     payload = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "resourceId": resource_id,
         "sources": [
             {
@@ -233,11 +195,9 @@ def _page_index_revision(
 
 
 __all__ = [
-    "ComicManifestPolicyFailure",
     "ReadOnlyResourcePageIndex",
     "ResolvedResourcePageIndex",
     "ResourcePageIndexProjection",
     "ResourcePageSource",
     "ResourcePageUnit",
-    "comic_manifest_policy_failure",
 ]

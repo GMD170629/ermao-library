@@ -9,11 +9,9 @@ import pytest
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.model import (
     PublicationCorruptError,
-    PublicationParserLimitError,
     PublicationResourceBlockedError,
     PublicationResourceNotFoundError,
 )
-from app.modules.publications.infrastructure import fb2_adapter as fb2_adapter_module
 from app.modules.publications.infrastructure.fb2_adapter import Fb2PublicationAdapter
 
 
@@ -122,7 +120,7 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     assert publication.author == "测试 作者"
     assert publication.language == "zh-CN"
     assert publication.revision.parser == "shuku-fb2-parser-v1"
-    assert publication.revision.normalization == "shuku-fb2-publication-v3"
+    assert publication.revision.normalization == "shuku-fb2-publication-v4"
     assert [entry.title for entry in publication.toc] == ["第一部", "注释"]
     assert [entry.title for entry in publication.toc[0].children] == ["第二章"]
     assert [link.href for link in publication.reading_order] == [
@@ -210,11 +208,10 @@ def test_fb2_adapter_still_rejects_unbound_non_link_prefix(
         Fb2PublicationAdapter(tmp_path).open(_source(path))
 
 
-def test_fb2_image_budget_blocks_only_the_oversized_optional_resource(
+def test_fb2_large_image_is_retained_and_readable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(fb2_adapter_module, "MAX_ENCODED_BINARY_BYTES", 4)
     path = tmp_path / "oversized-image.fb2"
     path.write_text(
         """<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"
@@ -226,6 +223,10 @@ def test_fb2_image_budget_blocks_only_the_oversized_optional_resource(
 </FictionBook>""",
         encoding="utf-8",
     )
+    encoded = "aGVsbG8="
+    payload = b"x" * (21 * 1024 * 1024 + 1)
+    import base64
+    path.write_text(path.read_text().replace(encoded, base64.b64encode(payload).decode()))
     original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     adapter = Fb2PublicationAdapter(tmp_path)
     source = _source(path)
@@ -238,29 +239,22 @@ def test_fb2_image_budget_blocks_only_the_oversized_optional_resource(
     assert "Still readable" in markup
     assert '<img src="images/' in markup
     image = next(link for link in publication.resources if "images/" in link.href)
-    with pytest.raises(PublicationResourceBlockedError) as failure:
-        adapter.read_resource(source, image.href)
-    assert failure.value.rule_id == "FB2.IMAGE_BUDGET"
-    assert failure.value.code == "PUBLICATION_RESOURCE_BLOCKED"
+    assert adapter.read_resource(source, image.href).content == payload
     assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
 
 
-def test_fb2_structure_budget_failure_carries_generated_rule_id(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(fb2_adapter_module, "MAX_XML_ELEMENTS", 2)
-    path = tmp_path / "too-many-nodes.fb2"
+def test_fb2_xml_deeper_than_previous_limit_remains_readable(tmp_path: Path) -> None:
+    path = tmp_path / "deep.fb2"
     path.write_text(
-        "<FictionBook><body><section><p>text</p></section></body></FictionBook>",
-        encoding="utf-8",
+        "<FictionBook><body><section>" + "<wrapper>" * 129
+        + "<p>text</p>" + "</wrapper>" * 129
+        + "</section></body></FictionBook>", encoding="utf-8",
     )
-
-    with pytest.raises(PublicationParserLimitError) as failure:
-        Fb2PublicationAdapter(tmp_path).open(_source(path))
-
-    assert failure.value.code == "PUBLICATION_PARSER_LIMIT"
-    assert failure.value.rule_id == "FB2.STRUCTURE_BUDGET"
+    adapter = Fb2PublicationAdapter(tmp_path)
+    publication = adapter.open(_source(path))
+    assert publication.reading_order
+    content = adapter.read_resource(_source(path), publication.reading_order[0].href)
+    assert b"text" in content.content
 
 
 @pytest.mark.parametrize("media_type", ["image/future-format", ""])

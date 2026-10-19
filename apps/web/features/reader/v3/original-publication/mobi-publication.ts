@@ -1,5 +1,4 @@
 import {
-  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
   type ReaderReadingProgression,
   type ReaderWritingMode,
@@ -39,9 +38,6 @@ async function sanitizeMarkup(
   mediaType: 'text/html' | 'image/svg+xml' = 'text/html',
   failureRuleId: ReaderSafetyRuleId = READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP
 ): Promise<Uint8Array> {
-  if (bytes.byteLength > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES);
-  }
   const source = preflightReflowableXml(
     decodeResourceText(bytes, failureRuleId)
   );

@@ -1,6 +1,5 @@
 import { BlobReader, ZipReader, type FileEntry } from '@zip.js/zip.js';
 import {
-  READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
   type ReaderReadingProgression,
   type ReaderWritingMode,
@@ -34,8 +33,6 @@ import {
   rejectEpubResourceReadFailure,
   rejectUnreadableEpubResource
 } from '../security/epub-archive-safety';
-
-const MAX_XML_BYTES = READER_SAFETY_BUDGETS.xmlControlDocumentMaxBytes;
 
 function bareHref(href: string): string {
   return href.split('#', 1)[0]?.split('?', 1)[0] ?? href;
@@ -232,16 +229,9 @@ function decodeXml(bytes: Uint8Array, requiredResource: boolean): string {
 function parseXml(
   value: string,
   code: string,
-  maxBytes: number = READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes,
-  maxBytesRuleId: typeof READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES
-    | typeof READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES = READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES,
   requiredResource = true
 ): XMLDocument {
-  const safeSource = preflightReflowableXml(
-    value,
-    maxBytes,
-    maxBytesRuleId
-  );
+  const safeSource = preflightReflowableXml(value);
   const document = new DOMParser().parseFromString(safeSource, 'application/xml');
   if (document.querySelector('parsererror')) {
     rejectEpubResourceReadFailure(new Error(code), requiredResource);
@@ -250,9 +240,6 @@ function parseXml(
 }
 
 function publicationTextLength(bytes: Uint8Array): number {
-  if (bytes.byteLength > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES);
-  }
   const source = decodeXml(bytes, true);
   const document = parseXml(source, 'PUBLICATION_MARKUP_INVALID');
   return Math.max(1, (document.body?.textContent ?? document.documentElement.textContent ?? '').length);
@@ -310,9 +297,6 @@ async function sanitizeEpubDocument(
   href: string,
   assetUrl: (path: string) => Promise<string | null>
 ): Promise<Uint8Array> {
-  if (bytes.byteLength > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES);
-  }
   const source = decodeXml(bytes, true);
   const document = parseXml(source, 'PUBLICATION_MARKUP_INVALID');
   sanitizeAuthoredMarkup(document);
@@ -359,27 +343,17 @@ async function openEpub(
     // parser failures are classified at the concrete read/parse boundary.
     await readZipEntry(required('mimetype'), signal, true);
     const containerBytes = await readZipEntry(required('META-INF/container.xml'), signal, true);
-    if (containerBytes.byteLength > MAX_XML_BYTES) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
-    }
     const container = parseXml(
       decodeXml(containerBytes, true),
-      'PUBLICATION_STRUCTURE_INVALID',
-      MAX_XML_BYTES,
-      READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES
+      'PUBLICATION_STRUCTURE_INVALID'
     );
     const rootfile = container.querySelector('rootfile')?.getAttribute('full-path');
     if (!rootfile) throw new Error('PUBLICATION_STRUCTURE_INVALID');
     const opfPath = normalizeEpubArchivePath(rootfile);
     const opfBytes = await readZipEntry(required(opfPath), signal, true);
-    if (opfBytes.byteLength > MAX_XML_BYTES) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
-    }
     const opf = parseXml(
       decodeXml(opfBytes, true),
-      'PUBLICATION_STRUCTURE_INVALID',
-      MAX_XML_BYTES,
-      READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES
+      'PUBLICATION_STRUCTURE_INVALID'
     );
     const manifestItems = new Map<string, EpubManifestItem>();
     const spineIds = new Set([...opf.querySelectorAll('spine > itemref')]
@@ -404,15 +378,10 @@ async function openEpub(
     if (navItem) {
       const navEntry = byPath.get(navItem.path);
       if (navEntry) {
-        if (navEntry.uncompressedSize > MAX_XML_BYTES) {
-          rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
-        }
         try {
           const nav = parseXml(
             decodeXml(await readZipEntry(navEntry, signal, false), false),
             'PUBLICATION_STRUCTURE_INVALID',
-            MAX_XML_BYTES,
-            READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
             false
           );
           epub3Toc = await parseEpubNavigationWithChapterCore(
@@ -433,15 +402,10 @@ async function openEpub(
       if (ncxItem) {
         const ncxEntry = byPath.get(ncxItem.path);
         if (ncxEntry) {
-          if (ncxEntry.uncompressedSize > MAX_XML_BYTES) {
-            rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
-          }
           try {
             const ncx = parseXml(
               decodeXml(await readZipEntry(ncxEntry, signal, false), false),
               'PUBLICATION_STRUCTURE_INVALID',
-              MAX_XML_BYTES,
-              READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
               false
             );
             ncxToc = await parseEpubNavigationWithChapterCore(
@@ -539,8 +503,6 @@ async function openEpub(
           const svg = parseXml(
             decodeXml(bytes, false),
             'PUBLICATION_MARKUP_INVALID',
-            READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes,
-            READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES,
             false
           );
           sanitizeAuthoredMarkup(svg);

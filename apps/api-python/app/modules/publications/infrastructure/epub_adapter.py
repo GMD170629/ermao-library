@@ -32,8 +32,6 @@ from app.modules.publications.application.safety_policy import (
     publication_native_parser_implementation_failure,
     publication_native_parser_rejection,
     publication_optional_resource_failure,
-    publication_parser_limit,
-    publication_resource_limit,
     publication_security_rejection,
 )
 from app.modules.publications.domain.model import (
@@ -61,6 +59,7 @@ from app.modules.publications.infrastructure.locator_dom import (
 )
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
+    publication_snapshot_weight,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
@@ -68,32 +67,15 @@ from app.modules.publications.infrastructure.source_files import (
 )
 from app.modules.publications.infrastructure.xml_policy import (
     XmlPolicyDecodeError,
-    XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
     parse_xml,
 )
 
 EPUB_PARSER_IDENTIFIER = "epub-package:1"
-EPUB_NORMALIZATION_IDENTIFIER = "shuku-epub-locator-dom-v4"
-MAX_ARCHIVE_ENTRIES = reader_safety_budget(
-    ReaderSafetyBudgetName.ARCHIVE_ENTRY_MAX_COUNT
-)
-MAX_SINGLE_RESOURCE_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.ARCHIVE_ENTRY_MAX_BYTES
-)
-MAX_MARKUP_RESOURCE_BYTES = reader_safety_budget(
+EPUB_NORMALIZATION_IDENTIFIER = "shuku-epub-locator-dom-v5"
+MAX_XML_ENTITY_EXPANSION_BYTES = reader_safety_budget(
     ReaderSafetyBudgetName.REFLOWABLE_MARKUP_MAX_BYTES
 )
-MAX_TOTAL_UNCOMPRESSED_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.ARCHIVE_EXPANDED_MAX_BYTES
-)
-MAX_COMPRESSION_RATIO = reader_safety_budget(
-    ReaderSafetyBudgetName.ARCHIVE_COMPRESSION_RATIO_MAX
-)
-MAX_XML_CONTROL_DOCUMENT_BYTES = reader_safety_budget(
-    ReaderSafetyBudgetName.XML_CONTROL_DOCUMENT_MAX_BYTES
-)
-MAX_EPUB_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,26 +96,15 @@ class _ValidatedArchive:
 
 
 def _xml_root(content: bytes) -> ElementTree.Element:
-    if len(content) > MAX_XML_CONTROL_DOCUMENT_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
-            "publication XML control document exceeds the size limit",
-        )
     try:
         _projection, root = parse_xml(
             content,
-            expansion_limit_bytes=MAX_XML_CONTROL_DOCUMENT_BYTES,
+            expansion_limit_bytes=MAX_XML_ENTITY_EXPANSION_BYTES,
         )
         return root
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XML is invalid") from error
-    except XmlPolicyExpansionLimitError as error:
-        capture_exception(error, persist=False)
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
-            "publication XML entity expansion exceeds the size limit",
-        ) from error
     except XmlPolicyDecodeError as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XML encoding is invalid") from error
@@ -194,46 +165,16 @@ def _entry_key(href: str) -> str:
 
 def _validated_entries(archive: zipfile.ZipFile) -> _ValidatedArchive:
     infos = archive.infolist()
-    if len(infos) > MAX_ARCHIVE_ENTRIES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.EPUB_ARCHIVE_ENTRY_MAX_COUNT,
-            "publication has too many resources",
-        )
     entries: dict[str, zipfile.ZipInfo] = {}
     integrity_hrefs: set[str] = set()
-    total = 0
     spans: list[tuple[int, int, str | None]] = []
     for info in infos:
-        total += info.file_size
-        if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_EXPANDED_MAX_BYTES,
-                "publication exceeds the expanded size limit",
-            )
-        if info.file_size > MAX_SINGLE_RESOURCE_BYTES:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_ENTRY_MAX_BYTES,
-                "publication resource exceeds the size limit",
-            )
-        if info.compress_size == 0 and info.file_size > 0:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_COMPRESSION_RATIO,
-                "publication resource has an invalid compression ratio",
-            )
-        if (
-            info.compress_size
-            and info.file_size / info.compress_size > MAX_COMPRESSION_RATIO
-        ):
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.EPUB_ARCHIVE_COMPRESSION_RATIO,
-                "publication resource compression ratio is unsafe",
-            )
         key: str | None
         try:
             key = normalize_archive_path(info.filename)
         except UnsafeArchivePathError as _caught_error:
             # An unused escaped name cannot be extracted through this adapter.
-            # Quarantine it while retaining the archive-wide bounds above; a
+            # Quarantine it; a
             # required package/manifest lookup will fail when it is addressed.
             # diagnostics-control-flow: Unused unsafe archive members are quarantined; required resources still fail.
             capture_exception(_caught_error)
@@ -276,16 +217,9 @@ def _read_archive_resource(
     *,
     required: bool,
     integrity_failed: bool = False,
-    parser_budget: tuple[ReaderSafetyRuleId, int] | None = None,
 ) -> bytes:
     """Read one entry and classify checksum/decoder failures by role."""
 
-    if parser_budget is not None:
-        rule_id, maximum_bytes = parser_budget
-        if info.file_size > maximum_bytes:
-            raise publication_parser_limit(
-                rule_id, "EPUB parser resource exceeds its byte budget"
-            )
 
     if integrity_failed:
         if required:
@@ -355,10 +289,6 @@ def _container_opf_path(
                 container,
                 required=True,
                 integrity_failed="META-INF/container.xml" in integrity_hrefs,
-                parser_budget=(
-                    ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
-                    MAX_XML_CONTROL_DOCUMENT_BYTES,
-                ),
             )
         )
     except PublicationMarkupError as error:
@@ -422,10 +352,6 @@ def _toc_from_nav(
             nav_info,
             required=False,
             integrity_failed=nav_key in integrity_hrefs,
-            parser_budget=(
-                ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-                MAX_MARKUP_RESOURCE_BYTES,
-            ),
         )
     )
     if _local_name(root.tag) != "html":
@@ -483,10 +409,6 @@ def _toc_from_ncx(
             ncx_info,
             required=False,
             integrity_failed=ncx_key in integrity_hrefs,
-            parser_budget=(
-                ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
-                MAX_XML_CONTROL_DOCUMENT_BYTES,
-            ),
         )
     )
     return _chapter_xml_projection(root, ncx_key, known_hrefs, 2)
@@ -513,10 +435,6 @@ def _index_epub(
                         entries[opf_path],
                         required=True,
                         integrity_failed=opf_path in integrity_hrefs,
-                        parser_budget=(
-                            ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES,
-                            MAX_XML_CONTROL_DOCUMENT_BYTES,
-                        ),
                     )
                 )
             except PublicationMarkupError as error:
@@ -727,22 +645,7 @@ class EpubPublicationAdapter(PublicationAdapter):
         }
         try:
             with zipfile.ZipFile(indexed.source_path) as archive:
-                size_limit = (
-                    MAX_MARKUP_RESOURCE_BYTES
-                    if is_markup or media_type == "text/css"
-                    else MAX_SINGLE_RESOURCE_BYTES
-                )
                 info = archive.getinfo(archive_name)
-                if info.file_size > size_limit:
-                    if size_limit == MAX_MARKUP_RESOURCE_BYTES:
-                        raise publication_parser_limit(
-                            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-                            "Publication markup exceeds the byte limit",
-                        )
-                    raise publication_resource_limit(
-                        ReaderSafetyRuleId.COMMON_BINARY_RESOURCE_MAX_BYTES,
-                        "Publication resource exceeds the byte limit",
-                    )
                 content = _read_archive_resource(
                     archive,
                     info,
@@ -792,11 +695,6 @@ class EpubPublicationAdapter(PublicationAdapter):
             select_publication_source_root(source.library_root, self._storage_root),
         )
         stat_result = path.stat()
-        if stat_result.st_size > MAX_EPUB_SOURCE_BYTES:
-            raise publication_resource_limit(
-                ReaderSafetyRuleId.COMMON_ORIGINAL_MAX_BYTES,
-                "EPUB source exceeds the size limit",
-            )
         key = (
             str(path),
             stat_result.st_size,
@@ -805,7 +703,7 @@ class EpubPublicationAdapter(PublicationAdapter):
             source.author,
         )
         return self._cache.get(
-            key, lambda: _index_epub(*key), MAX_ARCHIVE_ENTRIES * 2048
+            key, lambda: _index_epub(*key), publication_snapshot_weight(stat_result.st_size)
         )
 
     def close(self) -> None:

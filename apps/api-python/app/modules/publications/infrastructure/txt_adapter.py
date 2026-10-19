@@ -7,18 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from app.contracts.reader_safety_policy_generated import (
-    ReaderSafetyBudgetName,
-    ReaderSafetyRuleId,
-    reader_safety_budget,
-)
 from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
-)
-from app.modules.publications.application.safety_policy import (
-    publication_parser_limit,
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -42,8 +34,7 @@ from app.modules.publications.infrastructure.source_files import (
 )
 
 TXT_PARSER_IDENTIFIER = "ermao-chapters:1"
-TXT_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v3"
-MAX_TXT_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES)
+TXT_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v4"
 _STYLESHEET_HREF = "text/reader.css"
 _STYLESHEET = b"""html { color-scheme: light dark; }
 body { margin: 0; padding: 1rem; line-height: 1.6; overflow-wrap: anywhere; }
@@ -66,11 +57,6 @@ class _TxtSnapshot:
 
 
 def _decode_txt(content: bytes) -> str:
-    if len(content) > MAX_TXT_SOURCE_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.TXT_MEMORY_BUDGET,
-            "TXT source exceeds the size limit",
-        )
     candidates: tuple[tuple[str, bytes], ...]
     if content.startswith(b"\xef\xbb\xbf"):
         candidates = (("utf-8", content[3:]),)
@@ -253,11 +239,6 @@ class TxtPublicationAdapter(PublicationAdapter):
             select_publication_source_root(source.library_root, self._storage_root),
         )
         stat_result = source_path.stat()
-        if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
-            raise publication_parser_limit(
-                ReaderSafetyRuleId.TXT_MEMORY_BUDGET,
-                "TXT source exceeds the size limit",
-            )
         key = (
             str(source_path),
             stat_result.st_size,

@@ -1,6 +1,5 @@
 /// <reference lib="webworker" />
 
-import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import type {
   TextPublicationChapter,
   TextPublicationFormat,
@@ -20,12 +19,8 @@ import { parseStrictFb2 } from './strict-fb2-parser';
 import { decodePublicationText } from './text-decoder';
 import {
   ReaderSafetyImplementationError,
-  ReaderSafetyPolicyError,
-  rejectReaderSafety
+  ReaderSafetyPolicyError
 } from '../security/reader-safety-policy';
-
-const MAX_TEXT_BYTES = READER_SAFETY_BUDGETS.originalMaxBytes;
-const MAX_TEXT_MEMORY_BYTES = READER_SAFETY_BUDGETS.txtMemoryMaxBytes;
 
 function property(value: unknown, key: PropertyKey): unknown {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
@@ -57,14 +52,7 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
-async function decodeText(blob: Blob, format: TextPublicationFormat): Promise<string> {
-  if (blob.size > MAX_TEXT_BYTES) rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
-  if (format === 'txt' && blob.size > MAX_TEXT_MEMORY_BYTES) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.TXT_MEMORY_BUDGET);
-  }
-  if (format === 'fb2' && blob.size > READER_SAFETY_BUDGETS.fb2TextMaxBytes) {
-    rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
-  }
+async function decodeText(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return decodePublicationText(bytes);
 }
@@ -264,7 +252,7 @@ async function parseFb2(value: string, fallbackTitle: string): Promise<TextPubli
 }
 
 async function openText(blob: Blob, format: TextPublicationFormat, fallbackTitle: string): Promise<TextPublicationResult> {
-  const value = await decodeText(blob, format);
+  const value = await decodeText(blob);
   return format === 'txt' ? parseTxt(value, fallbackTitle) : parseFb2(value, fallbackTitle);
 }
 

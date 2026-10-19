@@ -105,9 +105,6 @@ export class PdfRangeByteSource {
     if (!Number.isSafeInteger(access.length) || access.length <= 0) {
       throw pdfRangePolicyError('PDF 文件大小无效');
     }
-    if (access.length > READER_SAFETY_BUDGETS.originalMaxBytes) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
-    }
   }
 
   get length() {

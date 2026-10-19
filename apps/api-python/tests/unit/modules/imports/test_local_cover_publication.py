@@ -77,3 +77,10 @@ def test_same_size_corrupt_cover_is_not_reused(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unexpected content"):
         publication.prepare(resource_id="book-1", content=_png())
+
+
+def test_large_discovered_cover_is_published_and_reopened(tmp_path: Path) -> None:
+    publication = FilesystemLocalCoverPublication(tmp_path)
+    content = _png() + b"\0" * (20 * 1024 * 1024 + 1)
+    stored_path = publication.retain_audio_candidate(resource_id="large", content=content)
+    assert publication.read_candidate(stored_path) == content

@@ -107,10 +107,6 @@ class XmlPolicyDecodeError(XmlPolicyPreparationError):
     """The authored XML bytes cannot be decoded using their declared encoding."""
 
 
-class XmlPolicyExpansionLimitError(ValueError):
-    """A parser-only entity expansion exceeded the role's existing byte budget."""
-
-
 def _require_xml_preparation_profile() -> None:
     """Fail closed if the generated XML preparation contract drifts."""
 
@@ -597,37 +593,24 @@ def _reference_operations(
         consume_source(original)
         append_output(original)
 
-    def append_output(candidate: str, fallback: str | None = None) -> None:
+    expanded_bytes = 0
+
+    def append_output(candidate: str) -> None:
         nonlocal output_bytes
-        candidate_bytes = len(candidate.encode("utf-8"))
-        if output_bytes + candidate_bytes <= expansion_limit_bytes:
-            output.append(candidate)
-            output_bytes += candidate_bytes
-            return
-        if fallback is None:
-            raise XmlPolicyExpansionLimitError(
-                "prepared XML exceeds the role's byte budget"
-            )
-        fallback_bytes = len(fallback.encode("utf-8"))
-        if output_bytes + fallback_bytes > expansion_limit_bytes:
-            raise XmlPolicyExpansionLimitError(
-                "prepared XML exceeds the role's byte budget"
-            )
-        output.append(fallback)
-        output_bytes += fallback_bytes
+        output.append(candidate)
+        output_bytes += len(candidate.encode("utf-8"))
 
     def append_escaped_output(name: str, value: str, fallback: str) -> None:
+        nonlocal expanded_bytes
         escaped_bytes = memo_escaped_sizes.get(name)
         if escaped_bytes is None:
             escaped_bytes = _escaped_reference_size(value)
-            # Only memoized resolutions have a stable representation independent
-            # of the current recursive path. Cache their length, not another copy.
             if memo.get(name) is value:
                 memo_escaped_sizes[name] = escaped_bytes
-        if (
-            output_bytes + escaped_bytes + source_bytes_remaining
-            <= expansion_limit_bytes
-        ):
+        # Only expanded entity replacements consume the protection allowance.
+        # Ordinary source text and literal fallback can be arbitrarily large.
+        if expanded_bytes + escaped_bytes <= expansion_limit_bytes:
+            expanded_bytes += escaped_bytes
             append_output(_escape_reference(value))
             return
         append_output(fallback)
@@ -679,7 +662,7 @@ def _reference_operations(
         nonlocal output_bytes
         # The source value was consumed once while its original references were
         # prepared. Charge its SDK serialization in place, never expand it again
-        # or refill the document budget. The normal output guard still applies.
+        # or refill the entity-expansion allowance.
         output_bytes -= sum(len(part.encode("utf-8")) for part in output[output_start:])
         del output[output_start:]
         append_output(quoted_value)
@@ -812,9 +795,9 @@ def prepare_xml(
 ) -> XmlPolicyProjection:
     """Prepare XML for the standard-library parser without external I/O.
 
-    ``expansion_limit_bytes`` is the caller's existing role budget: control
-    documents use ``xmlControlDocumentMaxBytes`` and reflowable resources use
-    ``reflowableMarkupMaxBytes``.  The function never writes the prepared copy
+    ``expansion_limit_bytes`` bounds cumulative entity replacement only; source
+    documents have no byte ceiling. Overflow keeps the reference literal.
+    The function never writes the prepared copy
     to disk and never mutates the original bytes.
 
     An HTML SDK may report actual syntax to one causal preparation session.
@@ -873,7 +856,6 @@ __all__ = [
     "MarkupSourceRange",
     "PreparedMarkupReference",
     "XmlPolicyDecodeError",
-    "XmlPolicyExpansionLimitError",
     "XmlPolicyPreparationError",
     "XmlPolicyProjection",
     "parse_xml",

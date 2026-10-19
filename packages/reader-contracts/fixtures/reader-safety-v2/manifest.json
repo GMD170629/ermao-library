@@ -2,8 +2,8 @@
   "$schema": "../../schemas/reader-safety-fixture-manifest-v1.schema.json",
   "schemaVersion": 1,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 4,
-  "policyDigest": "edfc4aeef6a2f40316dcf38b5727559921ecd7af68da79f349718e2021d108f5",
+  "policyVersion": 5,
+  "policyDigest": "3dc406a17303ec05476fddca6c161f2213494e8901ab00ffd145441428f5d79a",
   "cases": [
     {
       "id": "safe-xhtml-11-http",
@@ -287,8 +287,6 @@
       "input": "sizeBytes=2147483648",
       "inputSha256": "fd135700f5868dd613227941c09b3de7225dbd5dee83e27eb6c6eb3027128b11",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -310,8 +308,6 @@
       "input": "sizeBytes=2147483649",
       "inputSha256": "b922265b9d7075ce28284cedc273fc6b5dc80fbc2537241d15ade1c13e984ead",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -333,8 +329,6 @@
       "input": "depth=128;nodes=500001;textChars=1",
       "inputSha256": "7aed817ff5d8397011bd387396883f514fdcd06d137eb5cd7b40be23e44b7a67",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -378,7 +372,6 @@
       "input": "pageCount=20001;width=612;height=792",
       "inputSha256": "79d34415c357d45c16ca209ecdb2777e644dfe0699cb2c318664e3eb805a83e0",
       "requiredConsumers": [
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -446,8 +439,6 @@
       "input": "pageCount=10001",
       "inputSha256": "e2da4de9a3bee08e1dbb801947a7a33acf7dd59492cb893908098d664b4f88cb",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -559,8 +550,6 @@
       "input": "durationMs=1000;chapterStartMs=900;chapterEndMs=1100",
       "inputSha256": "f066fa80966e88e57b4281fce6b33be805ff4ecf5dc2c41730e88938a458b9b7",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -651,8 +640,6 @@
       "input": "resourceBytes=268435457",
       "inputSha256": "dff6f50e03ca7624265cefd64da1a5ba341c5608cbb7883b3647257aaaae354e",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -720,8 +707,6 @@
       "input": "controlDocumentBytes=16777217",
       "inputSha256": "ee32bdf41910de452e85122119c21f2a52911a058151b3b30b0cc84b6edf75eb",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -743,8 +728,6 @@
       "input": "markupBytes=67108865",
       "inputSha256": "fd925ae7d3dbf2529f33e16fc2a9e8b9650bfaf83724f4eacd9fdad133af7724",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -766,8 +749,6 @@
       "input": "entryCount=10001",
       "inputSha256": "b89286ed9c8b9c68bd1fdaadf57d01115901ace1829277685d137aaa3774ff7d",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -789,8 +770,6 @@
       "input": "expandedBytes=2147483649",
       "inputSha256": "3908411836c89bfd29f71756f46dda86862ff8a0f082053ea1ece77d1d86caf8",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -812,8 +791,6 @@
       "input": "entryBytes=268435457",
       "inputSha256": "407fded2ed07c6da6f2c81099d6738895d021afa556be9d763f4b4e39424a1e0",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -835,8 +812,6 @@
       "input": "compressedBytes=1;expandedBytes=201",
       "inputSha256": "9864376a31a7e5dd292215d3de704a859faae8e0d37eeac3acd693be3d12a02e",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -858,8 +833,6 @@
       "input": "encodedBytes=29360129;decodedBytes=1;decodedTotalBytes=1;mime=image/jpeg",
       "inputSha256": "cae26ae762c2beb58d7f533c7e09c3d229c8a25fd0e9934d532fc2707497d8fe",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -881,8 +854,6 @@
       "input": "textBytes=67108865",
       "inputSha256": "7e3939a4a232e4b77d303ab042c9917e5e25cc6bff99adf4f0fc690698c1b0ed",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -904,8 +875,6 @@
       "input": "chunkCharacters=65536",
       "inputSha256": "8323076e721ae00aa5fd939247146c16a2c004176e86305f3bbe02a99a69e57a",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -972,8 +941,6 @@
       "input": "expandedBytes=2147483649;compressedBytes=1",
       "inputSha256": "4279f5f1913fa4ed1bb0a29a3e04a7f65c950a032016f41f81cc49ca9efb3f94",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -995,8 +962,6 @@
       "input": "pageBytes=33554433",
       "inputSha256": "a43de3c3f4581608b37d19b5ebef2765d6c3170fe3fd7bc846643481f4c97c80",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -1018,8 +983,6 @@
       "input": "manifestBytes=2097153",
       "inputSha256": "1efb1731b2766aab19482b65d787b7ebdbb6b33e118bfc9b9c72883da4ed1cbb",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -1041,8 +1004,6 @@
       "input": "sizeBytes=2147483649",
       "inputSha256": "b922265b9d7075ce28284cedc273fc6b5dc80fbc2537241d15ade1c13e984ead",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -1064,8 +1025,6 @@
       "input": "metadataBytes=1048577;artworkBytes=1",
       "inputSha256": "ad3a02709da2c02b12eaf9ee8af76e0e16f66b04a8ab9ee2118c3f9df55299ae",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -1501,8 +1460,6 @@
       "input": "encodedBytes=4;decodedBytes=1;decodedTotalBytes=1;mime=image/future-format",
       "inputSha256": "9596370b0d50b5cd08762a445dde3f49e567ce15be40176efb977bbaa8e9ca3f",
       "requiredConsumers": [
-        "BACKEND",
-        "WEB",
         "ANDROID",
         "IOS"
       ],
@@ -1567,12 +1524,93 @@
         "BACKEND"
       ],
       "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "COMMON.PARSER_SNAPSHOT_MEMORY:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "weightBytes=134217729",
+        "semanticProjectionSha256": "d048b19caf61dc1d0782729dcfa4968b291ca5b8589a33558b779e2facca18ba"
+      }
+    },
+    {
+      "id": "import-source-at-limit",
+      "format": "EPUB",
+      "input": "sizeBytes=2147483648",
+      "inputSha256": "fd135700f5868dd613227941c09b3de7225dbd5dee83e27eb6c6eb3027128b11",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "expected": {
+        "triggered": false,
+        "action": "ALLOW",
+        "terminalRuleId": "IMPORT.SOURCE_MAX_BYTES",
+        "errorCode": null,
+        "orderedRuleEvents": [
+          "IMPORT.SOURCE_MAX_BYTES:BOUNDARY_ALLOW"
+        ],
+        "semanticProjection": "sizeBytes=2147483648",
+        "semanticProjectionSha256": "fd135700f5868dd613227941c09b3de7225dbd5dee83e27eb6c6eb3027128b11"
+      }
+    },
+    {
+      "id": "import-source-over-limit",
+      "format": "EPUB",
+      "input": "sizeBytes=2147483649",
+      "inputSha256": "b922265b9d7075ce28284cedc273fc6b5dc80fbc2537241d15ade1c13e984ead",
+      "requiredConsumers": [
+        "BACKEND"
+      ],
+      "expected": {
         "triggered": true,
         "action": "REJECT_PUBLICATION",
-        "terminalRuleId": "COMMON.PARSER_SNAPSHOT_MEMORY",
-        "errorCode": "PUBLICATION_TOO_LARGE",
+        "terminalRuleId": "IMPORT.SOURCE_MAX_BYTES",
+        "errorCode": "IMPORT_FILE_TOO_LARGE",
         "orderedRuleEvents": [
-          "COMMON.PARSER_SNAPSHOT_MEMORY:REJECT_PUBLICATION"
+          "IMPORT.SOURCE_MAX_BYTES:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "web-backend-audio-invalid-chapter",
+      "format": "AUDIOBOOK_DIR",
+      "input": "durationMs=1000;chapterStartMs=900;chapterEndMs=1100",
+      "inputSha256": "f066fa80966e88e57b4281fce6b33be805ff4ecf5dc2c41730e88938a458b9b7",
+      "requiredConsumers": [
+        "BACKEND",
+        "WEB"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "AUDIO.TRACK_AND_CHAPTER_VALIDITY",
+        "errorCode": "AUDIO_DURATION_INVALID",
+        "orderedRuleEvents": [
+          "AUDIO.TRACK_AND_CHAPTER_VALIDITY:REJECT_PUBLICATION"
+        ],
+        "semanticProjection": null,
+        "semanticProjectionSha256": null
+      }
+    },
+    {
+      "id": "web-pdf-invalid-geometry",
+      "format": "PDF",
+      "input": "pageCount=1;width=0;height=792",
+      "inputSha256": "9e79d694457288fd4ea507a987875b310f933e4d0b295f717a668831cc66b2c1",
+      "requiredConsumers": [
+        "WEB"
+      ],
+      "expected": {
+        "triggered": true,
+        "action": "REJECT_PUBLICATION",
+        "terminalRuleId": "PDF.PAGE_VALIDITY",
+        "errorCode": "PDF_PAGE_LIMIT",
+        "orderedRuleEvents": [
+          "PDF.PAGE_VALIDITY:REJECT_PUBLICATION"
         ],
         "semanticProjection": null,
         "semanticProjectionSha256": null

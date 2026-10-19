@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.auth import hash_password
 from app.core.config import Settings
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
@@ -204,7 +205,7 @@ def test_missing_comic_page_index_reads_archive_without_writing_while_writer_is_
             blocker.execute(
                 update(SystemSetting)
                 .where(SystemSetting.key == "systemName")
-                .values(value="writer owns SQLite slot")
+                .values(value=encode_setting_value("writer owns SQLite slot"))
             )
 
             event.listen(reader_engine, "before_cursor_execute", capture_writes)
@@ -256,3 +257,33 @@ def test_missing_comic_page_index_reads_archive_without_writing_while_writer_is_
         blocker.close()
         reader_engine.dispose()
         writer_engine.dispose()
+
+
+def test_large_comic_manifest_is_delivered_by_both_endpoints(tmp_path: Path) -> None:
+    settings = Settings(
+        storage_root=str(tmp_path / "storage"), secure_cookies=False,
+        download_queue_enabled=False, kindle_send_queue_enabled=False,
+    )
+    engine = create_sqlite_engine(settings.database_path)
+    bootstrap_database(engine, settings)
+    _updated_at, resource_id = _seed_comic(engine, settings)
+    archive_path = settings.resolved_storage_root / "library" / "comic.cbz"
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        for index in range(16_000):
+            archive.writestr(f"{index:05}-" + "章" * 90 + ".jpg", b"page")
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    try:
+        with TestClient(create_app(settings, session_factory=factory)) as client:
+            assert client.post("/api/auth/login", json={
+                "email": "comic-lock@example.com", "password": "starshipnas",
+            }).status_code == 200
+            for endpoint, collection in (
+                (f"/api/resources/{resource_id}/pages", "pages"),
+                (f"/api/reader/v5/resources/{resource_id}/comic/manifest", "readingOrder"),
+            ):
+                response = client.get(endpoint)
+                assert response.status_code == 200, response.text[:200]
+                assert len(response.content) > 2 * 1024 * 1024
+                assert len(response.json()["data"][collection]) == 16_000
+    finally:
+        engine.dispose()

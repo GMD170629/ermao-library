@@ -1638,6 +1638,21 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             is not None
         )
 
+    def asset_was_imported(self, *, resource_id: str, source_node_id: str) -> bool:
+        return (
+            self._session.scalar(
+                select(LibraryResourceAsset.id).where(
+                    LibraryResourceAsset.resource_id == resource_id,
+                    LibraryResourceAsset.source_node_id == source_node_id,
+                    (
+                        LibraryResourceAsset.processed_source_version.is_not(None)
+                        | (LibraryResourceAsset.import_state == AssetImportState.READY.value)
+                    ),
+                )
+            )
+            is not None
+        )
+
     def count_ready_assets(self, resource_id: str) -> int:
         return int(
             self._session.scalar(

@@ -13,6 +13,7 @@ import {
   ZipWriter
 } from '@zip.js/zip.js';
 import {
+  READER_SAFETY_BUDGETS,
   READER_SAFETY_IMPLEMENTATION_FAILURE_CODES,
   READER_SAFETY_RULE_IDS,
   ReaderSafetyImplementationError,
@@ -525,4 +526,23 @@ test('openEpub rejects an escaping reading-order path', async () => {
   } finally {
     restoreDom();
   }
+});
+
+
+test('EPUB archive metadata accepts former count, entry, expanded and compression ceilings', async () => {
+  const reader = new ZipReader(new BlobReader(await epubBlob([{ path: 'large.bin', bytes: 'x' }])));
+  try {
+    const [entry] = await reader.getEntries();
+    assert.ok(entry);
+    const count = READER_SAFETY_BUDGETS.archiveEntryMaxCount + 1;
+    const entries = Array.from({ length: count }, (_, index) => ({
+      ...entry,
+      filename: `entry-${index}.bin`,
+      compressedSize: 1,
+      uncompressedSize: READER_SAFETY_BUDGETS.archiveExpandedMaxBytes + 1
+    }));
+    const result = await preflightEpubArchiveEntries(entries);
+    assert.equal(result.entries.size, count);
+    assert.deepEqual([...result.unreadablePaths], []);
+  } finally { await reader.close(); }
 });

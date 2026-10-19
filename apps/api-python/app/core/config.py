@@ -21,12 +21,6 @@ class Settings(BaseSettings):
     import_queue_interval_seconds: int = Field(default=2, ge=1)
     library_scan_interval_ms: int | None = Field(default=None, ge=1)
     metadata_opf_queue_max_pending: int = Field(default=50_000, ge=1, le=1_000_000)
-    audiobook_max_file_bytes: int = Field(
-        default=8 * 1024 * 1024 * 1024, ge=1024 * 1024
-    )
-    audiobook_max_bundle_bytes: int = Field(
-        default=8 * 1024 * 1024 * 1024, ge=1024 * 1024
-    )
     file_streams_per_user_limit: int = Field(default=8, ge=0, le=128)
     opds_page_size: int = Field(default=50, ge=1, le=100)
     opds_max_page_size: int = Field(default=100, ge=1, le=100)

@@ -30,7 +30,6 @@ from app.contracts.reader_safety_policy_generated import (
 from app.core.exception_diagnostics import capture_exception
 from app.modules.publications.application.safety_policy import (
     publication_native_parser_implementation_failure,
-    publication_parser_limit,
 )
 from app.modules.publications.domain.model import (
     PublicationMarkupError,
@@ -47,7 +46,6 @@ from app.modules.publications.infrastructure.html_syntax import prepare_html_mar
 from app.modules.publications.infrastructure.xml_policy import (
     MarkupPreparer,
     XmlPolicyDecodeError,
-    XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
     prepare_xml,
 )
@@ -143,11 +141,6 @@ def _parse_safe_markup_root(
 
     if not content:
         raise PublicationMarkupError("publication markup is empty")
-    if len(content) > MAXIMUM_MARKUP_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-            "publication markup exceeds the size limit",
-        )
     try:
         projection = prepare_xml(
             content,
@@ -158,12 +151,6 @@ def _parse_safe_markup_root(
     except (ElementTree.ParseError, UnicodeDecodeError) as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XHTML is not well formed") from error
-    except XmlPolicyExpansionLimitError as error:
-        capture_exception(error, persist=False)
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-            "publication XML entity expansion exceeds the size limit",
-        ) from error
     except XmlPolicyDecodeError as error:
         capture_exception(error, persist=False)
         raise PublicationMarkupError("publication XML encoding is invalid") from error
@@ -259,11 +246,6 @@ def sanitize_markup_resource(
 
 def sanitize_css_resource(content: bytes) -> bytes:
     """Apply the same authored CSS policy used for inline styles."""
-    if len(content) > MAXIMUM_MARKUP_BYTES:
-        raise publication_parser_limit(
-            ReaderSafetyRuleId.REFLOWABLE_MARKUP_MAX_BYTES,
-            "publication stylesheet exceeds the size limit",
-        )
     try:
         source = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:

@@ -18,7 +18,6 @@ from app.modules.publications.domain.model import (
     PublicationMarkupError,
     PublicationParserError,
     PublicationResourceBlockedError,
-    PublicationResourceTooLargeError,
     PublicationRevision,
 )
 from app.modules.publications.infrastructure.mobi_adapter import (
@@ -53,14 +52,13 @@ def test_native_unsupported_uses_generated_format_capability_rule() -> None:
 
 
 @pytest.mark.parametrize("status", ["limit_exceeded", "out_of_memory"])
-def test_native_memory_limit_uses_generated_snapshot_budget_rule(status: str) -> None:
-    with pytest.raises(PublicationResourceTooLargeError) as failure:
+def test_native_capacity_failure_preserves_engine_reason(status: str) -> None:
+    with pytest.raises(PublicationParserError) as failure:
         _core_for_status(status).require_ok(1, "open")
 
-    assert failure.value.code == "PUBLICATION_TOO_LARGE"
-    assert (
-        failure.value.rule_id == ReaderSafetyRuleId.COMMON_PARSER_SNAPSHOT_MEMORY.value
-    )
+    assert failure.value.code == "PUBLICATION_PARSE_FAILED"
+    assert failure.value.rule_id is None
+    assert failure.value.reason == status
 
 
 @pytest.mark.parametrize(

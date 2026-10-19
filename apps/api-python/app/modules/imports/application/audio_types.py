@@ -10,10 +10,8 @@ from pathlib import Path
 from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_AUDIO_PROFILE,
     READER_SAFETY_FORMATS,
-    ReaderSafetyBudgetName,
     ReaderSafetyFormatLifecycle,
     ReaderSafetyMorphology,
-    reader_safety_budget,
 )
 from app.core.exception_diagnostics import capture_exception
 
@@ -27,12 +25,6 @@ LEGACY_AUDIO_EXTS = frozenset(
 )
 NEW_AUDIO_EXTS = SUPPORTED_AUDIO_EXTS - LEGACY_AUDIO_EXTS
 
-MAX_AUDIO_CHAPTERS = reader_safety_budget(
-    ReaderSafetyBudgetName.AUDIO_CHAPTER_MAX_COUNT
-)
-MAX_AUDIO_BUNDLE_TRACKS = reader_safety_budget(
-    ReaderSafetyBudgetName.AUDIO_TRACK_MAX_COUNT
-)
 _EXPLICIT_EPISODE_PATTERN = re.compile(
     r"第\s*0*(\d{1,6})\s*[集章回节]",
     re.IGNORECASE,

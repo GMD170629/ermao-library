@@ -45,7 +45,6 @@ from app.core.config import Settings, get_settings
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
 from app.models import LibraryReadableResource
-from app.modules.media.application.page_index import comic_manifest_policy_failure
 from app.modules.media.application.resource_preview import (
     ResourcePreviewAccessScope,
     ResourcePreviewNotFoundError,
@@ -424,14 +423,6 @@ def list_resource_pages(
     projection = media_page_index.load_read_only(db, resource_id)
     db.close()
     index = media_page_index.resolve_read_only(projection)
-    policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
-    if policy_failure is not None:
-        return fail(
-            "Comic manifest exceeds the safety policy.",
-            status_code=422,
-            code=policy_failure.error_code,
-            params={"ruleId": policy_failure.rule_id},
-        )
     pages = [
         ResourcePage(
             id=unit.id,
@@ -458,17 +449,6 @@ def list_resource_pages(
             revision=index.revision,
         )
     )
-    policy_failure = comic_manifest_policy_failure(
-        page_count=len(index.pages),
-        serialized_size_bytes=len(result.model_dump_json(by_alias=True).encode()),
-    )
-    if policy_failure is not None:
-        return fail(
-            "Comic manifest exceeds the safety policy.",
-            status_code=422,
-            code=policy_failure.error_code,
-            params={"ruleId": policy_failure.rule_id},
-        )
     return result
 
 

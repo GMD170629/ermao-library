@@ -59,7 +59,7 @@ type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
 const PDF_RANGE_CHUNK_BYTES = READER_SAFETY_BUDGETS.pdfRangeChunkBytes;
 const PDF_PAGE_POLICY_ERROR_CODE =
-  READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY].errorCode;
+  READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.PDF_PAGE_VALIDITY].errorCode;
 const PDF_DRM_POLICY_ERROR_CODE =
   READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_DRM_REJECTED].errorCode;
 
@@ -308,9 +308,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.passwordCallback = null;
       this.passwordReason = undefined;
       if (!Number.isSafeInteger(document.numPages)
-        || document.numPages <= 0
-        || document.numPages > READER_SAFETY_BUDGETS.pdfPageMaxCount) {
-        rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+        || document.numPages <= 0) {
+        rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_VALIDITY);
       }
       this.pageCount = document.numPages;
       if (context.initialPosition && (this.pageNumber < 1 || this.pageNumber > this.pageCount)) {
@@ -717,7 +716,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const baseViewport = page.getViewport({ scale: 1, rotation });
     if (!Number.isFinite(baseViewport.width) || !Number.isFinite(baseViewport.height)
       || baseViewport.width <= 0 || baseViewport.height <= 0) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_VALIDITY);
     }
     const visibleContainerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
     const containerWidth = effectiveReaderPageWidth(preferences.pdf.pageWidth, visibleContainerWidth);
@@ -733,7 +732,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const viewport = page.getViewport({ scale, rotation });
     if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)
       || viewport.width <= 0 || viewport.height <= 0) {
-      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_VALIDITY);
     }
     const cropBox = preferences.pdf.cropMargins === 'auto'
       ? await this.resolveCropBox(pageNumber, page, generation, epoch, signal)

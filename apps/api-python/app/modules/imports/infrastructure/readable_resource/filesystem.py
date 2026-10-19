@@ -32,7 +32,6 @@ from app.modules.imports.infrastructure.sidecar_opf import (
 )
 from app.modules.library.public import SourceNodePhysicalKind
 from app.modules.metadata.public import (
-    MAX_OPF_BYTES,
     OpfMetadataError,
     parse_opf_metadata,
 )
@@ -56,10 +55,10 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     observed.observed_mtime_ns if observed else None,
                 )
             )
-            if observed is None or observed.observed_size_bytes > MAX_OPF_BYTES:
+            if observed is None:
                 continue
             try:
-                content = read_optional_file(path, MAX_OPF_BYTES)
+                content = read_optional_file(path)
                 if content is None:
                     continue
                 metadata = parse_opf_metadata(content)

@@ -40,7 +40,6 @@ from app.modules.imports.public import (
     is_supported_import_filename,
     safe_upload_filename,
 )
-from app.services.audio_metadata import is_supported_audio_file
 from app.services.import_preferences import (
     extension_is_allowed,
     load_raw_import_preferences_projection,
@@ -122,11 +121,6 @@ class ImportAttachmentUploads:
             path, preferences.ignore_patterns
         ):
             raise UploadError("UPLOAD_EXCLUDED")
-        if is_supported_audio_file(spec.filename) and spec.size_bytes > min(
-            self.settings.audiobook_max_file_bytes,
-            self.settings.audiobook_max_bundle_bytes,
-        ):
-            raise UploadError("UPLOAD_TOO_LARGE")
         try:
             with self.directories(root, parent) as descriptor:
                 observed = os.fstat(descriptor)

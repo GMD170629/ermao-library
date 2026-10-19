@@ -4,17 +4,10 @@ import os
 from dataclasses import replace
 from zipfile import ZipFile
 
-from app.contracts.reader_safety_policy_generated import (
-    READER_SAFETY_POLICY_VERSION,
-    ReaderSafetyBudgetName,
-    ReaderSafetyRuleId,
-    reader_safety_budget,
-)
 from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
     ResourcePageIndexProjection,
     ResourcePageSource,
-    comic_manifest_policy_failure,
 )
 from app.modules.media.infrastructure.page_index import FilesystemComicArchivePageReader
 
@@ -109,6 +102,11 @@ def test_archive_pages_are_resolved_on_demand_and_invalidated_by_source_change(
     assert first.revision == repeated.revision
     assert [page.id for page in first.pages] == [page.id for page in repeated.pages]
 
+    # Existing indexes may omit pages filtered by older parser quotas.
+    incomplete = replace(projection, persisted_pages=first.pages[:1])
+    recovered = resolver.execute(incomplete)
+    assert recovered.pages == first.pages
+
     original_mtime = archive.stat().st_mtime_ns
     with ZipFile(archive, "w") as output:
         output.writestr("new.jpg", b"new page")
@@ -118,20 +116,10 @@ def test_archive_pages_are_resolved_on_demand_and_invalidated_by_source_change(
     assert changed.revision != first.revision
 
 
-def test_manifest_policy_uses_generated_page_and_size_budgets() -> None:
-    assert READER_SAFETY_POLICY_VERSION == 4
-    page_failure = comic_manifest_policy_failure(
-        page_count=reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_COUNT) + 1
+def test_image_directory_index_retains_pages_above_former_count_limit() -> None:
+    projection = ResourcePageIndexProjection(
+        resource_id="comic-1", resource_index=None, persisted_pages=(),
+        sources=tuple(_page_source(str(index), f"{index}.jpg", legacy_sort_order=index) for index in range(10_001)),
     )
-    size_failure = comic_manifest_policy_failure(
-        page_count=1,
-        serialized_size_bytes=reader_safety_budget(
-            ReaderSafetyBudgetName.COMIC_MANIFEST_MAX_BYTES
-        )
-        + 1,
-    )
-
-    assert page_failure is not None
-    assert page_failure.rule_id == ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT.value
-    assert size_failure is not None
-    assert size_failure.rule_id == ReaderSafetyRuleId.COMIC_MANIFEST_MAX_BYTES.value
+    resolved = ReadOnlyResourcePageIndex().execute(projection)
+    assert len(resolved.pages) == 10_001

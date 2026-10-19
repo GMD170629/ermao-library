@@ -3,35 +3,21 @@
 from __future__ import annotations
 
 
+class ImportFileTooLargeError(ValueError):
+    """A new source file exceeds the shared single-file import allowance."""
+
+    code = "IMPORT_FILE_TOO_LARGE"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 class AudioInspectionError(ValueError):
     """A source cannot satisfy the audiobook media-inspection contract."""
 
     def __init__(self, code: str, message: str, *, rule_id: str | None = None) -> None:
         super().__init__(message)
         self.code = code
-        self.rule_id = rule_id
-
-
-class AudioTrackLimitExceededError(RuntimeError):
-    """A logical audiobook contains more tracks than one import may own."""
-
-    code = "AUDIO_TRACK_LIMIT_EXCEEDED"
-
-    def __init__(
-        self,
-        *,
-        path: str,
-        limit: int,
-        observed_count: int,
-        code: str | None = None,
-        rule_id: str | None = None,
-    ) -> None:
-        super().__init__(f"有声书音轨超过 {limit} 条，请拆分目录后重新导入")
-        if code is not None:
-            self.code = code
-        self.path = path
-        self.limit = limit
-        self.observed_count = observed_count
         self.rule_id = rule_id
 
 

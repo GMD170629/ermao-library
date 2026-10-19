@@ -599,7 +599,7 @@ function evaluateFactCase(testCase: ExecutableCase): ActualDecision {
     case 'PDF_PAGE_GEOMETRY': {
       const width = Number(values.width);
       const height = Number(values.height);
-      detected = integerFact(values, 'pageCount') > readerSafetyBudget('pdfPageMaxCount');
+      detected = integerFact(values, 'pageCount') <= 0;
       if (READER_SAFETY_PROFILES.pdf.requireFinitePageGeometry) {
         detected ||= !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0;
       }

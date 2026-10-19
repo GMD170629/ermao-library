@@ -10,11 +10,9 @@ from app.contracts.reader_safety_policy_generated import ReaderSafetyRuleId
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.model import (
     PublicationIntegrityError,
-    PublicationParserLimitError,
     PublicationResourceBlockedError,
     PublicationStructureError,
 )
-from app.modules.publications.infrastructure import epub_adapter as epub_adapter_module
 from app.modules.publications.infrastructure.epub_adapter import (
     EpubPublicationAdapter,
     _read_archive_resource,
@@ -361,7 +359,7 @@ def test_unknown_spine_mime_still_runs_resource_sanitization(tmp_path: Path) -> 
     assert path.read_bytes() == original
 
 
-def test_optional_ncx_capacity_failure_does_not_trigger_navigation_fallback(
+def test_large_optional_ncx_is_read_and_parsed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,9 +370,8 @@ def test_optional_ncx_capacity_failure_does_not_trigger_navigation_fallback(
         'media-type="application/xhtml+xml"/><item id="ncx" href="toc.ncx" '
         'media-type="application/x-dtbncx+xml"/></manifest>'
         '<spine toc="ncx"><itemref idref="one"/></spine></package>',
-        navigation={"toc.ncx": "<ncx><navMap/>" + " " * 800 + "</ncx>"},
+        navigation={"toc.ncx": "<ncx><navMap/>" + " " * (16 * 1024 * 1024 + 1) + "</ncx>"},
     )
-    monkeypatch.setattr(epub_adapter_module, "MAX_XML_CONTROL_DOCUMENT_BYTES", 512)
     reads: list[str] = []
     original_read = zipfile.ZipFile.read
 
@@ -385,13 +382,9 @@ def test_optional_ncx_capacity_failure_does_not_trigger_navigation_fallback(
         return original_read(archive, name, pwd)
 
     monkeypatch.setattr(zipfile.ZipFile, "read", read_member)
-    with pytest.raises(PublicationParserLimitError) as failure:
-        EpubPublicationAdapter(tmp_path).open(_source(path))
-    assert (
-        failure.value.rule_id
-        == ReaderSafetyRuleId.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES.value
-    )
-    assert reads == ["META-INF/container.xml", "OPS/package.opf"]
+    publication = EpubPublicationAdapter(tmp_path).open(_source(path))
+    assert publication.reading_order
+    assert "OPS/toc.ncx" in reads
 
 
 def test_required_regular_member_colliding_with_symlink_is_not_read(

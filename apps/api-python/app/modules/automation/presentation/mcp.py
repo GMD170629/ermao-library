@@ -12,6 +12,10 @@ from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
 from app.contracts.automation_upload import UploadError
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyBudgetName,
+    reader_safety_budget,
+)
 from app.core.exception_diagnostics import capture_exception
 from app.modules.automation.application.runtime import (
     AutomationRequest,
@@ -20,7 +24,6 @@ from app.modules.automation.application.runtime import (
     WriteInvocation,
 )
 from app.modules.automation.application.uploads import (
-    BOOK_BYTES,
     CHUNK_BYTES,
     COVER_BYTES,
     LIFETIME_MS,
@@ -100,10 +103,11 @@ def build_catalog_server(
                 "library_ids": sorted(access.permissions.library_ids),
                 "limits": {
                     "upload_chunk_bytes": CHUNK_BYTES,
-                    "upload_book_bytes": BOOK_BYTES,
+                    "upload_book_bytes": reader_safety_budget(
+                        ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES
+                    ),
                     "upload_cover_bytes": COVER_BYTES,
                     "upload_count": UPLOAD_COUNT,
-                    "upload_staging_bytes": BOOK_BYTES,
                     "upload_lifetime_ms": LIFETIME_MS,
                     "query": QUERY_MAX_LIMIT,
                     "metadata_batch": METADATA_BATCH_LIMIT,

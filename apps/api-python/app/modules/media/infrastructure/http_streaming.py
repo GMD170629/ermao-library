@@ -39,7 +39,6 @@ from app.infrastructure.comic_archives import (
     ComicArchiveEncryptedError,
     ComicArchiveError,
     ComicArchiveMultiVolumeError,
-    comic_page_exceeds_limit,
     open_comic_archive,
 )
 from app.schemas.responses import fail
@@ -368,18 +367,6 @@ def _reader_policy_error(
     )
 
 
-def _validate_comic_page_delivery(
-    *,
-    media_type: str | None,
-    size: int,
-) -> Response | None:
-    if comic_page_exceeds_limit(size):
-        return _reader_policy_error(
-            ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
-            "Comic page exceeds the size limit.",
-            status_code=413,
-        )
-    return None
 
 
 def _comic_page_cache_path(settings: Settings, cache_key: str) -> Path:
@@ -1063,13 +1050,6 @@ def _send_zip_entry(
         or "application/octet-stream"
     )
     size = int(info.file_size)
-    policy_error = _validate_comic_page_delivery(
-        media_type=resolved_media_type,
-        size=size,
-    )
-    if policy_error is not None:
-        archive.close()
-        return policy_error
     headers = _response_headers(
         size,
         archive_path.stat().st_mtime,
@@ -1188,12 +1168,6 @@ def _send_original_comic_page_file(
         or reader_safety_comic_page_mime_type(resolved_path.suffix)
         or "application/octet-stream"
     )
-    policy_error = _validate_comic_page_delivery(
-        media_type=resolved_media_type,
-        size=resolved_path.stat().st_size,
-    )
-    if policy_error is not None:
-        return policy_error
     return _with_comic_page_variant_header(
         _send_file(
             resolved_path,
@@ -1248,12 +1222,6 @@ def _send_comic_page_file(
         or reader_safety_comic_page_mime_type(path.suffix)
         or "application/octet-stream"
     )
-    policy_error = _validate_comic_page_delivery(
-        media_type=resolved_media_type,
-        size=path.stat().st_size,
-    )
-    if policy_error is not None:
-        return policy_error
     if variant != COMIC_PAGE_DATA_SAVER_VARIANT or not _is_comic_page_image(
         resolved_media_type
     ):
@@ -1337,12 +1305,6 @@ def _send_comic_page_zip_entry(
                 or reader_safety_comic_page_mime_type(Path(entry_name).suffix)
                 or "application/octet-stream"
             )
-            policy_error = _validate_comic_page_delivery(
-                media_type=resolved_media_type,
-                size=info.file_size,
-            )
-            if policy_error is not None:
-                return policy_error
             if not _is_comic_page_image(resolved_media_type):
                 return _send_original_comic_page_zip_entry(
                     archive_path,
@@ -1538,12 +1500,6 @@ def send_pse_page_zip_entry(
     try:
         with open_comic_archive(archive_path) as archive:
             info = archive.getinfo(entry_name)
-            policy_error = _validate_comic_page_delivery(
-                media_type=resolved_media_type,
-                size=info.file_size,
-            )
-            if policy_error is not None:
-                return policy_error
             source = archive.read(entry_name)
         stat = archive_path.stat()
     except KeyError as _caught_error:
