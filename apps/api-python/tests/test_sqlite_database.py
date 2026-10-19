@@ -379,7 +379,8 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         with Session(engine) as db:
             assert db.scalar(select(SystemSetting).where(False)) is None
             settings_by_key = {
-                row.key: json.loads(row.value) for row in db.scalars(select(SystemSetting)).all()
+                row.key: json.loads(row.value)
+                for row in db.scalars(select(SystemSetting)).all()
             }
             server_identity = settings_by_key.pop(SERVER_IDENTITY_SETTING_KEY)
             assert re.fullmatch(r"server_[0-9a-f]{32}", server_identity)
@@ -760,7 +761,9 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
                 )
             )
             assert len(server_identities) == 1
-            assert re.fullmatch(r"server_[0-9a-f]{32}", json.loads(server_identities[0]))
+            assert re.fullmatch(
+                r"server_[0-9a-f]{32}", json.loads(server_identities[0])
+            )
             assert json.loads(db.get(SystemSetting, "systemName").value) == "我的书库"
             douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
             assert douban is not None
@@ -1086,7 +1089,9 @@ def test_invalid_topology_backup_is_rejected_before_live_restore(tmp_path) -> No
             ) as failure:
                 restore_backup(db, settings, backup.id)
             assert failure.value.problem.params["field"] == "LibraryBook.sourceNodeId"
-            assert db.get(SystemSetting, "backup.sentinel").value == json.dumps("before")
+            assert db.get(SystemSetting, "backup.sentinel").value == json.dumps(
+                "before"
+            )
     finally:
         engine.dispose()
 

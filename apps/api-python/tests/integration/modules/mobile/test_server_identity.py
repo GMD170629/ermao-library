@@ -60,12 +60,19 @@ def test_existing_database_bootstrap_adds_identity_without_replacing_settings(
     try:
         apply_schema(engine, settings)
         with Session(engine) as db, db.begin():
-            db.add(SystemSetting(key="systemName", value=encode_setting_value("Existing library")))
+            db.add(
+                SystemSetting(
+                    key="systemName", value=encode_setting_value("Existing library")
+                )
+            )
 
         bootstrap_database(engine, settings)
 
         with Session(engine) as db:
-            assert decode_setting_value(db.get(SystemSetting, "systemName").value) == "Existing library"
+            assert (
+                decode_setting_value(db.get(SystemSetting, "systemName").value)
+                == "Existing library"
+            )
             assert _read_server_identity(db) is not None
     finally:
         engine.dispose()
@@ -83,7 +90,9 @@ def test_backup_restore_preserves_server_identity(tmp_path) -> None:
         with Session(engine) as db, db.begin():
             identity_setting = db.get(SystemSetting, SERVER_IDENTITY_SETTING_KEY)
             assert identity_setting is not None
-            identity_setting.value = encode_setting_value("server_replaced_after_backup")
+            identity_setting.value = encode_setting_value(
+                "server_replaced_after_backup"
+            )
 
         with Session(engine) as db:
             restore_backup(db, settings, backup.id)

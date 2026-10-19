@@ -19,7 +19,14 @@ def load_module(path: Path, name: str) -> ModuleType:
         raise RuntimeError(f"cannot load {path}")
     module = importlib.util.module_from_spec(specification)
     sys.modules[name] = module
-    specification.loader.exec_module(module)
+    api_root = ROOT / "apps/api-python"
+    original_sys_path = sys.path.copy()
+    try:
+        if path.is_relative_to(api_root):
+            sys.path.insert(0, str(api_root))
+        specification.loader.exec_module(module)
+    finally:
+        sys.path[:] = original_sys_path
     return module
 
 
