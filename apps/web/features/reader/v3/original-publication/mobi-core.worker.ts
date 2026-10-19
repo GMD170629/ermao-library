@@ -92,6 +92,7 @@ function copyString(functionName: string, prefix: readonly number[]): string | n
   try {
     setValue(requiredPointer, 0, 'i32');
     const first = numberValue(ccall(functionName, 'number', [...prefix.map(() => 'number'), 'number', 'number', 'number'], [...prefix, 0, 0, requiredPointer]));
+    if (first === 11) return null; // ABI NOT_FOUND denotes an absent optional string.
     if (first !== 0 && first !== 13) assertStatus(first);
     const required = getValue(requiredPointer, 'i32') >>> 0;
     if (required <= 1) return null;

@@ -569,10 +569,11 @@ test('real Chromium reads and reopens MOBI family originals through the producti
   const [bundle, workerBundle] = await Promise.all([buildReaderBundle(), buildReaderBundle('mobi-worker')]);
   const formats = [
     ['mobi', '01-basic-mobi6.mobi'], ['azw', '13-basic.azw'],
-    ['azw3', '03-css.azw3'], ['prc', '12-basic.prc']
+    ['azw3', '03-css.azw3'], ['prc', '12-basic.prc'],
+    ['azw3', '07-complex-toc.azw3']
   ];
-  const originals = new Map<string, Buffer>(await Promise.all(formats.map(async ([format, name]) => [
-    `/original.${format}`, await readFile(path.resolve(webRoot, '../../test-data/library/mobi', name))
+  const originals = new Map<string, Buffer>(await Promise.all(formats.map(async ([, name]) => [
+    `/original/${name}`, await readFile(path.resolve(webRoot, '../../test-data/library/mobi', name))
   ] as const)));
   const browser = await chromium.launch({ headless: true });
   try {
@@ -594,22 +595,24 @@ test('real Chromium reads and reopens MOBI family originals through the producti
     await page.waitForFunction('typeof globalThis.__openReadiumPublication === "function"');
     const report: unknown = await page.evaluate(`(async () => {
       const results = [];
-      for (const format of ['mobi', 'azw', 'azw3', 'prc', 'azw3']) {
-        const blob = await (await fetch('/original.' + format)).blob();
+      for (const [format, filename] of ${JSON.stringify([...formats, formats[4]])}) {
+        const blob = await (await fetch('/original/' + filename)).blob();
         const publication = await globalThis.__openReadiumPublication(blob, format, 'Original', 'ltr', 'horizontal');
         try {
           const link = publication.publication.readingOrder.items[0];
           if (!link) throw new Error('TEST_READING_ORDER_MISSING');
           const bytes = await publication.publication.get(link).read();
           const document = new DOMParser().parseFromString(new TextDecoder().decode(bytes), 'text/html');
-          results.push({ format, text: document.body.textContent.trim() });
+          results.push({ format, filename, text: document.body.textContent.trim(), tocHrefs: publication.publication.toc?.items.map((item) => item.href) ?? [] });
         } finally { publication.close(); }
       }
       return results;
     })()`);
     assert.ok(Array.isArray(report));
-    assert.deepEqual(report.map((item) => Reflect.get(item, 'format')), ['mobi', 'azw', 'azw3', 'prc', 'azw3']);
+    assert.deepEqual(report.map((item) => Reflect.get(item, 'format')), ['mobi', 'azw', 'azw3', 'prc', 'azw3', 'azw3']);
     for (const item of report) assert.ok(String(Reflect.get(item, 'text')).length > 0);
-    assert.deepEqual(report[2], report[4]);
+    assert.match(String(Reflect.get(report[4], 'text')), /TOC_LEVEL_3_A/);
+    assert.ok((Reflect.get(report[4], 'tocHrefs') as string[]).includes('mobi/resource-0.xhtml'));
+    assert.deepEqual(report[4], report[5]);
   } finally { await browser.close(); }
 });
