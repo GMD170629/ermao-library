@@ -52,7 +52,7 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
-async function decodeText(blob: Blob): Promise<string> {
+async function decodeText(blob: Blob, format: TextPublicationFormat): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return decodePublicationText(bytes, format);
 }
@@ -252,7 +252,7 @@ async function parseFb2(value: string, fallbackTitle: string): Promise<TextPubli
 }
 
 async function openText(blob: Blob, format: TextPublicationFormat, fallbackTitle: string): Promise<TextPublicationResult> {
-  const value = await decodeText(blob);
+  const value = await decodeText(blob, format);
   return format === 'txt' ? parseTxt(value, fallbackTitle) : parseFb2(value, fallbackTitle);
 }
 
