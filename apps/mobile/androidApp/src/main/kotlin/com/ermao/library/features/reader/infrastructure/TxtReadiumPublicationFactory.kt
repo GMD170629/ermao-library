@@ -31,7 +31,7 @@ internal class TxtReadiumPublicationFactory {
             throw ReaderOpenFailure(com.ermao.library.shared.modules.reader.ReaderError(it))
         }
         val bytes = file.readBytes()
-        val decoded = StrictTxtDecoder.decode(bytes)
+        val decoded = TxtDecoder.decode(bytes)
         val core = ChapterCore.parseTxt(decoded)
         if (core.text.isBlank()) {
             throw com.ermao.library.shared.modules.reader.TxtPublicationEmptyException()
@@ -142,7 +142,7 @@ h1 { font-size: 1.35em; margin: 1.5em 0 1em; }
 p { margin: 0 0 1em; white-space: normal; }
 """
 
-internal object StrictTxtDecoder {
+internal object TxtDecoder {
     fun decode(bytes: ByteArray): String {
         val candidates = when {
             bytes.startsWith(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())) ->
@@ -153,21 +153,52 @@ internal object StrictTxtDecoder {
                 listOf(Charsets.UTF_16BE to 2)
             else -> listOf(Charsets.UTF_8 to 0, Charset.forName("GB18030") to 0)
         }
-        var lastFailure: CharacterCodingException? = null
-        for ((charset, offset) in candidates) {
+        if (candidates.size > 1) {
             try {
-                return charset.newDecoder()
+                return Charsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes, offset, bytes.size - offset))
+                    .decode(ByteBuffer.wrap(bytes))
                     .toString()
-            } catch (failure: CharacterCodingException) {
-                lastFailure = failure
+            } catch (_: CharacterCodingException) {
+                // UTF-8 selection failed; GB18030 below preserves malformed input as U+FFFD.
             }
         }
-        throw IllegalArgumentException("TXT publication encoding is unsupported", lastFailure)
+        val (charset, offset) = candidates.last()
+        if (charset == Charsets.UTF_16LE || charset == Charsets.UTF_16BE) {
+            return decodeUtf16(bytes, offset, charset == Charsets.UTF_16LE)
+        }
+        return charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+            .decode(ByteBuffer.wrap(bytes, offset, bytes.size - offset))
+            .toString()
     }
 
+    private fun decodeUtf16(bytes: ByteArray, offset: Int, littleEndian: Boolean): String = buildString {
+        fun unit(index: Int): Char {
+            val first = bytes[index].toInt() and 0xFF
+            val second = bytes[index + 1].toInt() and 0xFF
+            return (if (littleEndian) first or (second shl 8) else (first shl 8) or second).toChar()
+        }
+        var index = offset
+        while (index + 1 < bytes.size) {
+            val current = unit(index)
+            if (current.isHighSurrogate()) {
+                if (index + 3 < bytes.size && unit(index + 2).isLowSurrogate()) {
+                    append(current)
+                    append(unit(index + 2))
+                    index += 4
+                    continue
+                }
+                append('\uFFFD')
+            } else {
+                append(if (current.isLowSurrogate()) '\uFFFD' else current)
+            }
+            index += 2
+        }
+        if (index < bytes.size) append('\uFFFD')
+    }
 }
 
 private fun ByteArray.startsWith(prefix: ByteArray): Boolean =

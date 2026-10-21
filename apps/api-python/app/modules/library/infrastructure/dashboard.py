@@ -77,7 +77,7 @@ def dashboard_summary(
             db.scalar(
                 select(func.count())
                 .select_from(Library)
-                .where(Library.enabled.is_(True))
+                .where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
             )
             or 0
         )

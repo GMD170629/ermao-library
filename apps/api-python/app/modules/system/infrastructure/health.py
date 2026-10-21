@@ -105,7 +105,7 @@ def run_system_health_checks(db: Session, settings: Settings) -> dict[str, objec
     library_root_paths = [
         (str(library_id), Path(path))
         for library_id, path in db.execute(
-            select(Library.id, Library.root_path).where(Library.enabled.is_(True))
+            select(Library.id, Library.root_path).where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
         ).all()
         if path
     ]

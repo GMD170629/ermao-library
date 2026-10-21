@@ -185,7 +185,7 @@
 		A13900000000000000000139 /* DownloadManagementAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13900000000000000000139 /* DownloadManagementAdapterTests.swift */; };
 		C21000000000000000000210 /* reader-contract.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21000000000000000000210; };
 		C21100000000000000000211 /* reader-contract-bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = D21100000000000000000211; };
-		C22100000000000000000221 /* txt-decoding-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = D22100000000000000000221; };
+		C22100000000000000000221 /* txt-decoding-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = D22100000000000000000221; };
 		C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21200000000000000000212; };
 	C22200000000000000000222 /* reader-normalization-v4.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = D22200000000000000000222; };
 	C22300000000000000000223 /* reader-normalization-v4.json in Resources */ = {isa = PBXBuildFile; fileRef = D22300000000000000000223; };
@@ -390,7 +390,7 @@
 		E13900000000000000000139 /* DownloadManagementAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManagementAdapterTests.swift; sourceTree = "<group>"; };
 		D21000000000000000000210 /* reader-contract.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract.fb2"; path = "../../../test-data/library/fb2/reader-contract.fb2"; sourceTree = SOURCE_ROOT; };
 		D21100000000000000000211 /* reader-contract-bodies.json */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract-bodies.json"; path = "../../../test-data/library/fb2/reader-contract-bodies.json"; sourceTree = SOURCE_ROOT; };
-		D22100000000000000000221 /* txt-decoding-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "txt-decoding-v1.json"; path = "../../../packages/reader-contracts/fixtures/txt-decoding-v1.json"; sourceTree = SOURCE_ROOT; };
+		D22100000000000000000221 /* txt-decoding-v2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "txt-decoding-v2.json"; path = "../../../packages/reader-contracts/fixtures/txt-decoding-v2.json"; sourceTree = SOURCE_ROOT; };
 		D21200000000000000000212 /* source_test_book_fb2.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "source_test_book_fb2.fb2"; path = "../../../test-data/library/fb2/source_test_book_fb2.fb2"; sourceTree = SOURCE_ROOT; };
 	D22200000000000000000222 /* reader-normalization-v4.xhtml */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-normalization-v4.xhtml"; path = "../../../packages/reader-contracts/fixtures/normalization-v4/chapter.xhtml"; sourceTree = SOURCE_ROOT; };
 	D22300000000000000000223 /* reader-normalization-v4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-normalization-v4.json"; path = "../../../packages/reader-contracts/fixtures/normalization-v4/projection.json"; sourceTree = SOURCE_ROOT; };
@@ -945,7 +945,7 @@
 			files = (
 				C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */,
 				C21100000000000000000211 /* reader-contract-bodies.json in Resources */,
-				C22100000000000000000221 /* txt-decoding-v1.json in Resources */,
+				C22100000000000000000221 /* txt-decoding-v2.json in Resources */,
 				C21000000000000000000210 /* reader-contract.fb2 in Resources */,
 				C22200000000000000000222 /* reader-normalization-v4.xhtml in Resources */,
 				C22300000000000000000223 /* reader-normalization-v4.json in Resources */,
@@ -1259,6 +1259,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.5.7;
+				OTHER_LDFLAGS = ("$(inherited)", "-liconv");
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -1292,6 +1293,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.5.7;
+				OTHER_LDFLAGS = ("$(inherited)", "-liconv");
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;

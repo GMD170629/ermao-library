@@ -25,6 +25,7 @@ from app.contracts.reader_safety_policy_generated import (
     READER_SAFETY_COMIC_PROFILE,
 )
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import library_is_active
 from app.core.natural_sort import natural_sort_key
 from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPriority
 from app.models.common import cuid
@@ -110,7 +111,7 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
 
     def get_library(self, library_id: str) -> LibrarySourceTreeConfig:
         library = self._session.get(Library, library_id)
-        if library is None:
+        if library is None or not library_is_active(self._session, library_id):
             raise LookupError(library_id)
         mode = parse_target_organization_mode(library.organization_mode)
         if not isinstance(mode, TargetLibraryOrganizationMode):
@@ -152,14 +153,14 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
         mode: TargetLibraryOrganizationMode,
     ) -> None:
         library = self._session.get(Library, library_id)
-        if library is None:
+        if library is None or not library_is_active(self._session, library_id):
             raise LookupError(library_id)
         library.organization_mode = mode.value
         self._session.flush()
 
     def update_root_path(self, library_id: str, root_path: Path) -> None:
         library = self._session.get(Library, library_id)
-        if library is None:
+        if library is None or not library_is_active(self._session, library_id):
             raise LookupError(library_id)
         library.root_path = str(root_path)
         self._session.flush()

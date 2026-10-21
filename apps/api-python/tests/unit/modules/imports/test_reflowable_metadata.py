@@ -4,6 +4,8 @@ import base64
 import struct
 from pathlib import Path
 
+import pytest
+
 from app.modules.imports.infrastructure.reflowable_metadata import (
     inspect_reflowable_book,
 )
@@ -24,6 +26,53 @@ def test_txt_inspection_reads_metadata_without_generating_navigation(
     assert metadata.language == "zh-CN"
     assert "navigationCount" not in metadata.raw_metadata
     assert "navigationFingerprint" not in metadata.raw_metadata
+
+
+@pytest.mark.parametrize("content", [
+    "正文".encode("gbk"),
+    "正文".encode("gbk") + b"\xff" + "结束".encode("gbk"),
+    b"\x00" + "正文".encode("gbk") + b"\x00" + "结束".encode("gbk"),
+    ("�" * 20 + "正文").encode("gb18030"),
+    b"\xef\xbb\xbfA\xffB",
+    b"",
+])
+def test_txt_inspection_tolerates_bytes_without_error_logs_or_source_changes(
+    tmp_path, monkeypatch, caplog, content,
+):
+    from app.modules.system.infrastructure import log_files
+
+    monkeypatch.setattr(log_files, "_root", tmp_path / "logs")
+    source = tmp_path / "book.txt"
+    source.write_bytes(content)
+    metadata = inspect_reflowable_book(source, "TXT")
+    assert metadata.raw_metadata["inputEncoding"] in {"utf-8", "utf-8-sig", "gb18030"}
+    assert source.read_bytes() == content
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+    assert not list((tmp_path / "logs" / "api").glob("*.jsonl"))
+
+
+def test_txt_sample_does_not_treat_a_partial_character_as_file_eof():
+    from app.modules.publications.public import decode_txt_bytes
+
+    assert decode_txt_bytes(b"A\x81", final=False).text == "A"
+    assert decode_txt_bytes(b"A\x81", final=True).text == "A�"
+    assert decode_txt_bytes(b"\xef\xbb\xbfA\xe4", final=False).text == "A"
+    assert decode_txt_bytes(b"\xef\xbb\xbfA\xe4", final=True).text == "A�"
+
+
+def test_txt_error_beyond_bounded_sample_does_not_prevent_import(tmp_path):
+    from app.modules.imports.infrastructure.reflowable_metadata import (
+        TXT_ENCODING_SAMPLE_BYTES,
+    )
+    from app.modules.publications.public import decode_txt_bytes
+
+    content = b"A" * (TXT_ENCODING_SAMPLE_BYTES + 3) + b"\xffB"
+    source = tmp_path / "late-error.txt"
+    source.write_bytes(content)
+    metadata = inspect_reflowable_book(source, "TXT")
+    assert metadata.raw_metadata["inputEncoding"] == "utf-8"
+    assert decode_txt_bytes(content).text.endswith("�B")
+    assert source.read_bytes() == content
 
 
 def test_txt_inspection_uses_matching_sidecar_cover(tmp_path: Path) -> None:

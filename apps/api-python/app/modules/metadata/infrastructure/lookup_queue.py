@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
+from app.core.library_lifecycle import active_book
 from app.models import (
     LibraryBook,
     LibraryBookMetadata,
@@ -34,7 +35,6 @@ _LOOKUP_TASK_CAMEL_TO_SNAKE: dict[str, str] = {
     "attempts": "attempts",
     "nextAttemptAt": "next_attempt_at",
     "resultSource": "result_source",
-    "candidateRawJson": "candidate_raw_json",
     "appliedFields": "applied_fields",
     "errorSummary": "error_summary",
     "startedAt": "started_at",
@@ -91,7 +91,6 @@ def lookup_task_to_dict(task: MetadataLookupTask) -> dict[str, Any]:
         "leaseOwnerId": task.lease_owner_id,
         "leaseExpiresAt": task.lease_expires_at,
         "resultSource": task.result_source,
-        "candidateRawJson": task.candidate_raw_json,
         "appliedFields": task.applied_fields,
         "errorSummary": task.error_summary,
         "startedAt": task.started_at,
@@ -107,7 +106,7 @@ def automatic_rate_limit_applies(db: Session, task: dict[str, Any]) -> bool:
     job_id = str(task.get("organizeJobId") or "").strip()
     if not job_id:
         return True
-    trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id))
+    trigger = db.scalar(select(OrganizeJob.trigger).where(OrganizeJob.id == job_id, active_book(OrganizeJob.book_id)))
     return str(trigger or "SCHEDULE").upper() != "MANUAL"
 
 
@@ -160,10 +159,20 @@ def lookup_task_is_active(db: Session, task_id: str) -> bool:
             select(MetadataLookupTask.id).where(
                 MetadataLookupTask.id == task_id,
                 MetadataLookupTask.status.in_(("PENDING", "RUNNING")),
+                active_book(MetadataLookupTask.book_id),
             )
         )
         is not None
     )
+
+
+def lock_active_lookup_task(db: Session, task_id: str) -> bool:
+    result = db.execute(update(MetadataLookupTask).where(
+        MetadataLookupTask.id == task_id,
+        MetadataLookupTask.status.in_(("PENDING", "RUNNING")),
+        active_book(MetadataLookupTask.book_id),
+    ).values(updated_at=MetadataLookupTask.updated_at))
+    return bool(result.rowcount)
 
 
 def write_metadata_to_files_enabled(db: Session) -> bool:
@@ -204,6 +213,7 @@ def update_lookup_task(
     clauses = [
         MetadataLookupTask.id == task_id,
         MetadataLookupTask.status != "CANCELLED",
+        active_book(MetadataLookupTask.book_id),
     ]
     if owner_id is not None:
         clauses.append(MetadataLookupTask.lease_owner_id == owner_id)
@@ -225,6 +235,7 @@ def recover_stale_lookup_tasks(db: Session, *, now: datetime) -> int:
             .where(
                 MetadataLookupTask.status == "RUNNING",
                 MetadataLookupTask.lease_expires_at <= now,
+                active_book(MetadataLookupTask.book_id),
             )
             .values(
                 status="PENDING",
@@ -252,6 +263,7 @@ def claim_next_lookup_task(
     candidate_id = (
         select(MetadataLookupTask.id)
         .where(
+            active_book(MetadataLookupTask.book_id),
             ~exists(
                 select(LibraryBookMetadata.book_id).where(
                     LibraryBookMetadata.book_id == MetadataLookupTask.book_id,
@@ -306,7 +318,7 @@ def mark_organize_job_running(
     # startedAt exists on the v14 OrganizeJob model; COALESCE preserves an
     # existing stamp.
     values["started_at"] = func.coalesce(OrganizeJob.started_at, started_at)
-    db.execute(update(OrganizeJob).where(OrganizeJob.id == job_id).values(**values))
+    db.execute(update(OrganizeJob).where(OrganizeJob.id == job_id, active_book(OrganizeJob.book_id)).values(**values))
 
 
 def prepare_provider_execution_start(
@@ -337,7 +349,6 @@ def prepare_provider_execution_finish(
     execution_id: str | None,
     *,
     status: str,
-    raw_result_json: str | None = None,
     error: str | None = None,
     now: datetime,
 ) -> PreparedProviderExecutionWrite:
@@ -345,10 +356,18 @@ def prepare_provider_execution_finish(
         return PreparedProviderExecutionWrite(statement=None, execution_id=None)
     return PreparedProviderExecutionWrite(
         update(MetadataProviderExecution)
-        .where(MetadataProviderExecution.id == execution_id)
+        .where(
+            MetadataProviderExecution.id == execution_id,
+            exists(select(MetadataLookupTask.id).where(
+                MetadataLookupTask.id == MetadataProviderExecution.lookup_task_id,
+                active_book(MetadataLookupTask.book_id),
+            )) | exists(select(OrganizeJob.id).where(
+                OrganizeJob.id == MetadataProviderExecution.job_id,
+                active_book(OrganizeJob.book_id),
+            )),
+        )
         .values(
             status=status,
-            raw_result_json=raw_result_json,
             error_summary=error,
             finished_at=now,
             updated_at=now,
@@ -375,7 +394,7 @@ def get_book(db: Session, book_id: str | None) -> dict[str, Any] | None:
             LibraryBookMetadata,
             LibraryBookMetadata.book_id == LibraryBook.id,
         )
-        .where(LibraryBook.id == book_id)
+        .where(LibraryBook.id == book_id, active_book(LibraryBook.id))
     ).one_or_none()
     if row is None:
         return None
@@ -485,6 +504,7 @@ def clear_remote_cover_if_current(
         .where(
             LibraryBookMetadata.book_id == book_id,
             LibraryBookMetadata.cover_path == cover_path,
+            active_book(LibraryBookMetadata.book_id),
         )
         .values(
             cover_path=None,
@@ -550,7 +570,7 @@ def mark_organize_job_retry_wait(
 ) -> None:
     db.execute(
         update(OrganizeJob)
-        .where(OrganizeJob.id == job_id)
+        .where(OrganizeJob.id == job_id, active_book(OrganizeJob.book_id))
         .values(
             status="LOOKUP_PENDING",
             summary=summary,
@@ -569,7 +589,7 @@ def book_metadata_guard(
             LibraryBookMetadata.updated_at,
             LibraryBookMetadata.protected_fields,
             LibraryBookMetadata.metadata_pending,
-        ).where(LibraryBookMetadata.book_id == book_id)
+        ).where(LibraryBookMetadata.book_id == book_id, active_book(LibraryBookMetadata.book_id))
     ).one_or_none()
     if row is None:
         return None
@@ -579,6 +599,14 @@ def book_metadata_guard(
         )
     )
     return row[0], row[1].isoformat(), row[2], str(priority or ""), row[3]
+
+
+def lock_book_metadata_write(db: Session, book_id: str) -> bool:
+    result = db.execute(update(LibraryBookMetadata).where(
+        LibraryBookMetadata.book_id == book_id,
+        active_book(LibraryBookMetadata.book_id),
+    ).values(import_revision=LibraryBookMetadata.import_revision, updated_at=LibraryBookMetadata.updated_at))
+    return bool(result.rowcount)
 
 
 def local_identification_failed(db: Session, book_id: str) -> bool:

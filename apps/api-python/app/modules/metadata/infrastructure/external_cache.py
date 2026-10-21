@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -17,6 +20,28 @@ from app.models.library import ExternalMetadataCache
 class PreparedExternalMetadataCacheWrite:
     statement: Executable
 
+
+class SqlAlchemyExpiredMetadataCacheStore:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def delete_expired_batch(self, *, now: datetime, limit: int) -> int:
+        expired = ExternalMetadataCache.expires_at <= now
+        ids = (
+            select(ExternalMetadataCache.id)
+            .where(expired)
+            .order_by(ExternalMetadataCache.expires_at, ExternalMetadataCache.id)
+            .limit(limit)
+        )
+        result = cast(
+            CursorResult,
+            self._db.execute(
+                delete(ExternalMetadataCache)
+                .where(ExternalMetadataCache.id.in_(ids), expired)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return result.rowcount
 
 def external_metadata_cache_ready(db: Session) -> bool:
     del db

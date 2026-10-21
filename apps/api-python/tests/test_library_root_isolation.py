@@ -346,6 +346,21 @@ def test_delete_library_cancels_queued_and_running_import_tasks(
 
     assert response.status_code == 200, response.text
     assert response.json()["data"] == {"deleted": True, "id": library.id}
+    db_session.expire_all()
+    assert db_session.get(Library, library.id).deletion_requested_at is not None
+    from app.bootstrap.library_cleanup import build_library_cleanup
+    from app.modules.imports.infrastructure.readable_resource.task_queue import (
+        SqlAlchemyLibraryImportTaskQueue,
+    )
+
+    queue = SqlAlchemyLibraryImportTaskQueue(db_session)
+    assert queue.get_task("delete-library-running") is None
+    assert queue.next_queued() is None
+    db_session.commit()
+    for _ in range(30):
+        if not build_library_cleanup(db_session).execute():
+            break
+    db_session.expire_all()
     assert db_session.get(Library, library.id) is None
     assert db_session.get(LibraryImportTask, "delete-library-queued") is None
     assert db_session.get(LibraryImportTask, "delete-library-running") is None

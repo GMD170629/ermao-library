@@ -86,7 +86,7 @@ class SqlAlchemyLibraryFilterQueries:
     def _library_options(
         self, context: AuthorizationContext
     ) -> tuple[LibraryFilterOption, ...]:
-        statement = select(Library.id, Library.name, Library.root_path)
+        statement = select(Library.id, Library.name, Library.root_path).where(Library.deletion_requested_at.is_(None))
         if not context.is_admin:
             if not context.library_ids:
                 return ()

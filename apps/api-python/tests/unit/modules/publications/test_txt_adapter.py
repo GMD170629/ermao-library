@@ -32,20 +32,16 @@ def _source(path: Path) -> PublicationSource:
 def test_txt_decoding_matches_shared_cross_language_contract() -> None:
     fixture_path = (
         Path(__file__).resolve().parents[6]
-        / "packages/reader-contracts/fixtures/txt-decoding-v1.json"
+        / "packages/reader-contracts/fixtures/txt-decoding-v2.json"
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     assert fixture["schema"] == "ermao.txt-decoding"
-    assert fixture["version"] == 1
+    assert fixture["version"] == 2
 
     for case in fixture["cases"]:
         content = bytes.fromhex(case["sourceHex"])
         expected = case["expectedText"]
-        if expected is None:
-            with pytest.raises(PublicationCorruptError):
-                _decode_txt(content)
-        else:
-            assert _decode_txt(content) == expected, case["id"]
+        assert _decode_txt(content) == expected, case["id"]
 
 
 @pytest.mark.parametrize(
@@ -76,6 +72,25 @@ def test_txt_adapter_has_fixed_encoding_and_newline_policy(
     assert "\r" not in resource.content.decode("utf-8")
     assert b"\x00" not in resource.content
     assert path.read_bytes() == encoded
+
+
+@pytest.mark.parametrize("content, expected", [
+    (b"A\xffB", "A�B"),
+    (b"\xef\xbb\xbfA\xffB", "A�B"),
+    (b"\xff\xfeA\x00\x00\xd8B\x00", "A�B"),
+])
+def test_txt_publication_keeps_normal_text_and_original_bytes(tmp_path, content, expected):
+    path = tmp_path / "damaged.txt"
+    path.write_bytes(content)
+    adapter = TxtPublicationAdapter(tmp_path)
+    try:
+        source = _source(path)
+        publication = adapter.open(source)
+        chapter = adapter.read_resource(source, publication.reading_order[0].href)
+        assert expected in chapter.content.decode("utf-8")
+        assert path.read_bytes() == content
+    finally:
+        adapter.close()
 
 
 def test_txt_adapter_golden_chapters_hrefs_and_dom_ids_are_stable(
@@ -170,7 +185,6 @@ def test_txt_adapter_preserves_nul_and_rejects_unindexed_resources(
 @pytest.mark.parametrize(
     ("encoded", "code"),
     [
-        (b"\xef\xbb\xbf\xff", "PUBLICATION_TXT_ENCODING_UNSUPPORTED"),
         (b" \r\n\t", "PUBLICATION_TXT_EMPTY"),
     ],
 )
@@ -186,8 +200,6 @@ def test_txt_parser_failures_have_stable_codes_without_changing_the_source(
 
         assert caught.value.code == code
         assert path.read_bytes() == encoded
-        if code == "PUBLICATION_TXT_ENCODING_UNSUPPORTED":
-            assert isinstance(caught.value.__cause__, UnicodeDecodeError)
     finally:
         adapter.close()
 

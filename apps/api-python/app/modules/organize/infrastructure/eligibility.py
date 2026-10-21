@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.library_lifecycle import active_library
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
 from app.models import (
     LibraryBook,
@@ -86,6 +87,7 @@ def select_eligible_books(
     bounded = min(max(int(limit), 1), 2000)
     filters = [
         LibraryBook.visibility_state == "VISIBLE",
+        active_library(LibraryBook.library_id),
         LibraryBook.curation_state != "DISMISSED",
     ]
     if trigger in {"NEW", "SCHEDULE"}:

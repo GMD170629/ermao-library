@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import active_book
 from app.models.organize import OrganizeJob, OrganizeRun
 from app.modules.organize.infrastructure.policy import DEFAULT_RULES
 
@@ -135,7 +136,7 @@ def list_run_rows(db: Session, limit: int) -> list[dict[str, Any]]:
 
 
 def get_job_row(db: Session, job_id: str) -> dict[str, Any] | None:
-    entity = db.scalar(select(OrganizeJob).where(OrganizeJob.id == job_id))
+    entity = db.scalar(select(OrganizeJob).where(OrganizeJob.id == job_id, active_book(OrganizeJob.book_id)))
     return job_entity_record(entity) if entity is not None else None
 
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import active_library
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
@@ -82,6 +83,7 @@ class FilesystemResourcePreview:
         resource = self._db.scalar(
             select(LibraryReadableResource).where(
                 LibraryReadableResource.id == resource_id,
+                active_library(LibraryReadableResource.library_id),
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryReadableResource.import_state == "READY",
                 (
@@ -144,6 +146,7 @@ class FilesystemResourcePreview:
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.role.in_(roles),

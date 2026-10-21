@@ -302,9 +302,6 @@ class MetadataLookupTask(Base):
     result_source: Mapped[str | None] = mapped_column(
         "resultSource", Text, nullable=True
     )
-    candidate_raw_json: Mapped[str | None] = mapped_column(
-        "candidateRawJson", Text, nullable=True
-    )
     applied_fields: Mapped[str | None] = mapped_column(
         "appliedFields", Text, nullable=True
     )
@@ -690,9 +687,6 @@ class MetadataProviderExecution(Base):
     )
     attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
-    )
-    raw_result_json: Mapped[str | None] = mapped_column(
-        "rawResultJson", Text, nullable=True
     )
     error_summary: Mapped[str | None] = mapped_column(
         "errorSummary", Text, nullable=True

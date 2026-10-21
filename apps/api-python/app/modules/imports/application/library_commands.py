@@ -46,8 +46,6 @@ class LibraryWriteStorePort(Protocol):
 
     def reorder(self, prepared: PreparedLibraryOrder) -> None: ...
 
-    def cancel_import_tasks(self, library_id: str) -> int: ...
-
     def delete(self, prepared: PreparedLibraryDelete) -> bool: ...
 
 
@@ -125,7 +123,6 @@ class DeleteLibrary:
 
     def execute(self, prepared: PreparedLibraryDelete) -> bool:
         try:
-            self._store.cancel_import_tasks(prepared.library_id)
             deleted = self._store.delete(prepared)
             self._unit_of_work.commit()
             return deleted

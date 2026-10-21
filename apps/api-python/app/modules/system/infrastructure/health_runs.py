@@ -180,7 +180,7 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
     ]
     folders = db.scalars(
         select(Library)
-        .where(Library.enabled.is_(True))
+        .where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
         .order_by(Library.created_at, Library.id)
     ).all()
     for folder in folders:

@@ -83,6 +83,59 @@ def test_uploaded_copies_have_independent_identity_and_restore(backup_client):
     assert {item["id"] for item in remaining} == {created["id"], copies[1]["id"]}
 
 
+def test_metadata_tasks_round_trip_without_archived_payloads(backup_client):
+    from app.models import LibraryBookMetadata, MetadataLookupTask
+    from tests.test_library_delete_graph import seed_delete_graph
+
+    client = backup_client
+    with client.app.state.session_factory() as db:
+        seed_delete_graph(db, "backup-metadata")
+    response = client.post("/api/backups")
+    assert response.status_code == 201, response.text
+    created = response.json()["data"]["backup"]
+    payload = client.get(f"/api/backups/{created['id']}/download").content
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        exported = archive.read("database-export.json").decode()
+        assert "candidateRawJson" not in exported
+        assert "rawResultJson" not in exported
+        assert "backup-metadata-lookup" in exported
+    response = client.post(f"/api/backups/{created['id']}/restore")
+    assert response.status_code == 200, response.text
+    with client.app.state.session_factory() as db:
+        task = db.get(MetadataLookupTask, "backup-metadata-lookup")
+        assert task.book_id == "backup-metadata-book"
+        assert task.provider_order == '["douban"]'
+        # Existing restore policy resumes RUNNING lookups as PENDING.
+        assert task.status == "PENDING"
+        assert db.get(LibraryBookMetadata, "backup-metadata-book").title == "Book"
+
+
+def test_removed_library_remains_hidden_and_cleanup_resumes_after_restore(backup_client):
+    from app.bootstrap.library_cleanup import build_library_cleanup
+    from app.models.library import Library
+    from app.modules.imports.infrastructure.library_queries import get_library
+    from tests.test_library_delete_graph import seed_delete_graph
+
+    client = backup_client
+    with client.app.state.session_factory() as db:
+        seed_delete_graph(db, "backup-removed")
+    assert client.delete("/api/libraries/backup-removed").status_code == 200
+    response = client.post("/api/backups")
+    assert response.status_code == 201, response.text
+    backup_id = response.json()["data"]["backup"]["id"]
+    response = client.post(f"/api/backups/{backup_id}/restore")
+    assert response.status_code == 200, response.text
+    with client.app.state.session_factory() as db:
+        assert get_library(db, "backup-removed") is None
+        assert db.get(Library, "backup-removed").deletion_requested_at is not None
+    for _ in range(50):
+        with client.app.state.session_factory() as db:
+            if not build_library_cleanup(db).execute():
+                break
+    with client.app.state.session_factory() as db:
+        assert db.get(Library, "backup-removed") is None
+
+
 def test_incompatible_and_broken_uploads_are_saved_but_restore_is_rejected(
     backup_client,
 ):
@@ -126,7 +179,8 @@ def test_upload_requires_authentication(backup_client):
 
 
 @pytest.mark.parametrize("source_revision, accepted", [
-    ("0040_periodic_scan_admission", True),
+    # The 0040 -> 0041 setting-only exception does not span payload removal.
+    ("0040_periodic_scan_admission", False),
     ("0041_system_setting_json", False),
     ("0039_generated_metadata_fields", False),
 ])

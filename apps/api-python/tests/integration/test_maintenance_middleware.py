@@ -25,7 +25,7 @@ from app.db.maintenance import (
     DATABASE_MAINTENANCE_SETTING_KEY,
 )
 from app.main import create_app
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from tests.support.log_events import log_records, one_log
 
 
@@ -61,7 +61,6 @@ def maintenance_app(
     )
     assert isinstance(engine.pool, QueuePool)
     SystemSetting.__table__.create(engine)
-    SystemEvent.__table__.create(engine)
     settings = Settings(
         storage_root=str(tmp_path / "storage"),
         download_queue_enabled=False,

@@ -140,7 +140,7 @@ class _QueuedResourceImportRun:
         return None
 
     def is_current(self) -> bool:
-        return self.queue.get_task(self.operation_id) is not None
+        return self.queue.lock_task_if_current(self.operation_id)
 
     def start(self, *, started_at: datetime) -> None:
         task = self.queue.get_task(self.operation_id)

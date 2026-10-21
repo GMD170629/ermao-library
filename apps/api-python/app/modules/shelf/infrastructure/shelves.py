@@ -228,8 +228,7 @@ def list_static_shelf_book_page(
     page_size: int,
 ) -> tuple[list[str], int]:
     predicates = [ShelfBook.shelf_id == shelf_id]
-    if not context.is_admin:
-        predicates.append(book_visibility_predicate(context))
+    predicates.append(book_visibility_predicate(context))
     total = int(
         db.scalar(
             select(func.count())
@@ -263,8 +262,7 @@ def filter_visible_book_ids(
     for chunk_start in range(0, len(book_ids), 400):
         chunk = book_ids[chunk_start : chunk_start + 400]
         stmt = select(LibraryBook.id).where(LibraryBook.id.in_(chunk))
-        if not context.is_admin:
-            stmt = stmt.where(book_visibility_predicate(context))
+        stmt = stmt.where(book_visibility_predicate(context))
         visible.update(str(row) for row in db.scalars(stmt).all())
     return [str(book_id) for book_id in book_ids if str(book_id) in visible]
 

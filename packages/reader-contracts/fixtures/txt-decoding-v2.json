@@ -1,6 +1,6 @@
 {
   "schema": "ermao.txt-decoding",
-  "version": 1,
+  "version": 2,
   "cases": [
     {
       "id": "utf8",
@@ -85,47 +85,37 @@
     {
       "id": "unsupported_encoding",
       "sourceHex": "41ff42",
-      "expectedText": null
+      "expectedText": "A�B"
     },
     {
       "id": "utf8_bom_invalid_encoding",
       "sourceHex": "efbbbfd5fdcec4",
-      "expectedText": null
+      "expectedText": "����"
     },
     {
       "id": "gb18030_truncated_character",
       "sourceHex": "d6d0ce",
-      "expectedText": null
+      "expectedText": "中�"
     },
     {
       "id": "utf16le_bom_truncated_character",
       "sourceHex": "fffe410042",
-      "expectedText": null,
-      "decoderOverrides": {
-        "apple-foundation": {
-          "expectedText": "A"
-        }
-      }
+      "expectedText": "A�"
     },
     {
       "id": "utf16be_bom_truncated_character",
       "sourceHex": "feff004100",
-      "expectedText": null,
-      "decoderOverrides": {
-        "apple-foundation": {
-          "expectedText": "A"
-        }
-      }
+      "expectedText": "A�"
     },
     {
       "id": "utf16le_bom_unpaired_surrogate",
       "sourceHex": "fffe410000d8",
-      "expectedText": null
+      "expectedText": "A�"
     },
     {
       "id": "utf16be_bom_unpaired_surrogate",
       "sourceHex": "feff0041d800",
-      "expectedText": null
+      "expectedText": "A�"
     },
     {
       "id": "empty",
@@ -141,6 +131,56 @@
       "id": "whitespace",
       "sourceHex": "200d0a09",
       "expectedText": " \r\n\t"
+    },
+    {
+      "id": "gb18030_invalid_byte_between_text",
+      "sourceHex": "d5fdcec4ffbde1caf8",
+      "expectedText": "正文�结束"
+    },
+    {
+      "id": "gb18030_consecutive_invalid_bytes",
+      "sourceHex": "41ffff42",
+      "expectedText": "A��B"
+    },
+    {
+      "id": "gb18030_truncated_four_byte",
+      "sourceHex": "41813081",
+      "expectedText": "A�"
+    },
+    {
+      "id": "utf8_bom_invalid_between_text",
+      "sourceHex": "efbbbf41ff42",
+      "expectedText": "A�B"
+    },
+    {
+      "id": "utf8_bom_duplicate_preserved",
+      "sourceHex": "efbbbfefbbbf41",
+      "expectedText": "﻿A"
+    },
+    {
+      "id": "gb18030_literal_replacement_character",
+      "sourceHex": "8431a437d6d0d6d0d6d0d6d0d6d0d6d0d6d0d6d0d6d0d6d0",
+      "expectedText": "�中中中中中中中中中中"
+    },
+    {
+      "id": "utf16le_bom_invalid_surrogate_then_text",
+      "sourceHex": "fffe00d84200",
+      "expectedText": "�B"
+    },
+    {
+      "id": "utf16be_bom_invalid_surrogate_then_text",
+      "sourceHex": "feffd8000042",
+      "expectedText": "�B"
+    },
+    {
+      "id": "mixed_utf8_and_gbk",
+      "sourceHex": "e4b8ade69687e5bc80e5a4b40ad5fdcec4",
+      "expectedText": "涓枃寮�澶�\n正文",
+      "decoderOverrides": {
+        "web-textdecoder": {
+          "expectedText": "涓枃寮€澶�\n正文"
+        }
+      }
     }
   ]
 }

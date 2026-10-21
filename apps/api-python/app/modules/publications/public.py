@@ -6,6 +6,10 @@ from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigationResult,
 )
 from app.modules.publications.application.ports import PublicationAccessScope
+from app.modules.publications.application.txt_decoding import (
+    DecodedTxt,
+    decode_txt_bytes,
+)
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
@@ -17,6 +21,7 @@ from app.modules.publications.domain.model import (
 )
 
 __all__ = [
+    "DecodedTxt",
     "EnsurePublicationNavigation",
     "EnsurePublicationNavigationOutcome",
     "EnsurePublicationNavigationResult",
@@ -28,4 +33,5 @@ __all__ = [
     "PublicationResourceNotFoundError",
     "PublicationResourceTooLargeError",
     "PublicationUnsupportedError",
+    "decode_txt_bytes",
 ]

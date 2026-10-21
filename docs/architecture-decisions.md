@@ -90,6 +90,8 @@
 
 对应 ADR 0009、0012、0014、0016、0025。
 
+- TXT 按 `txt-decoding-v2` 契约容错：BOM 选择 UTF-8／UTF-16；无 BOM 先严格 UTF-8，失败后 GB18030 替换解码。坏字节显示 `�` 并继续，不以错误数量、比例、NUL 或乱码特征拒绝。Publications 拥有服务端唯一解码入口，导入仅使用既定有界增量样本，不据样本拒绝整份文件；原件不转码覆盖。FB2 严格解码及正常 TXT 章节／进度身份保持不变。
+
 - 第一方 EPUB/FB2/TXT/MOBI/AZW/AZW3/PRC 使用 DOWNLOAD_ORIGINAL：授权 asset 完整下载、验证身份／版本／长度并原子发布后，由本地 parser 打开。原件是唯一持久正文，不生成、缓存或下载派生 EPUB/ZIP、生成章节集或解包目录；TXT/FB2/MOBI 只提供内存 Publication。
 - Native `DownloadResourceRuntime` 唯一拥有完整下载、去重、续传、校验与登记；平台提供私有 staging、原子发布和清理，按授权／资源／asset／版本／长度隔离。Reader 观察或打开同一工件，不复制下载管线。Web 使用账号隔离的 Reader IndexedDB 原文件库，HTTP／HTTPS 共用；原件以至多 1 MiB 分块写入，校验完成后事务发布，取消／失败不发布。事务校验账号与授权代次，退出和权限变化使旧写入失效；不创建原生下载中心状态机。漫画／image_dir 按 manifest/page 交付，Web／后端不限制清单或页面字节数，原生端保留既有额度，音频走播放器、不隐式创建可重排下载。
 - 实际格式 parser/engine 决定可读性；服务器指纹、诊断版本、页数和百分比不成为第二道解析门槛。安全／引擎失败不触发旧解析器、修复或在线回退。进度、书签、设置尽力恢复，缺进度可从头；SDK 无法恢复 Locator 明确报 LOCATION_RESTORE_FAILED，不改写；进度持久化失败不阻止打开／关闭。

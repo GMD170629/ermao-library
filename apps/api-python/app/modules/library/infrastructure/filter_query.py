@@ -187,7 +187,7 @@ def resolve_library_roots(
         return {}
     include_all = any(c.operator in {"is_empty", "is_not_empty"} for c in conditions)
     requested_ids = {str(c.value) for c in conditions if c.value is not None}
-    statement = select(Library.id, Library.root_path)
+    statement = select(Library.id, Library.root_path).where(Library.deletion_requested_at.is_(None))
     if not context.is_admin:
         statement = statement.where(Library.id.in_(context.library_ids))
     if not include_all:

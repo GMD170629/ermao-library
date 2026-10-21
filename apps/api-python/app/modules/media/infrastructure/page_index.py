@@ -239,6 +239,7 @@ def get_resource_asset(db: Session, asset_id: str) -> dict[str, Any] | None:
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
         .where(
             LibraryResourceAsset.id == asset_id,
             LibraryResourceAsset.import_state == "READY",
@@ -291,6 +292,7 @@ def load_read_only_page_index_projection(
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
         .join(
             LibraryReadableResource,
             LibraryReadableResource.id == LibraryResourceAsset.resource_id,

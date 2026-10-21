@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event as sqlalchemy_event
-from sqlalchemy import func, select
+from sqlalchemy import inspect
 
 import app.modules.system.infrastructure.runtime as system_runtime
 from app.bootstrap.system import (
@@ -26,7 +26,6 @@ from app.core.exception_diagnostics import (
     exception_diagnostic_boundary,
     record_exception,
 )
-from app.models.settings import SystemEvent
 from app.modules.system.infrastructure import log_files
 from app.modules.system.infrastructure.events import (
     get_system_event,
@@ -43,7 +42,7 @@ def test_default_records_only_error_without_database_statements(db_session):
     db_session.commit()
     assert [event["level"] for event in log_files.read_log_events()] == ["error"]
     assert statements == []
-    assert db_session.scalar(select(func.count()).select_from(SystemEvent)) == 0
+    assert not inspect(db_session.bind).has_table("SystemEvent")
     assert log_files.log_settings() == {"retentionDays": 3, "minimumLevel": "error"}
 
 

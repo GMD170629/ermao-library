@@ -21,6 +21,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.source_relocation import SourceRelocation
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import active_book, library_is_active
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.infrastructure.file_operation_conflicts import (
     file_operation_blocks_library,
@@ -118,6 +119,7 @@ def load_writeback_cleanup_projection(
     statement = (
         select(LibrarySourceNode.id, LibrarySourceNode.relative_path, Library.root_path)
         .join(Library, Library.id == LibrarySourceNode.library_id)
+            .where(Library.deletion_requested_at.is_(None))
         .order_by(LibrarySourceNode.id)
         .limit(bounded)
     )
@@ -198,7 +200,7 @@ def load_metadata_writeback_projection(
     if book is None or book_metadata is None:
         raise ValueError("图书不存在")
     library = db.get(Library, book.library_id)
-    if library is None:
+    if library is None or not library_is_active(db, library.id):
         raise ValueError("书库不存在")
     if resource_id is not None:
         selected_resource = db.scalar(
@@ -663,6 +665,7 @@ def claim_next_preparation(
     candidate_id = (
         select(MetadataWritebackPreparation.id)
         .where(
+            active_book(MetadataWritebackPreparation.book_id),
             or_(
                 (
                     (MetadataWritebackPreparation.status == "PENDING")
@@ -880,6 +883,7 @@ def prepare_preparation_finalization(
         for target in targets
     )
     owned_query = select(MetadataWritebackPreparation.id).where(
+        active_book(MetadataWritebackPreparation.book_id),
         MetadataWritebackPreparation.id == preparation_id,
         MetadataWritebackPreparation.operation_id == operation_id,
         MetadataWritebackPreparation.status == "RUNNING",
@@ -1038,6 +1042,10 @@ def claim_next_target(
     candidate_id = (
         select(MetadataWritebackTarget.id)
         .where(
+            select(MetadataWritebackOperation.id).where(
+                MetadataWritebackOperation.id == MetadataWritebackTarget.operation_id,
+                active_book(MetadataWritebackOperation.book_id),
+            ).exists(),
             ~standard_busy,
             or_(
                 MetadataWritebackTarget.status.in_(("RUNNING", "PREPARED")),
@@ -1196,6 +1204,10 @@ def mark_prepared(
                 MetadataWritebackTarget.id == target_id,
                 MetadataWritebackTarget.status == "RUNNING",
                 MetadataWritebackTarget.lease_owner_id == owner_id,
+                select(MetadataWritebackOperation.id).where(
+                    MetadataWritebackOperation.id == MetadataWritebackTarget.operation_id,
+                    active_book(MetadataWritebackOperation.book_id),
+                ).exists(),
             )
             .values(
                 status="PREPARED",
@@ -1268,6 +1280,10 @@ def complete_target(
             MetadataWritebackTarget.operation_id,
             MetadataWritebackTarget.asset_id,
         ).where(
+            select(MetadataWritebackOperation.id).where(
+                MetadataWritebackOperation.id == MetadataWritebackTarget.operation_id,
+                active_book(MetadataWritebackOperation.book_id),
+            ).exists(),
             MetadataWritebackTarget.id == target_id,
             MetadataWritebackTarget.lease_owner_id == owner_id,
         )
@@ -1287,6 +1303,24 @@ def complete_target(
         owner_id=owner_id,
         now=now,
     )
+
+
+def lock_target_for_publication(
+    db: Session, target_id: str, owner_id: str, *, now: datetime,
+) -> bool:
+    """Serialize the final file rename with library removal."""
+    result = db.execute(
+        update(MetadataWritebackTarget).where(
+            MetadataWritebackTarget.id == target_id,
+            MetadataWritebackTarget.lease_owner_id == owner_id,
+            MetadataWritebackTarget.status == "PREPARED",
+            select(MetadataWritebackOperation.id).where(
+                MetadataWritebackOperation.id == MetadataWritebackTarget.operation_id,
+                active_book(MetadataWritebackOperation.book_id),
+            ).exists(),
+        ).values(updated_at=now)
+    )
+    return bool(result.rowcount)
 
 
 def fail_target(

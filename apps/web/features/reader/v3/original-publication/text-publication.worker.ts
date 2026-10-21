@@ -54,7 +54,7 @@ function escapeHtml(value: string): string {
 
 async function decodeText(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  return decodePublicationText(bytes);
+  return decodePublicationText(bytes, format);
 }
 
 function xhtml(title: string, body: string): ArrayBuffer {

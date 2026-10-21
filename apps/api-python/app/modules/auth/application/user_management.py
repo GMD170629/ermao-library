@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
@@ -143,7 +142,7 @@ class UserAdministrationGateway(Protocol):
     ) -> None: ...
 
     def delete_user(
-        self, *, user_id: str, anonymous_user_id: str, actor_id: str
+        self, *, user_id: str, actor_id: str
     ) -> None: ...
 
 
@@ -366,12 +365,8 @@ class DeleteUser:
             raise UserAdministrationError(
                 "LAST_ADMIN_REQUIRED", "系统必须至少保留一个有效管理员"
             )
-        anonymous_id = hashlib.sha256(f"deleted-user:{user.id}".encode()).hexdigest()[
-            :24
-        ]
         self._gateway.delete_user(
             user_id=user.id,
-            anonymous_user_id=anonymous_id,
             actor_id=actor.id,
         )
         return user.id

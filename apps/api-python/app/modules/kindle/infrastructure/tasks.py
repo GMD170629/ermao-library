@@ -355,6 +355,7 @@ def get_library_asset_for_kindle(db: Session, asset_id: str) -> dict[str, Any] |
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:
@@ -397,6 +398,7 @@ def get_library_asset_details_for_kindle(
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
         .where(LibraryResourceAsset.id == asset_id)
     ).first()
     if row is None:

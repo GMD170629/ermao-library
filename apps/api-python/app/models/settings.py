@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     CheckConstraint,
     Float,
@@ -58,55 +57,6 @@ class SystemSetting(Base):
         nullable=False,
         default=db_timestamp,
         onupdate=db_timestamp,
-    )
-
-
-class SystemEvent(Base):
-    __tablename__ = "SystemEvent"
-    __table_args__ = (
-        Index("SystemEvent_level_createdAt_idx", "level", "createdAt"),
-        Index("SystemEvent_source_createdAt_idx", "source", "createdAt"),
-        Index("SystemEvent_actorType_createdAt_idx", "actorType", "createdAt"),
-        Index("SystemEvent_action_createdAt_idx", "action", "createdAt"),
-        Index("SystemEvent_targetType_targetId_idx", "targetType", "targetId"),
-        Index("SystemEvent_createdAt_idx", "createdAt"),
-        Index("SystemEvent_createdAt_id_idx", "createdAt", "id"),
-        Index(
-            "SystemEvent_targetType_createdAt_id_idx",
-            "targetType",
-            "createdAt",
-            "id",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    level: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="info", server_default="info"
-    )
-    source: Mapped[str] = mapped_column(String(191), nullable=False)
-    actor_type: Mapped[str] = mapped_column(
-        "actorType",
-        String(191),
-        nullable=False,
-        default="system",
-        server_default="system",
-    )
-    actor_id: Mapped[str | None] = mapped_column("actorId", String(191), nullable=True)
-    action: Mapped[str] = mapped_column(String(191), nullable=False)
-    target_type: Mapped[str | None] = mapped_column(
-        "targetType", String(191), nullable=True
-    )
-    target_id: Mapped[str | None] = mapped_column(
-        "targetId", String(191), nullable=True
-    )
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
     )
 
 
@@ -315,7 +265,6 @@ __all__ = [
     "ReaderBookPreference",
     "ReaderPreference",
     "ReaderProgressCursor",
-    "SystemEvent",
     "SystemHealthRun",
     "SystemSetting",
 ]

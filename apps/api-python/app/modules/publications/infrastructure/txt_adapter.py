@@ -12,6 +12,7 @@ from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
 )
+from app.modules.publications.application.txt_decoding import decode_txt_bytes
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationLink,
@@ -20,7 +21,6 @@ from app.modules.publications.domain.model import (
     PublicationResourceNotFoundError,
     PublicationRevision,
     PublicationTxtEmptyError,
-    PublicationTxtEncodingError,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.chapter_core import ChapterCore
@@ -57,28 +57,7 @@ class _TxtSnapshot:
 
 
 def _decode_txt(content: bytes) -> str:
-    candidates: tuple[tuple[str, bytes], ...]
-    if content.startswith(b"\xef\xbb\xbf"):
-        candidates = (("utf-8", content[3:]),)
-    elif content.startswith(b"\xff\xfe"):
-        candidates = (("utf-16-le", content[2:]),)
-    elif content.startswith(b"\xfe\xff"):
-        candidates = (("utf-16-be", content[2:]),)
-    else:
-        candidates = (("utf-8", content), ("gb18030", content))
-    last_decode_error: UnicodeDecodeError | None = None
-    for encoding, payload in candidates:
-        try:
-            decoded = payload.decode(encoding, errors="strict")
-        except UnicodeDecodeError as error:
-            # diagnostics-control-flow: Try candidate encodings; the final decoder failure is propagated with cause.
-            capture_exception(error)
-            last_decode_error = error
-            continue
-        return decoded
-    raise PublicationTxtEncodingError(
-        "TXT source encoding is unsupported"
-    ) from last_decode_error
+    return decode_txt_bytes(content).text
 
 
 def _escape_xml(value: str) -> str:

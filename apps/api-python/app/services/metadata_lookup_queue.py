@@ -156,6 +156,8 @@ def _start_provider_execution(
         now=now,
     )
     with MetadataWriteTransaction(db):
+        if not lookup_persist.lock_active_lookup_task(db, str(task["id"])):
+            return None
         persisted_id = lookup_persist.write_prepared_provider_execution(db, prepared)
     return persisted_id
 
@@ -165,18 +167,13 @@ def _finish_provider_execution(
     execution_id: str | None,
     *,
     status: str,
-    result: Any = None,
     error: str | None = None,
 ) -> None:
-    raw_result_json = (
-        json.dumps(result, ensure_ascii=False) if result is not None else None
-    )
     now = _now()
     db.close()
     prepared = lookup_persist.prepare_provider_execution_finish(
         execution_id,
         status=status,
-        raw_result_json=raw_result_json,
         error=error,
         now=now,
     )
@@ -605,7 +602,6 @@ def _finish_without_match(
     db: Session,
     task: dict[str, Any],
     status: str,
-    candidates: list[dict[str, Any]],
     message: str,
 ) -> None:
     if status in {"FAILED", "NO_PROVIDER"}:
@@ -613,7 +609,6 @@ def _finish_without_match(
             LOGGER, "metadata.lookup_rule_failed", MetadataLookupRuleFailure(message),
 
         )
-    candidate_json = json.dumps(candidates, ensure_ascii=False)
     finished_at = _now()
     unresolved = _prepare_unresolved_organize_update(
         db,
@@ -632,7 +627,6 @@ def _finish_without_match(
             updated_at=finished_at,
             owner_id=owner_id,
             status=status,
-            candidateRawJson=candidate_json,
             errorSummary=error_summary,
             nextAttemptAt=None,
             finishedAt=finished_at,
@@ -641,11 +635,10 @@ def _finish_without_match(
 
 
 def _schedule_retry(
-    db: Session, task: dict[str, Any], message: str, candidates: list[dict[str, Any]],
+    db: Session, task: dict[str, Any], message: str,
     *, import_status: str | None = None,
 ) -> str:
     attempts = int(task.get("attempts") or 0) + 1
-    candidate_json = json.dumps(candidates, ensure_ascii=False)
     now = _now()
     retry_exhausted = attempts > len(RETRY_DELAYS_SECONDS)
     if retry_exhausted:
@@ -673,7 +666,6 @@ def _schedule_retry(
             "status": "FAILED",
             "attempts": attempts,
             "nextAttemptAt": None,
-            "candidateRawJson": candidate_json,
             "errorSummary": message,
             "finishedAt": now,
         }
@@ -683,7 +675,6 @@ def _schedule_retry(
             "attempts": attempts,
             "nextAttemptAt": now
             + timedelta(seconds=RETRY_DELAYS_SECONDS[attempts - 1]),
-            "candidateRawJson": candidate_json,
             "errorSummary": message,
             "startedAt": None,
         }
@@ -724,10 +715,10 @@ def process_metadata_lookup_task(
         try:
             import_status = lookup_persist.get_import_task_status(db, task.get("importTaskId"))
             if import_status is not None and import_status != "SUCCEEDED":
-                return _schedule_retry(db, task, "等待本地导入任务完成", [], import_status=import_status)
+                return _schedule_retry(db, task, "等待本地导入任务完成", import_status=import_status)
             book = lookup_persist.get_book(db, task.get("bookId"))
             if not book:
-                _finish_without_match(db, task, "FAILED", [], "图书已不存在")
+                _finish_without_match(db, task, "FAILED", "图书已不存在")
                 return "FAILED"
             metadata_guard = lookup_persist.book_metadata_guard(db, str(book["id"]))
             if metadata_guard is not None and metadata_guard[-1]:
@@ -748,7 +739,7 @@ def process_metadata_lookup_task(
                     )
                 return "PENDING"
             if lookup_persist.local_identification_failed(db, str(book["id"])):
-                _finish_without_match(db, task, "FAILED", [], "本地元数据识别失败，请重试识别")
+                _finish_without_match(db, task, "FAILED", "本地元数据识别失败，请重试识别")
                 return "FAILED"
             context = metadata_context_for_book(db, str(book["id"]))
             if not context:
@@ -756,7 +747,6 @@ def process_metadata_lookup_task(
                     db,
                     task,
                     "FAILED",
-                    [],
                     "无法建立元数据查询上下文",
                 )
                 return "FAILED"
@@ -778,7 +768,7 @@ def process_metadata_lookup_task(
             except Exception as error:  # noqa: BLE001 - task failure retries without stale identity.
                 capture_exception(error, persist=False)
                 record_exception(LOGGER, "metadata.identity_failed", error)
-                return _schedule_retry(db, task, identity_failure_message, [])
+                return _schedule_retry(db, task, identity_failure_message)
             if identity is not None:
                 context = {**context, "book": {**context["book"],
                     "title": identity.title or context["book"].get("title"),
@@ -788,7 +778,6 @@ def process_metadata_lookup_task(
 
             enabled_providers = 0
             errors: list[str] = []
-            inspected: list[dict[str, Any]] = []
             candidates: list[dict[str, Any]] = []
             executions: dict[str, str | None] = {}
             # AI identity is fallback only, never a source that short-circuits websites.
@@ -796,6 +785,8 @@ def process_metadata_lookup_task(
                 if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                     return "CANCELLED"
                 execution_id = _start_provider_execution(db, task, provider)
+                if execution_id is None:
+                    return "CANCELLED"
                 executions[provider] = execution_id
                 try:
                     result = _search_provider(db, context, provider, search_title, effective_request_gate)
@@ -806,15 +797,14 @@ def process_metadata_lookup_task(
                     errors.append(f"{provider}: {exc}")
                     continue
                 if not result.get("enabled"):
-                    _finish_provider_execution(db, execution_id, status="SKIPPED", result=result)
+                    _finish_provider_execution(db, execution_id, status="SKIPPED")
                     continue
                 enabled_providers += 1
                 raw = result.get("candidates", [])
                 if isinstance(raw, list):
                     candidates.extend({**item, "source": provider} for item in raw[:10]
                                       if isinstance(item, dict) and item.get("id"))
-                inspected.append({"provider": provider, "candidates": raw, "cacheHit": bool(result.get("cacheHit"))})
-                _finish_provider_execution(db, execution_id, status="COMPLETED", result=result)
+                _finish_provider_execution(db, execution_id, status="COMPLETED")
             try:
                 match = match_metadata_candidates(
                     db, book_id=str(book["id"]), title=search_title, author=search_author,
@@ -827,7 +817,7 @@ def process_metadata_lookup_task(
                     "AI source matching failed" if configured_locale(db) == "en-US"
                     else "AI 条目对应判断失败"
                 )
-                return _schedule_retry(db, task, match_failure_message, inspected)
+                return _schedule_retry(db, task, match_failure_message)
             final_identity = match.identity
             if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                 return "CANCELLED"
@@ -855,26 +845,13 @@ def process_metadata_lookup_task(
                         candidate,
                     )
                     applied = list(prepared_application.applied)
-                    selected_result_json = json.dumps(
-                        {"selected": candidate, "attempted": inspected},
-                        ensure_ascii=False,
-                    )
                     applied_fields_json = json.dumps(applied, ensure_ascii=False)
                     finished_at = _now()
-                    execution_result = {
-                        "selected": candidate,
-                        "appliedFields": applied,
-                    }
-                    execution_result_json = json.dumps(
-                        execution_result,
-                        ensure_ascii=False,
-                    )
                     completed_attempts = int(task.get("attempts") or 0) + 1
                     prepared_execution_finish = (
                         lookup_persist.prepare_provider_execution_finish(
                             execution_id,
                             status="COMPLETED",
-                            raw_result_json=execution_result_json,
                             now=finished_at,
                         )
                     )
@@ -882,6 +859,8 @@ def process_metadata_lookup_task(
                     owner_id = str(task.get("leaseOwnerId") or "") or None
                     guarded_book_id = str(book["id"])
                     with MetadataWriteTransaction(db):
+                        if not lookup_persist.lock_book_metadata_write(db, guarded_book_id):
+                            raise RuntimeError("BOOK_METADATA_CHANGED")
                         if (
                             lookup_persist.book_metadata_guard(db, guarded_book_id)
                             != metadata_guard
@@ -916,7 +895,6 @@ def process_metadata_lookup_task(
                             attempts=completed_attempts,
                             nextAttemptAt=None,
                             resultSource=provider,
-                            candidateRawJson=selected_result_json,
                             appliedFields=applied_fields_json,
                             errorSummary=None,
                             finishedAt=finished_at,
@@ -960,20 +938,19 @@ def process_metadata_lookup_task(
                     db,
                     task,
                     "NO_PROVIDER",
-                    inspected,
                     "所有适用的元数据插件均未启用",
                 )
                 return "NO_PROVIDER"
             if errors:
                 if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                     return "CANCELLED"
-                _schedule_retry(db, task, "；".join(errors), inspected)
+                _schedule_retry(db, task, "；".join(errors))
                 refreshed_status = lookup_persist.get_lookup_task_status(db, str(task["id"]))
                 return str(refreshed_status or "FAILED")
             if not lookup_persist.lookup_task_is_active(db, str(task["id"])):
                 return "CANCELLED"
             _finish_without_match(
-                db, task, "NO_MATCH", inspected,
+                db, task, "NO_MATCH",
                 "No confirmed matching entry" if configured_locale(db) == "en-US" else "未找到可确认的对应条目"
             )
             return "NO_MATCH"

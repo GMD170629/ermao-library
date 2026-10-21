@@ -585,6 +585,8 @@ device conformance demonstrates the required generated action.
 
 ## 统一章节核心
 
+TXT 解码遵循 `packages/reader-contracts/fixtures/txt-decoding-v2.json`：BOM 选择 UTF-8／UTF-16 容错解码；无 BOM 先严格 UTF-8，失败后 GB18030 容错解码。坏序列输出 `�` 后继续，保留正常文字、NUL 和已有 `�`，不按替换数量或比例拒绝。服务端 Publications 公开 API 同时供正文和有界增量元数据样本使用，样本不决定整份文件是否允许登记。各端不改写原件；FB2 保持严格解码。正常文件的章节身份与进度规则不变。
+
 详情与各端 Reader 从同一原资源经 `packages/reader-core/native/chapters` C99 核心得到章节。核心拥有识别、标题、嵌套、过滤与最终先序身份；Python、Web WASM、原生适配器提供解码 UTF-8、源序 XML 事件或已有 MOBI 导航节点，归档／编码／安全／渲染仍由适配器拥有。TXT 识别标题，EPUB 读 NAV/NCX，FB2 读 section/title，MOBI 用已有 parser；不按渲染位置推断章节或另造通用 parser、过滤器和父级校验。
 
 - chapter-N 为资源内零基最终先序键，数据库行以 resourceId:chapter-N 隔离。分组保留标题和子项但无目标、不计章节；无章节即空目录，reading order 不补造章节。

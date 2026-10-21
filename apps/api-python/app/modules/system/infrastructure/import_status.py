@@ -58,7 +58,7 @@ def library_import_dashboard_snapshot(
         _library_view(row)
         for row in db.scalars(
             select(Library)
-            .where(Library.enabled.is_(True))
+            .where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
             .order_by(Library.created_at.desc(), Library.id.desc())
         ).all()
     ]

@@ -11,9 +11,9 @@ from app.infrastructure.bounded_inspection import (
 )
 from app.infrastructure.comic_archives import inspect_comic_archive
 from app.modules.imports.infrastructure.reflowable_metadata import (
+    TXT_ENCODING_SAMPLE_BYTES,
     inspect_reflowable_book,
 )
-from app.modules.imports.infrastructure.text_encoding import TXT_ENCODING_SAMPLE_BYTES
 from app.services.audio_metadata import parse_audio_metadata
 
 

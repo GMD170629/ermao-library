@@ -12,6 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
+from app.core.library_lifecycle import active_book
 from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
     MetadataLookupTask,
@@ -204,7 +205,7 @@ def mark_book_curation_state(
 ) -> None:
     db.execute(
         update(LibraryBook)
-        .where(LibraryBook.id == book_id)
+        .where(LibraryBook.id == book_id, active_book(LibraryBook.id))
         .values(curation_state=status, updated_at=now)
     )
 
@@ -232,7 +233,7 @@ def get_book_row(db: Session, book_id: str) -> dict[str, Any] | None:
     row = db.execute(
         select(LibraryBook, LibraryBookMetadata)
         .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .where(LibraryBook.id == book_id)
+        .where(LibraryBook.id == book_id, active_book(LibraryBook.id))
     ).first()
     if row is None:
         return None
@@ -350,7 +351,7 @@ def latest_job_status_for_book_excluding(
 
 def book_is_curated(db: Session, book_id: str) -> bool:
     state = db.scalar(
-        select(LibraryBook.curation_state).where(LibraryBook.id == book_id)
+        select(LibraryBook.curation_state).where(LibraryBook.id == book_id, active_book(LibraryBook.id))
     )
     return str(state or "") not in {"", "PENDING", "UNASSESSED", "DISMISSED"}
 

@@ -31,6 +31,9 @@ class Library(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(
+        "deletionRequestedAt", TimestampMilliseconds(), nullable=True, index=True,
+    )
     name: Mapped[str] = mapped_column(String(191), nullable=False)
     root_path: Mapped[str] = mapped_column(
         "rootPath", String(191), unique=True, nullable=False
@@ -489,6 +492,7 @@ class ExternalMetadataCache(Base):
     __tablename__ = "ExternalMetadataCache"
     __table_args__ = (
         Index("ExternalMetadataCache_provider_expiresAt_idx", "provider", "expiresAt"),
+        Index("ExternalMetadataCache_expiresAt_id_idx", "expiresAt", "id"),
         Index(
             "ExternalMetadataCache_provider_queryKey_key",
             "provider",

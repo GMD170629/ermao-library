@@ -122,6 +122,9 @@ class FakeQueue:
     def enqueue_book_identifications(self, prepared: tuple[()]) -> int:
         raise AssertionError("no pending books in this queue fixture")
 
+    def lock_task_if_current(self, task_id: str) -> bool:
+        return self.get_task(task_id) is not None
+
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
         if task_id != self._base.id or self.cancelled:
             return None

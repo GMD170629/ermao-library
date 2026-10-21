@@ -82,6 +82,7 @@ class SqlAlchemyImportedBookMetadata:
             .join(LibraryBookMetadata)
             .join(LibrarySourceNode, LibrarySourceNode.id == LibraryBook.source_node_id)
             .join(Library, Library.id == LibraryBook.library_id)
+        .where(Library.deletion_requested_at.is_(None))
             .where(LibraryBook.source_node_id == source_node_id)
         ).one_or_none()
         if row is None:

@@ -335,14 +335,12 @@ def persist_admin_user_delete(
     db: Session,
     *,
     user_id: str,
-    anonymous_user_id: str,
     event: PreparedSystemEvent,
 ) -> None:
     delete_statement = delete(User).where(User.id == user_id)
     prepared_deletion = prepare_personal_user_deletion(
         db,
         user_id,
-        anonymous_user_id,
     )
     with AuthWriteTransaction(db):
         write_prepared_personal_user_deletion(db, prepared_deletion)

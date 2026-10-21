@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core import exception_diagnostics as diagnostics
 from app.db.session import DiagnosticSession
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.services import metadata_lookup_queue, organize_service
 
 
@@ -21,7 +21,6 @@ from app.services import metadata_lookup_queue, organize_service
 def database(tmp_path):
     url = f"sqlite:///{tmp_path / 'diagnostic.sqlite'}"
     engine = create_engine(url, connect_args={"timeout": 0.1})
-    SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
     recorder = sessionmaker(bind=engine)
     diagnostics.configure_exception_storage(recorder)
@@ -53,7 +52,7 @@ def test_real_business_write_is_released_before_file_append(database, caplog, mo
             ),
         )
         session.execute(
-            insert(SystemSetting).values(key="business", value="rollback me")
+            insert(SystemSetting).values(key="business", value='"rollback me"')
         )
         try:
             raise OSError(
@@ -104,7 +103,7 @@ def test_metadata_maintenance_retains_cause_with_real_diagnostic_session(
 def test_rollback_failure_keeps_original_and_secondary(database, monkeypatch, caplog):
     engine, recorder = database
     session = DiagnosticSession(engine)
-    session.execute(insert(SystemSetting).values(key="business", value="rollback me"))
+    session.execute(insert(SystemSetting).values(key="business", value='"rollback me"'))
     original_rollback = Session.rollback
 
     def broken(self):
@@ -134,7 +133,7 @@ def test_rollback_failure_keeps_original_and_secondary(database, monkeypatch, ca
 def test_broken_diagnostics_cannot_prevent_cleanup(database, monkeypatch, capsys):
     engine, _ = database
     session = DiagnosticSession(engine)
-    session.execute(insert(SystemSetting).values(key="business", value="rollback me"))
+    session.execute(insert(SystemSetting).values(key="business", value='"rollback me"'))
 
     def broken(*args, **kwargs):
         raise TypeError("diagnostic adapter broken")

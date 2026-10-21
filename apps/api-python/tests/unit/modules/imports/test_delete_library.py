@@ -67,25 +67,25 @@ def _prepared_delete() -> PreparedLibraryDelete:
     )
 
 
-def test_delete_library_cancels_import_tasks_before_deleting() -> None:
+def test_delete_library_commits_removal_without_synchronous_task_cleanup() -> None:
     store = RecordingStore()
     unit_of_work = RecordingUnitOfWork()
 
     deleted = DeleteLibrary(store, unit_of_work).execute(_prepared_delete())
 
     assert deleted is True
-    assert store.calls == ["cancel:library-1", "delete:library-1"]
+    assert store.calls == ["delete:library-1"]
     assert unit_of_work.commits == 1
     assert unit_of_work.rollbacks == 0
 
 
-def test_delete_library_rolls_back_task_cancellation_when_delete_fails() -> None:
+def test_delete_library_rolls_back_failed_removal() -> None:
     store = RecordingStore(fail_delete=True)
     unit_of_work = RecordingUnitOfWork()
 
     with pytest.raises(RuntimeError, match="delete failed"):
         DeleteLibrary(store, unit_of_work).execute(_prepared_delete())
 
-    assert store.calls == ["cancel:library-1", "delete:library-1"]
+    assert store.calls == ["delete:library-1"]
     assert unit_of_work.commits == 0
     assert unit_of_work.rollbacks == 1

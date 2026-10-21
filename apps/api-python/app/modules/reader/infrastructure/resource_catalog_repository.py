@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.media_capabilities import resolve_asset_mime_type
+from app.core.library_lifecycle import active_library
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     LibraryBook,
@@ -149,6 +150,7 @@ class SqlAlchemyReaderResourceCatalogRepository:
             )
             .where(
                 LibraryReadableResource.id == resource_id,
+                active_library(LibraryReadableResource.library_id),
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryReadableResource.import_state == "READY",
                 visibility,
@@ -197,6 +199,7 @@ class SqlAlchemyReaderResourceCatalogRepository:
             )
             .where(
                 LibraryReadableResource.book_id == book_id,
+                active_library(LibraryReadableResource.library_id),
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryReadableResource.import_state == "READY",
                 visibility,

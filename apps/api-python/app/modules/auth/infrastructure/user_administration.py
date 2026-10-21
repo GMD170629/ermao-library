@@ -212,7 +212,7 @@ class SqlAlchemyUserAdministrationGateway:
         )
 
     def delete_user(
-        self, *, user_id: str, anonymous_user_id: str, actor_id: str
+        self, *, user_id: str, actor_id: str
     ) -> None:
         user = get_user(self._db, user_id)
         if user is None:
@@ -239,7 +239,6 @@ class SqlAlchemyUserAdministrationGateway:
         persist_admin_user_delete(
             self._db,
             user_id=user_id,
-            anonymous_user_id=anonymous_user_id,
             event=event,
         )
         if avatar_path is not None:

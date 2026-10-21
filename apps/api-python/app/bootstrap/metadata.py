@@ -1,8 +1,19 @@
 """Metadata capability composition root."""
 
+from collections.abc import Callable
+
+from sqlalchemy.orm import Session
+
+from app.core.time import now_timestamp_ms, timestamp_ms_to_datetime
+from app.modules.metadata.application.cache_maintenance import (
+    prune_expired_metadata_cache,
+)
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS
 from app.modules.metadata.infrastructure.automatic_rate_limiter import (
     AutomaticMetadataRequestRateLimiter,
+)
+from app.modules.metadata.infrastructure.external_cache import (
+    SqlAlchemyExpiredMetadataCacheStore,
 )
 from app.modules.metadata.infrastructure.providers import (
     get_provider_source,
@@ -27,6 +38,17 @@ def build_automatic_metadata_request_gate() -> AutomaticMetadataRequestRateLimit
     return AutomaticMetadataRequestRateLimiter(BUILTIN_MANIFESTS)
 
 
+def maintain_external_metadata_cache(
+    db: Session, *, cancelled: Callable[[], bool]
+) -> int:
+    return prune_expired_metadata_cache(
+        SqlAlchemyExpiredMetadataCacheStore(db),
+        unit_of_work=db,
+        now=timestamp_ms_to_datetime(now_timestamp_ms()),
+        cancelled=cancelled,
+    )
+
+
 __all__ = [
     "METADATA_SOURCE_KIND",
     "build_automatic_metadata_request_gate",
@@ -35,6 +57,7 @@ __all__ = [
     "list_enabled_provider_ids",
     "list_metadata_sources",
     "load_metadata_writeback_projection",
+    "maintain_external_metadata_cache",
     "persist_metadata_writeback_intents",
     "prepare_metadata_source_seed_rows",
     "prepare_metadata_source_seed_write",

@@ -153,5 +153,5 @@ def system_setting_value(db: Session, key: str) -> str | None:
 
 
 def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(select(Library).where(Library.enabled.is_(True))).scalars().all()
+    rows = db.execute(select(Library).where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))).scalars().all()
     return [entity_record(row) for row in rows]

@@ -70,6 +70,7 @@ class SqlAlchemyPublicationSourceRepository:
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
             .join(Library, Library.id == LibraryReadableResource.library_id)
+            .where(Library.deletion_requested_at.is_(None))
             .where(
                 LibraryReadableResource.id == resource_id,
                 LibraryReadableResource.enablement_state == "ENABLED",

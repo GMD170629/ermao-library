@@ -527,6 +527,9 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0039_generated_metadata_fields.py",
         "0040_periodic_scan_admission.py",
         "0041_system_setting_json.py",
+        "0042_remove_metadata_task_payloads.py",
+        "0043_remove_legacy_system_events.py",
+        "0044_library_background_deletion.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

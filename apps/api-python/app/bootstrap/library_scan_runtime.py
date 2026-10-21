@@ -100,7 +100,7 @@ class LibraryScanCoordinator:
             WatchedLibrary(library_id, Path(root_path).expanduser().resolve())
             for library_id, root_path in self._session.execute(
                 select(Library.id, Library.root_path)
-                .where(Library.enabled.is_(True))
+                .where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
                 .order_by(Library.id.asc())
             ).all()
         )

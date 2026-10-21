@@ -376,9 +376,17 @@ def process_next_metadata_writeback(
                     warning_code = (
                         str(target.get("warningCode")) if target.get("warningCode") else None
                     )
-                output, published_size_bytes, published_mtime_ms = (
-                    file_writeback.publish_prepared(str(target["sourcePath"]), prepared_path)
-                )
+                # Only the final rename holds the writer. Expensive preparation
+                # remains outside it. Removal either commits first and rejects
+                # this stale result, or follows the completed publication.
+                with MetadataWriteTransaction(db):
+                    if not writeback_queue.lock_target_for_publication(
+                        db, target_id, owner_id, now=db_timestamp(),
+                    ):
+                        return True
+                    output, published_size_bytes, published_mtime_ms = (
+                        file_writeback.publish_prepared(str(target["sourcePath"]), prepared_path)
+                    )
                 size_bytes: int | None = published_size_bytes
                 mtime_ms: int | None = published_mtime_ms
                 source = Path(str(target["sourcePath"])).expanduser().resolve()

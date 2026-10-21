@@ -18,6 +18,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.library_navigation import navigation_entry_id
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import active_library
 from app.models import (
     Library,
     LibraryReadableResource,
@@ -85,6 +86,7 @@ class SqlAlchemyResourceDetailQueries:
             )
             .where(
                 LibraryReadableResource.id == resource_id,
+                active_library(LibraryReadableResource.library_id),
                 LibraryReadableResource.book_id == book_id,
                 LibraryReadableResource.enablement_state == "ENABLED",
                 LibraryReadableResource.import_state == "READY",

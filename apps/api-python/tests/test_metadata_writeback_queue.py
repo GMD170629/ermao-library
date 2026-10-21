@@ -211,6 +211,37 @@ def test_uncertain_writeback_preserves_file_and_durable_ownership(
         assert list(tmp_path.glob(".*.shuku-*.part"))
 
 
+def test_removal_after_preparation_prevents_file_publication(
+    db_session, test_settings, tmp_path, monkeypatch,
+):
+    from dataclasses import replace
+
+    from app.modules.imports.application.library_commands import DeleteLibrary
+    from app.modules.imports.infrastructure.library_write import (
+        SqlAlchemyLibraryWriteStore,
+    )
+    from tests.unit.modules.imports.test_delete_library import _prepared_delete
+
+    source = tmp_path / "removed.txt"
+    source.write_text("original")
+    book, resource, _ = _seed_book_resource(db_session, source)
+    enqueue_writeback(db_session, book_id=book.id, resource_id=resource.id, source="MANUAL")
+    db_session.commit()
+    assert process_next_metadata_writeback(db_session, test_settings)
+    original = metadata_file_writeback._mark_target_prepared_uow
+
+    def remove_after_preparing(db, **kwargs):
+        original(db, **kwargs)
+        DeleteLibrary(SqlAlchemyLibraryWriteStore(db), db).execute(
+            replace(_prepared_delete(), library_id=book.library_id),
+        )
+
+    monkeypatch.setattr(metadata_file_writeback, "_mark_target_prepared_uow", remove_after_preparing)
+    assert process_next_metadata_writeback(db_session, test_settings)
+    assert source.read_text() == "original"
+    assert not source.with_suffix(".opf").exists()
+
+
 def test_external_asset_change_is_recorded_without_retry_or_source_rollback(
     db_session,
     test_settings,

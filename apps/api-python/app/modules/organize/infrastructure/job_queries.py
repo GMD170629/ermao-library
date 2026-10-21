@@ -12,6 +12,7 @@ from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exception_diagnostics import capture_exception, record_exception
+from app.core.library_lifecycle import active_book
 from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
     MetadataLookupTask,
@@ -233,7 +234,7 @@ def _filter_predicates(
     search: str,
     provider_ids: Sequence[str],
 ) -> list[Any]:
-    predicates: list[Any] = []
+    predicates: list[Any] = [active_book(OrganizeJob.book_id)]
     normalized_status = status.strip().upper()
     if normalized_status != "ALL":
         predicates.append(status_category_expression(db) == normalized_status)

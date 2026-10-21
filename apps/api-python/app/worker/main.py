@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from app.bootstrap.automation import build_automation_uploads
 from app.bootstrap.file_moves import build_file_move_worker
+from app.bootstrap.library_cleanup import build_library_cleanup
 from app.bootstrap.library_scan_runtime import (
     LibraryScanCoordinator,
 )
@@ -195,7 +196,18 @@ def main() -> None:
         imports_paused = False
         next_upload_cleanup = 0.0
         next_file_move_attempt = 0.0
+        next_library_cleanup = 0.0
         while not stop_event.is_set():
+            cleanup_worked = False
+            if monotonic() >= next_library_cleanup:
+                try:
+                    with BackgroundSessionLocal() as cleanup_session:
+                        cleanup_worked = build_library_cleanup(cleanup_session).execute()
+                except Exception as error:  # noqa: BLE001 - durable progress is retried after rollback.
+                    capture_exception(error)
+                    _report_failure("library_cleanup", error, outcome="retrying")
+                    next_library_cleanup = monotonic() + 60
+
             if monotonic() >= next_upload_cleanup:
                 with exception_diagnostic_boundary(
                     logger,
@@ -230,7 +242,7 @@ def main() -> None:
                         if file_move_session is not None:
                             _cleanup("file_move_close", file_move_session.close)
             if imports_paused or monotonic() < next_import_attempt:
-                stop_event.wait(settings.import_queue_interval_seconds)
+                stop_event.wait(0.05 if cleanup_worked else settings.import_queue_interval_seconds)
                 continue
             if readable_worker is None:
                 with exception_diagnostic_boundary(
@@ -358,7 +370,7 @@ def main() -> None:
                     if import_session is not None:
                         _cleanup("import_session_close", import_session.close)
             if outcome in {"idle", "error", "deferred"}:
-                stop_event.wait(settings.import_queue_interval_seconds)
+                stop_event.wait(0.05 if cleanup_worked else settings.import_queue_interval_seconds)
     finally:
         shutdown(0, None)
         _cleanup("import_heartbeat_stop", import_heartbeat.stop)

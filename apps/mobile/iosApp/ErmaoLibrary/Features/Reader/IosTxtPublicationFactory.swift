@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 @preconcurrency import ErmaoShared
 @preconcurrency import ReadiumShared
 @preconcurrency import ReadiumStreamer
@@ -15,8 +16,7 @@ struct IosTxtPublicationFactory: Sendable {
             throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: failure))
         }
         let data = try Data(contentsOf: managed.fileURL, options: [.mappedIfSafe])
-        guard let decoded = IosStrictTxtDecoder.decode(data)
-        else { throw IosTxtPublicationError.invalidEncoding }
+        let decoded = try IosTxtDecoder.decode(data)
 
         let parsed = try IosChapterCore.parseTXT(decoded)
         guard !parsed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -145,20 +145,68 @@ p { margin: 0 0 1em; white-space: normal; }
     }
 }
 
-enum IosStrictTxtDecoder {
-    static func decode(_ data: Data) -> String? {
-        let decoded: String?
+enum IosTxtDecoder {
+    static func decode(_ data: Data) throws -> String {
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
-            decoded = String(data: data.dropFirst(3), encoding: .utf8)
+            return String(decoding: data.dropFirst(3), as: UTF8.self)
         } else if data.starts(with: [0xFF, 0xFE]) {
-            decoded = String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+            return decodeUTF16(data.dropFirst(2), littleEndian: true)
         } else if data.starts(with: [0xFE, 0xFF]) {
-            decoded = String(data: data.dropFirst(2), encoding: .utf16BigEndian)
-        } else {
-            decoded = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
+            return decodeUTF16(data.dropFirst(2), littleEndian: false)
         }
-        return decoded
+        if let decoded = String(data: data, encoding: .utf8) {
+            return decoded
+        }
+        return try decodeGB18030(data)
+    }
+
+    private static func decodeUTF16(_ data: Data, littleEndian: Bool) -> String {
+        let bytes = Array(data)
+        var units: [UInt16] = []
+        for index in stride(from: 0, to: bytes.count - bytes.count % 2, by: 2) {
+            let first = UInt16(bytes[index])
+            let second = UInt16(bytes[index + 1])
+            units.append(littleEndian ? first | second << 8 : first << 8 | second)
+        }
+        if bytes.count % 2 != 0 { units.append(0xFFFD) }
+        return String(decoding: units, as: UTF16.self)
+    }
+
+    private static func decodeGB18030(_ data: Data) throws -> String {
+        guard let converter = iconv_open("UTF-8", "GB18030"),
+              converter != UnsafeMutableRawPointer(bitPattern: -1) else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        defer { iconv_close(converter) }
+        var input = Array(data)
+        var result: [UInt8] = []
+        try input.withUnsafeMutableBytes { inputBuffer in
+            var inputPointer = inputBuffer.baseAddress?.assumingMemoryBound(to: CChar.self)
+            var inputLeft = inputBuffer.count
+            while inputLeft > 0 {
+                var output = [UInt8](repeating: 0, count: 4096)
+                var outputLeft = output.count
+                var conversionError: Int32 = 0
+                let converted = output.withUnsafeMutableBytes { outputBuffer in
+                    var outputPointer = outputBuffer.baseAddress?.assumingMemoryBound(to: CChar.self)
+                    let status = iconv(converter, &inputPointer, &inputLeft, &outputPointer, &outputLeft)
+                    conversionError = errno
+                    return status
+                }
+                result.append(contentsOf: output.prefix(output.count - outputLeft))
+                if converted != -1 { continue }
+                if conversionError == E2BIG { continue }
+                if conversionError == EILSEQ || conversionError == EINVAL {
+                    result.append(contentsOf: [0xEF, 0xBF, 0xBD])
+                    let consumed = conversionError == EINVAL ? inputLeft : 1
+                    inputPointer = inputPointer?.advanced(by: consumed)
+                    inputLeft -= consumed
+                } else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(conversionError))
+                }
+            }
+        }
+        return String(decoding: result, as: UTF8.self)
     }
 }
 

@@ -18,6 +18,7 @@ import app.modules.auth.presentation.http as auth_http
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import SESSION_REFRESH_DAYS, hash_password, utcnow
 from app.core.config import Settings, get_settings
+from app.core.setting_values import encode_setting_value
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.main import create_app
@@ -33,6 +34,33 @@ def _create_user(db_session, email="admin@example.com", password="starshipnas"):
     db_session.add(user)
     db_session.commit()
     return user
+
+
+def test_admin_delete_user_without_legacy_log_table(client, db_session):
+    from sqlalchemy import inspect
+
+    from app.models.auth import UserPreference
+    from app.modules.system.infrastructure import log_files
+
+    _create_user(db_session)
+    target = _create_user(db_session, email="remove@example.com")
+    target_id = target.id
+    db_session.add(UserPreference(user_id=target_id, key="theme", value="dark"))
+    db_session.commit()
+    assert _login(client).status_code == 200
+    assert not inspect(db_session.get_bind()).has_table("SystemEvent")
+    log_files.save_log_settings(3, "info")
+    response = client.request(
+        "DELETE", f"/api/admin/users/{target_id}",
+        json={"confirmation": "remove@example.com"},
+    )
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    assert db_session.get(User, target_id) is None
+    assert not db_session.scalars(
+        select(UserPreference).where(UserPreference.user_id == target_id)
+    ).all()
+    assert any(row["action"] == "user.deleted" for row in log_files.read_log_events())
 
 
 def test_password_verification_and_hashing_run_after_read_transaction(
@@ -444,7 +472,7 @@ def test_session_refresh_reports_busy_when_test_engine_exhausts_its_wait_budget(
             blocker.execute(
                 update(SystemSetting)
                 .where(SystemSetting.key == "systemName")
-                .values(value="writer lock held")
+                .values(value=encode_setting_value("writer lock held"))
             )
 
             started_at = monotonic()
@@ -673,7 +701,7 @@ def test_avatar_write_contention_preserves_published_file_and_database_reference
             blocker.execute(
                 update(SystemSetting)
                 .where(SystemSetting.key == "systemName")
-                .values(value="avatar writer lock held")
+                .values(value=encode_setting_value("avatar writer lock held"))
             )
             blue_image = BytesIO()
             Image.new("RGB", (640, 480), color=(20, 30, 220)).save(

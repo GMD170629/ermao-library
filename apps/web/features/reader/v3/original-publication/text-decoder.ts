@@ -8,8 +8,8 @@ function startsWith(bytes: Uint8Array, prefix: readonly number[]): boolean {
     && prefix.every((value, index) => bytes[index] === value);
 }
 
-/** Decodes TXT/FB2 source bytes according to txt-decoding-v1. */
-export function decodePublicationText(bytes: Uint8Array): string {
+/** TXT follows txt-decoding-v2; FB2 retains its strict source decoding. */
+export function decodePublicationText(bytes: Uint8Array, format: 'txt' | 'fb2'): string {
   const candidates: readonly TextEncodingCandidate[] = startsWith(bytes, [0xef, 0xbb, 0xbf])
     ? [{ encoding: 'utf-8', offset: 3 }]
     : startsWith(bytes, [0xff, 0xfe])
@@ -17,6 +17,17 @@ export function decodePublicationText(bytes: Uint8Array): string {
       : startsWith(bytes, [0xfe, 0xff])
         ? [{ encoding: 'utf-16be', offset: 2 }]
         : [{ encoding: 'utf-8', offset: 0 }, { encoding: 'gb18030', offset: 0 }];
+  if (format === 'txt') {
+    if (candidates.length === 1) {
+      const candidate = candidates[0];
+      return new TextDecoder(candidate.encoding, { ignoreBOM: true }).decode(bytes.subarray(candidate.offset));
+    }
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      return new TextDecoder('gb18030', { ignoreBOM: true }).decode(bytes);
+    }
+  }
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {

@@ -229,6 +229,7 @@ def test_existing_maintenance_lifecycle_prunes_daily_and_keeps_log_interval(
     monkeypatch.setattr(
         log_maintenance, "delete_expired_or_disabled_sessions", sessions
     )
+    monkeypatch.setattr(log_maintenance, "maintain_external_metadata_cache", Mock(return_value=0))
     worker._db_factory = Mock(
         return_value=Mock(__enter__=Mock(), __exit__=Mock(return_value=False))
     )

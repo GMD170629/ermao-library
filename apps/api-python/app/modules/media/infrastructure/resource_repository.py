@@ -47,6 +47,7 @@ class SqlAlchemyMediaResourceRepository:
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
             )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
             .join(
                 LibraryReadableResource,
                 LibraryReadableResource.id == LibraryResourceAsset.resource_id,
@@ -77,6 +78,7 @@ class SqlAlchemyMediaResourceRepository:
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
             )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(Library.deletion_requested_at.is_(None))
             .join(
                 LibraryReadableResource,
                 LibraryReadableResource.id == LibraryResourceAsset.resource_id,

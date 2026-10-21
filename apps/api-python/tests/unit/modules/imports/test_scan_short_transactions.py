@@ -318,6 +318,9 @@ class FakeQueue:
     def next_queued(self) -> None:
         return None
 
+    def lock_task_if_current(self, task_id: str) -> bool:
+        return self.get_task(task_id) is not None
+
     def get_task(self, task_id: str) -> None:
         return None
 

@@ -18,13 +18,11 @@ from app.core.exception_diagnostics import (
 from app.infrastructure import atomic_files
 from app.infrastructure import copied_file_attributes as attributes
 from app.infrastructure.bounded_inspection import read_optional_file
-from app.models.settings import SystemEvent
 
 
 @pytest.fixture
 def events(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'events.sqlite'}")
-    SystemEvent.__table__.create(engine)
     factory = sessionmaker(bind=engine)
     configure_exception_storage(factory)
     try:

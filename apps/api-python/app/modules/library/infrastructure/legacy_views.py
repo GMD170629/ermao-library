@@ -153,6 +153,7 @@ def _asset_rows(
                 LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
             )
             .join(Library, Library.id == LibrarySourceNode.library_id)
+            .where(Library.deletion_requested_at.is_(None))
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == "READY",

@@ -9,7 +9,7 @@ from time import monotonic
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import create_engine, insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
@@ -24,7 +24,7 @@ from app.core.exception_diagnostics import (
     reset_exception_storage,
 )
 from app.models.auth import User
-from app.models.settings import SystemEvent
+from app.models.settings import SystemSetting
 from app.modules.imports.application.readable_resource.ports import (
     LibraryImportTaskRecord,
 )
@@ -55,6 +55,7 @@ def _load_event(db_session: Session, event_id: str):
 
 def _all_events(db_session: Session, source: str | None = None):
     from types import SimpleNamespace
+
     from app.modules.system.infrastructure.log_files import read_log_events
     return [SimpleNamespace(**{**event, "metadata_json": event["metadata"]})
             for event in read_log_events() if source is None or event["source"] == source]
@@ -307,6 +308,9 @@ class _FakeQueue:
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         self.task = replace(self.task, state="RUNNING")
+
+    def lock_task_if_current(self, task_id: str) -> bool:
+        return self.get_task(task_id) is not None
 
     def get_task(self, task_id: str):
         if not self._complete:
@@ -589,7 +593,7 @@ def test_recording_succeeds_without_waiting_for_business_write_lock(
         f"sqlite+pysqlite:///{database_path.as_posix()}",
         connect_args={"timeout": 0.25, "check_same_thread": False},
     )
-    SystemEvent.__table__.create(recorder_engine)
+    SystemSetting.__table__.create(recorder_engine)
     factory = sessionmaker(
         bind=recorder_engine,
         autoflush=False,
@@ -605,13 +609,8 @@ def test_recording_succeeds_without_waiting_for_business_write_lock(
         with locked_engine.connect() as business:
             transaction = business.begin()
             business.execute(
-                insert(SystemEvent).values(
-                    id="held-business-row",
-                    level="info",
-                    source="test",
-                    actor_type="system",
-                    action="held",
-                    message="uncommitted business write",
+                insert(SystemSetting).values(
+                    key="held-business-row", value='"uncommitted business write"'
                 )
             )
             started = monotonic()
@@ -628,7 +627,7 @@ def test_recording_succeeds_without_waiting_for_business_write_lock(
         assert persist_exception_diagnostic(LOGGER, snapshot, factory) is True
         session = factory()
         try:
-            assert session.get(SystemEvent, snapshot.diagnostic_id) is None
+            assert session.get(SystemSetting, "held-business-row") is None
             assert _load_event(session, snapshot.diagnostic_id) is not None
         finally:
             session.close()

@@ -4,12 +4,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, exists, false, select, true
+from sqlalchemy import ColumnElement, exists, false, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
 
 from app.core.exception_diagnostics import capture_exception
+from app.core.library_lifecycle import active_library, library_is_active
 from app.models.auth import User, UserLibraryAccess, UserPreference
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
@@ -56,7 +57,7 @@ def authorization_context(db: Session, user: User) -> AuthorizationContext:
     if not is_admin(user):
         rows = db.scalars(
             select(UserLibraryAccess.library_id)
-            .where(UserLibraryAccess.user_id == user.id)
+            .where(UserLibraryAccess.user_id == user.id, active_library(UserLibraryAccess.library_id))
             .order_by(UserLibraryAccess.library_id)
         )
         library_ids = tuple(str(item) for item in rows)
@@ -75,18 +76,16 @@ def library_visibility_predicate(
     library_column: ColumnElement[str],
 ) -> ColumnElement[bool]:
     if context.is_admin:
-        return true()
+        return active_library(library_column)
     if not context.library_ids:
         return false()
-    return library_column.in_(context.library_ids)
+    return active_library(library_column) & library_column.in_(context.library_ids)
 
 
 def book_visibility_predicate(
     context: AuthorizationContext,
     book: type[LibraryBook] = LibraryBook,
 ) -> ColumnElement[bool]:
-    if context.is_admin:
-        return book.id.is_not(None)
     return library_visibility_predicate(
         context, cast(ColumnElement[str], book.library_id)
     )
@@ -100,8 +99,6 @@ def resource_visibility_predicate(
         resource.enablement_state == "ENABLED",
         resource.import_state == "READY",
     )
-    if context.is_admin:
-        return resource.id.is_not(None) & state[0] & state[1]
     return (
         library_visibility_predicate(
             context, cast(ColumnElement[str], resource.library_id)
@@ -136,10 +133,10 @@ def asset_visibility_predicate(
 
 
 def can_access_library(db: Session, user: User, library_id: str | None) -> bool:
+    if not library_id or not library_is_active(db, library_id):
+        return False
     if is_admin(user):
         return True
-    if not library_id:
-        return False
     return (
         db.scalar(
             select(UserLibraryAccess.user_id).where(

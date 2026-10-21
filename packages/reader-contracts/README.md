@@ -46,11 +46,16 @@ projection JSON (UTF-8, sorted keys and compact separators), so formatting the
 golden file cannot change its semantic identity. Reader v5 never compares this
 diagnostic with a Locator and never uses it to accept, reject, or select progress.
 
-`schemas/txt-decoding-v1.schema.json` and `fixtures/txt-decoding-v1.json`
-record the native TXT decoder output, including internal/trailing NUL and empty
-text. Applications must not reject or remove NUL before the actual parser.
-Verified Foundation codec differences use explicit decoder overrides. Empty
-publication and renderer failures are separate from decoding failures.
+`schemas/txt-decoding-v2.schema.json` and `fixtures/txt-decoding-v2.json`
+record tolerant TXT decoder output, including internal/trailing NUL and empty
+text. A BOM selects UTF-8/UTF-16; without a BOM, strict UTF-8 is tried before
+GB18030 with replacement. Malformed input becomes U+FFFD without an error-count
+or ratio gate. Existing NUL and U+FFFD remain unchanged. Import inspection uses
+the same rule on a bounded, incremental sample. FB2 decoding stays strict.
+Empty publication and renderer failures are separate from decoding failures.
+The verified `web-textdecoder` override records WHATWG's GB18030 mapping of
+byte 0x80 to the euro sign; native decoders replace that invalid byte. This
+platform mapping difference does not change the encoding selection rule.
 
 `reader-http-error-statuses.json` is the authoritative status/code allowlist for
 bounded publication and comic resource requests. Web consumes it directly;

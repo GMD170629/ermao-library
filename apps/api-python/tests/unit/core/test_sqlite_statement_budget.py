@@ -23,7 +23,7 @@ from app.db.sqlite import (
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
     create_sqlite_engine,
 )
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from tests.support.log_events import log_records, one_log
 
 
@@ -316,7 +316,6 @@ def test_slow_write_transaction_is_saved_with_full_sql_and_bindings(tmp_path: Pa
         tmp_path / "slow-write-event.sqlite3",
         slow_write_threshold_seconds=0.01,
     )
-    SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
     try:
         with DiagnosticSession(engine) as session:
@@ -343,7 +342,6 @@ def test_default_slow_write_threshold_records_only_transactions_over_one_second(
     from app.modules.system.infrastructure.log_files import save_log_settings
     save_log_settings(3, "debug")
     engine = create_sqlite_engine(tmp_path / "default-slow-write-event.sqlite3")
-    SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
     try:
         with caplog.at_level(logging.WARNING, logger="app.db.sqlite"):
@@ -378,7 +376,6 @@ def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path:
     root = logging.getLogger()
     monkeypatch.setattr(root, "handlers", [*root.handlers, DailyFileHandler()])
     engine = create_sqlite_engine(tmp_path / "failed-transaction-event.sqlite3")
-    SystemEvent.__table__.create(engine)
     SystemSetting.__table__.create(engine)
     diagnostics.configure_exception_storage(sessionmaker(bind=engine, class_=Session))
     try:

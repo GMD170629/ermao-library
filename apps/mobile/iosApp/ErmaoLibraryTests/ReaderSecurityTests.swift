@@ -673,32 +673,21 @@ final class ReaderSecurityTests: XCTestCase {
         await database.close()
     }
 
-    func testTxtDecoderPreservesTheNativeCodecOutput() throws {
+    func testTxtDecoderPreservesTextWithReplacementForMalformedInput() throws {
         struct Contract: Decodable {
-            struct DecoderResult: Decodable {
-                let expectedText: String?
-            }
-            struct DecoderOverrides: Decodable {
-                let appleFoundation: DecoderResult?
-
-                enum CodingKeys: String, CodingKey {
-                    case appleFoundation = "apple-foundation"
-                }
-            }
             struct Case: Decodable {
                 let id: String
                 let sourceHex: String
-                let expectedText: String?
-                let decoderOverrides: DecoderOverrides?
+                let expectedText: String
             }
             let schema: String
             let version: Int
             let cases: [Case]
         }
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "txt-decoding-v1", withExtension: "json"))
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "txt-decoding-v2", withExtension: "json"))
         let contract = try JSONDecoder().decode(Contract.self, from: Data(contentsOf: url))
         XCTAssertEqual(contract.schema, "ermao.txt-decoding")
-        XCTAssertEqual(contract.version, 1)
+        XCTAssertEqual(contract.version, 2)
         XCTAssertFalse(contract.cases.isEmpty)
         for example in contract.cases {
             let hex = Array(example.sourceHex)
@@ -706,13 +695,7 @@ final class ReaderSecurityTests: XCTestCase {
             let bytes = try stride(from: 0, to: hex.count, by: 2).map { index in
                 try XCTUnwrap(UInt8(String(hex[index ..< index + 2]), radix: 16), example.id)
             }
-            let expected: String?
-            if let override = example.decoderOverrides?.appleFoundation {
-                expected = override.expectedText
-            } else {
-                expected = example.expectedText
-            }
-            XCTAssertEqual(IosStrictTxtDecoder.decode(Data(bytes)), expected, example.id)
+            XCTAssertEqual(try IosTxtDecoder.decode(Data(bytes)), example.expectedText, example.id)
         }
     }
 

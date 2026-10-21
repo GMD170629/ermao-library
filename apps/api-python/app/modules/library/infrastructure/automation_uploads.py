@@ -51,7 +51,7 @@ class LibraryAttachmentCovers:
         )
         library = self.db.scalar(
             select(Library).where(
-                Library.id == snapshot.library_id, Library.enabled.is_(True)
+                Library.id == snapshot.library_id, (Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
             )
         )
         if library is None:

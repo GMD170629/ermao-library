@@ -24,12 +24,10 @@ from app.modules.imports.application.reflowable_types import (
     ReflowableBookMetadata,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
-from app.modules.imports.infrastructure.text_encoding import (
-    TXT_ENCODING_MAX_SEQUENCE_BYTES,
-    TXT_ENCODING_SAMPLE_BYTES,
-    TextEncodingError,
-    detect_sample_encoding,
-)
+from app.modules.publications.public import decode_txt_bytes
+
+TXT_ENCODING_SAMPLE_BYTES = 4 * 1024 * 1024
+TXT_ENCODING_MAX_SEQUENCE_BYTES = 4
 
 _MOBI_FAMILY_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
 
@@ -70,9 +68,12 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
             sample = source.read(
                 TXT_ENCODING_SAMPLE_BYTES + TXT_ENCODING_MAX_SEQUENCE_BYTES - 1
             )
-        encoding = detect_sample_encoding(sample)
-        text = sample[:100_000].decode(encoding, errors="ignore")
-    except (OSError, UnicodeError, TextEncodingError) as exc:
+        decoded = decode_txt_bytes(
+            sample,
+            final=len(sample) < TXT_ENCODING_SAMPLE_BYTES + TXT_ENCODING_MAX_SEQUENCE_BYTES - 1,
+        )
+        text = decoded.text[:100_000]
+    except OSError as exc:
         capture_exception(exc, persist=False)
         raise ReflowableMetadataError("Unable to inspect TXT metadata") from exc
     return ReflowableBookMetadata(
@@ -88,7 +89,7 @@ def _inspect_txt(path: Path) -> ReflowableBookMetadata:
         cover=None,
         raw_metadata={
             "sourceFormat": "TXT",
-            "inputEncoding": encoding,
+            "inputEncoding": decoded.encoding,
         },
     )
 

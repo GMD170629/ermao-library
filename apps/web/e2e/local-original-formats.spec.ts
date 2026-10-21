@@ -232,6 +232,27 @@ for (const fixture of fixtures) {
   });
 }
 
+for (const sample of [
+  { name: 'GBK bad byte', hex: 'd5fdcec4ffbde1caf8', expected: '正文�结束' },
+  { name: 'UTF-8 BOM bad byte', hex: 'efbbbf41ff42', expected: 'A�B' },
+  { name: 'UTF-16 isolated surrogate', hex: 'fffe410000d84200', expected: 'A�B' }
+]) {
+  test(`TXT tolerant decoding renders ${sample.name} and reopens the cached original`, async ({ page }) => {
+    const fixture: ReflowableFixture = { format: 'txt', mimeType: 'text/plain', path: '' };
+    const bytes = Buffer.from(sample.hex, 'hex');
+    const requests: string[] = [];
+    await installFixtureRoutes(page, fixture, bytes, requests);
+    await page.goto('/reader/txt-local-resource');
+    let frame = await visibleReaderFrame(page);
+    await expect(frame.contentFrame().locator('body')).toContainText(sample.expected);
+    await page.reload();
+    frame = await visibleReaderFrame(page);
+    await expect(frame.contentFrame().locator('body')).toContainText(sample.expected);
+    expect(requests.filter((path) => path === '/api/assets/txt-local-asset')).toHaveLength(1);
+    expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
+  });
+}
+
 for (const invalid of [
   { name: 'corrupt', path: 'test-data/library/mobi/negative-truncated.mobi', expectedCode: /^(?:MOBI|PUBLICATION)_/ },
   { name: 'DRM-protected', path: 'test-data/library/mobi/negative-upstream-drm-v1.mobi', expectedCode: /DRM/ }

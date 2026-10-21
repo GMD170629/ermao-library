@@ -58,14 +58,14 @@ def _library_display_order() -> tuple[ColumnElement[object], ...]:
 
 
 def list_libraries(db: Session) -> list[dict[str, object]]:
-    rows = db.scalars(select(Library).order_by(*_library_display_order())).all()
+    rows = db.scalars(select(Library).where(Library.deletion_requested_at.is_(None)).order_by(*_library_display_order())).all()
     return [_library_view(row) for row in rows]
 
 
 def list_enabled_library_rows(db: Session) -> list[dict[str, object]]:
     rows = db.scalars(
         select(Library)
-        .where(Library.enabled.is_(True))
+        .where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))
         .order_by(*_library_display_order())
     ).all()
     return [_library_view(row) for row in rows]
@@ -74,7 +74,7 @@ def list_enabled_library_rows(db: Session) -> list[dict[str, object]]:
 def list_library_root_paths(db: Session) -> tuple[str, ...]:
     rows = db.scalars(
         select(Library.root_path)
-        .where(Library.root_path.is_not(None))
+        .where(Library.root_path.is_not(None), Library.deletion_requested_at.is_(None))
         .order_by(*_library_display_order())
     ).all()
     return tuple(str(path) for path in rows if path)
@@ -82,7 +82,7 @@ def list_library_root_paths(db: Session) -> tuple[str, ...]:
 
 def get_library(db: Session, library_id: str) -> dict[str, object] | None:
     row = db.get(Library, library_id)
-    return None if row is None else _library_view(row)
+    return None if row is None or row.deletion_requested_at is not None else _library_view(row)
 
 
 def get_library_by_root_path(
@@ -95,6 +95,8 @@ def get_library_by_root_path(
     if exclude_id is not None:
         filters.append(Library.id != exclude_id)
     row = db.scalar(select(Library).where(*filters).limit(1))
+    # Keep the root reserved until cleanup finishes; do not turn a predictable
+    # duplicate-root response into a database uniqueness error.
     return None if row is None else _library_view(row)
 
 
@@ -122,7 +124,7 @@ def library_id_for_path(db: Session, target: Path) -> str | None:
         capture_exception(error, persist=False)
         record_exception(logging.getLogger(__name__), "modules.imports.infrastructure.library_queries.library_id_for_path.failed", error)
         return None
-    for row in db.scalars(select(Library).where(Library.enabled.is_(True))).all():
+    for row in db.scalars(select(Library).where(Library.enabled.is_(True) & Library.deletion_requested_at.is_(None))).all():
         try:
             root = Path(row.root_path).expanduser().resolve()
             resolved_target.relative_to(root)
@@ -183,6 +185,7 @@ def _task_projection_statement():
             LibraryBookMetadata.title.label("book_title"),
         )
         .join(Library, Library.id == LibraryImportTask.library_id)
+        .where(Library.deletion_requested_at.is_(None))
         .outerjoin(
             LibrarySourceNode,
             LibrarySourceNode.id == LibraryImportTask.source_node_id,

@@ -11,6 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
+from app.core.library_lifecycle import active_library
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
     BookDetailPreference,
@@ -36,7 +37,6 @@ from app.models.settings import (
     ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
-    SystemEvent,
 )
 from app.models.shelf import Shelf, ShelfBook
 
@@ -66,7 +66,7 @@ class PreparedPersonalUserDeletion:
 def list_library_ids(db: Session, user_id: str) -> list[str]:
     rows = db.execute(
         select(UserLibraryAccess.library_id)
-        .where(UserLibraryAccess.user_id == user_id)
+        .where(UserLibraryAccess.user_id == user_id, active_library(UserLibraryAccess.library_id))
         .order_by(UserLibraryAccess.library_id)
     ).scalars()
     return [str(item) for item in rows]
@@ -80,7 +80,7 @@ def validate_library_ids(db: Session, folder_ids: list[str]) -> list[str]:
     existing = {
         str(item)
         for item in db.execute(
-            select(Library.id).where(Library.id.in_(folder_ids))
+            select(Library.id).where(Library.id.in_(folder_ids), Library.deletion_requested_at.is_(None))
         ).scalars()
     }
     missing = [folder_id for folder_id in folder_ids if folder_id not in existing]
@@ -215,7 +215,6 @@ def write_prepared_user_with_preferences(
 def prepare_personal_user_deletion(
     db: Session,
     user_id: str,
-    anonymous_user_id: str,
 ) -> PreparedPersonalUserDeletion:
     """Prepare deletion of all account-owned rows in the fresh schema."""
 
@@ -253,16 +252,6 @@ def prepare_personal_user_deletion(
             .where(nullable_model.user_id == user_id)
             .values(user_id=None)
         )
-    statements.append(
-        update(SystemEvent)
-        .where(SystemEvent.actor_id == user_id)
-        .values(actor_id=anonymous_user_id)
-    )
-    statements.append(
-        update(SystemEvent)
-        .where(SystemEvent.target_id == user_id)
-        .values(target_id=anonymous_user_id)
-    )
     return PreparedPersonalUserDeletion(statements=tuple(statements))
 
 

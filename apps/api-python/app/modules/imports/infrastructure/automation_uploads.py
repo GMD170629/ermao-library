@@ -63,7 +63,7 @@ class ImportAttachmentUploads:
             raise UploadError("RESOURCE_NOT_FOUND")
         library = self.db.scalar(
             select(Library)
-            .where(Library.id == spec.library_id, Library.enabled.is_(True))
+            .where(Library.id == spec.library_id, (Library.enabled.is_(True) & Library.deletion_requested_at.is_(None)))
             .execution_options(populate_existing=True)
         )
         if library is None:

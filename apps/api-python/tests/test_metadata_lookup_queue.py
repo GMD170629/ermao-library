@@ -500,7 +500,7 @@ def test_queue_semantic_match_runs_after_websites_and_uses_final_identity(db_ses
         assert db_session.get(MetadataLookupTask, task_id).result_source == ("bangumi" if scenario == "source-failure" else "douban")
 
 
-@pytest.mark.parametrize("interruption", [None, "cancelled", "concurrent"])
+@pytest.mark.parametrize("interruption", [None, "cancelled", "concurrent", "deleted"])
 def test_queue_reads_selected_subject_detail_through_real_provider(db_session, test_settings, monkeypatch, interruption):
     from app.models.organize import OrganizePolicy
     from tests.contract.api.test_metadata_identity import _douban_detail_transport
@@ -520,6 +520,24 @@ def test_queue_reads_selected_subject_detail_through_real_provider(db_session, t
             metadata = db_session.get(LibraryBookMetadata, book_id)
             metadata.title = "用户并发标题"
             metadata.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+        elif interruption == "deleted":
+            from app.modules.imports.application.library_commands import (
+                DeleteLibrary,
+                PreparedLibraryDelete,
+            )
+            from app.modules.imports.infrastructure.library_write import (
+                SqlAlchemyLibraryWriteStore,
+            )
+            from app.services.system_events import prepare_system_event
+
+            DeleteLibrary(SqlAlchemyLibraryWriteStore(db_session), db_session).execute(
+                PreparedLibraryDelete(
+                    "test-library", (), datetime.now(UTC),
+                    prepare_system_event(level="warning", source="library",
+                                         actor_type="admin", action="deleted",
+                                         message="Deleted during provider request"),
+                )
+            )
         db_session.commit()
     requests, prompts = _douban_detail_transport(db_session, monkeypatch, before_detail=during_detail)
     class Gate:
@@ -538,7 +556,12 @@ def test_queue_reads_selected_subject_detail_through_real_provider(db_session, t
     assert gate.providers == ["douban", "douban"]
     db_session.expire_all()
     saved = db_session.get(LibraryBookMetadata, book_id)
-    if interruption:
+    if interruption == "deleted":
+        assert status == "CANCELLED"
+        assert saved.title == "错误下载书名"
+        assert saved.description is None
+        assert not queue.lookup_persist.lookup_task_is_active(db_session, task_id)
+    elif interruption:
         assert saved.title == ("用户并发标题" if interruption == "concurrent" else "错误下载书名")
         assert saved.description is None
     else:

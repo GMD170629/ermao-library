@@ -13,7 +13,7 @@ from app.core.exception_diagnostics import (
     reset_exception_storage,
 )
 from app.core.setting_values import encode_setting_value
-from app.models.settings import SystemEvent, SystemSetting
+from app.models.settings import SystemSetting
 from app.modules.imports.application.readable_resource.ports import (
     LibraryImportTaskRecord,
 )
@@ -64,6 +64,9 @@ class _Queue:
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         self.task = replace(self.task, state="RUNNING")
 
+    def lock_task_if_current(self, task_id: str) -> bool:
+        return self.get_task(task_id) is not None
+
     def get_task(self, task_id: str):
         return self.task if self.task.state == "RUNNING" else None
 
@@ -113,7 +116,6 @@ def _engines(tmp_path: Path) -> tuple[Engine, Engine]:
         f"sqlite+pysqlite:///{database_path}", connect_args=connect_args
     )
     SystemSetting.__table__.create(business_engine)
-    SystemEvent.__table__.create(recorder_engine)
     return business_engine, recorder_engine
 
 

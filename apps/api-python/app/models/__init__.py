@@ -45,7 +45,6 @@ from app.models.settings import (
     ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
-    SystemEvent,
     SystemHealthRun,
     SystemSetting,
 )
@@ -151,7 +150,6 @@ __all__ = [
     "ShelfCollectionMembership",
     "Source",
     "SourceSearchRecord",
-    "SystemEvent",
     "SystemHealthRun",
     "SystemSetting",
     "User",

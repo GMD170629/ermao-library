@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session
 from app.contracts.library_file_activity import LibraryFileActivityBusy
 from app.contracts.source_relocation import SourceRelocation
 from app.core.exception_diagnostics import record_exception
+from app.core.library_lifecycle import (
+    active_library,
+    library_is_active,
+    lock_active_library,
+)
 from app.infrastructure.file_operation_conflicts import file_operation_blocks_library
 from app.models import (
     LibraryBook,
@@ -133,7 +138,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         if work.is_empty:
             raise ValueError("EMPTY_BOOK_WORK")
         book = self._session.get(LibraryBook, book_id)
-        if book is None:
+        if book is None or not lock_active_library(self._session, book.library_id):
             raise LookupError(book_id)
         anchor = self._session.get(LibrarySourceNode, book.source_node_id)
         if anchor is None or anchor.library_id != book.library_id:
@@ -179,7 +184,7 @@ class SqlAlchemyLibraryImportTaskQueue(
     def claim_next_book(self, *, started_at: datetime) -> BookImportTaskRecord | None:
         task_id = self._session.scalar(
             select(LibraryImportTask.id)
-            .where(LibraryImportTask.kind == "IMPORT_BOOK", LibraryImportTask.state == "QUEUED")
+            .where(LibraryImportTask.kind == "IMPORT_BOOK", LibraryImportTask.state == "QUEUED", active_library(LibraryImportTask.library_id))
             .order_by(LibraryImportTask.created_at, LibraryImportTask.id)
             .limit(1)
         )
@@ -200,6 +205,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                 LibraryImportTask.id == row.id,
                 LibraryImportTask.state == "QUEUED",
                 ~file_operation_blocks_library(LibraryImportTask.library_id),
+                active_library(LibraryImportTask.library_id),
             )
             .values(
                 state="RUNNING",
@@ -221,7 +227,7 @@ class SqlAlchemyLibraryImportTaskQueue(
 
     def book_requires_scan(self, book_id: str) -> bool:
         book = self._session.get(LibraryBook, book_id)
-        if book is None:
+        if book is None or not library_is_active(self._session, book.library_id):
             return True
         node = self._session.get(LibrarySourceNode, book.source_node_id)
         gap = self._session.get(LibraryImportScanGap, book.library_id)
@@ -251,6 +257,7 @@ class SqlAlchemyLibraryImportTaskQueue(
         require_latest_request: bool = False,
     ) -> bool:
         conditions = [
+            active_library(LibraryImportTask.library_id),
             LibraryImportTask.id == task_id,
             LibraryImportTask.kind == "IMPORT_BOOK",
             LibraryImportTask.state == "RUNNING",
@@ -259,7 +266,9 @@ class SqlAlchemyLibraryImportTaskQueue(
         if require_latest_request:
             conditions.append(LibraryImportTask.request_version == execution_version)
         return self._session.scalar(
-            select(LibraryImportTask.id).where(*conditions)
+            update(LibraryImportTask).where(*conditions)
+            .values(execution_version=LibraryImportTask.execution_version)
+            .returning(LibraryImportTask.id)
         ) is not None
 
     def advance_book_resource_cursor(
@@ -547,6 +556,8 @@ class SqlAlchemyLibraryImportTaskQueue(
         role: AssetRole | None = None,
         missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
     ) -> LibraryImportTaskRecord:
+        if not lock_active_library(self._session, library_id):
+            raise LookupError(library_id)
         row = LibraryImportTask(
             id=cuid(),
             kind=kind,
@@ -580,6 +591,8 @@ class SqlAlchemyLibraryImportTaskQueue(
         missing_entry_policy: MissingEntryPolicy,
         scan_scopes: tuple[ScanScope, ...] | None = None,
     ) -> tuple[LibraryImportTaskRecord, bool]:
+        if not lock_active_library(self._session, library_id):
+            raise LookupError(library_id)
         # A scan request owns its scope; historical and running scans are immutable.
         row = LibraryImportTask(
             id=cuid(),
@@ -684,6 +697,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                 LibraryImportTask.state == "QUEUED",
                 LibraryImportTask.superseded_by_task_id.is_(None),
                 ~file_operation_blocks_library(LibraryImportTask.library_id),
+                active_library(LibraryImportTask.library_id),
             )
             .order_by(
                 LibraryImportTask.created_at.asc(),
@@ -692,11 +706,20 @@ class SqlAlchemyLibraryImportTaskQueue(
             .limit(1)
             .execution_options(populate_existing=True)
         )
-        return None if row is None else self._to_record(row)
+        return None if row is None or not library_is_active(self._session, row.library_id) else self._to_record(row)
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
         row = self._session.get(LibraryImportTask, task_id, populate_existing=True)
-        return None if row is None else self._to_record(row)
+        return None if row is None or not library_is_active(self._session, row.library_id) else self._to_record(row)
+
+    def lock_task_if_current(self, task_id: str) -> bool:
+        # Result transactions serialize with removal before changing the graph.
+        return self._session.scalar(
+            update(LibraryImportTask).where(
+                LibraryImportTask.id == task_id,
+                active_library(LibraryImportTask.library_id),
+            ).values(state=LibraryImportTask.state).returning(LibraryImportTask.id)
+        ) is not None
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         row = self._session.get(LibraryImportTask, task_id)
@@ -709,6 +732,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                 LibraryImportTask.state == "QUEUED",
                 LibraryImportTask.superseded_by_task_id.is_(None),
                 ~file_operation_blocks_library(LibraryImportTask.library_id),
+                active_library(LibraryImportTask.library_id),
             )
             .values(state="RUNNING")
             .returning(LibraryImportTask.id)
@@ -762,7 +786,9 @@ class SqlAlchemyLibraryImportTaskQueue(
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
         running = self._session.scalars(
-            select(LibraryImportTask).where(LibraryImportTask.state == "RUNNING")
+            select(LibraryImportTask).where(
+                LibraryImportTask.state == "RUNNING", active_library(LibraryImportTask.library_id),
+            )
         ).all()
         for task in running:
             record_exception(
@@ -775,7 +801,7 @@ class SqlAlchemyLibraryImportTaskQueue(
                 self._record_gaps_for_task(task)
         result = self._session.execute(
             update(LibraryImportTask)
-            .where(LibraryImportTask.state == "RUNNING")
+            .where(LibraryImportTask.state == "RUNNING", active_library(LibraryImportTask.library_id))
             .values(state="FAILED", error_summary=WORKER_INTERRUPTED,
                     finished_at=finished_at)
         )

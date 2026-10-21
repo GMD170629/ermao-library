@@ -158,7 +158,7 @@ class SqlAlchemyMoveTopology:
             .where(
                 Library.id == request.destination_library_id,
                 Library.id.in_(library_ids),
-                Library.enabled.is_(True),
+                (Library.enabled.is_(True) & Library.deletion_requested_at.is_(None)),
             )
             .execution_options(populate_existing=True)
         )
