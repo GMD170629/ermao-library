@@ -40,7 +40,9 @@ internal class TxtReadiumPublicationFactory {
         val readingOrder = normalizedResources.map { resource ->
             Link(
                 href = requireNotNull(Url(resource.href)),
-                mediaType = MediaType.XHTML,
+                // TXT may contain NUL; HTML parsing keeps the rest of the text readable.
+                // XML parsing would stop at that byte even though decoding succeeded.
+                mediaType = MediaType.HTML,
                 title = resource.title,
             )
         }
@@ -75,7 +77,7 @@ internal class TxtReadiumPublicationFactory {
                 tableOfContents = core.entries.map { entry ->
                         Link(
                             href = requireNotNull(Url(requireNotNull(entry.href))),
-                            mediaType = MediaType.XHTML,
+                            mediaType = MediaType.HTML,
                             title = entry.title,
                         ).addProperties(mapOf("shuku:navigationKey" to entry.key))
                     },

@@ -52,6 +52,7 @@ class ReaderFailureMappingTest {
             "PUBLICATION_RESOURCE_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
             "BINARY_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
             "PAYLOAD_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
+            "IMPORT_FILE_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
         )
         expected.forEach { (wireCode, readerCode) ->
             for (recoverable in listOf(false, true)) {

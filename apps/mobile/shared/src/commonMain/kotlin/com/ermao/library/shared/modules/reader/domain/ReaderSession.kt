@@ -106,7 +106,9 @@ private fun readerErrorCodeForSafetyFailure(code: String): ReaderErrorCode? =
             ReaderSafetyErrorCode.PUBLICATION_PARSER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk
             ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED -> ReaderErrorCode.ResourceMissing
             ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED -> ReaderErrorCode.SecurityRejected
-            ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE -> ReaderErrorCode.PublicationTooLarge
+            ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE,
+            ReaderSafetyErrorCode.IMPORT_FILE_TOO_LARGE,
+            -> ReaderErrorCode.PublicationTooLarge
             ReaderSafetyErrorCode.PDF_PAGE_LIMIT -> ReaderErrorCode.PdfPageLimit
             ReaderSafetyErrorCode.PDF_RANGE_INVALID -> ReaderErrorCode.RangeInvalid
             ReaderSafetyErrorCode.PDF_RENDER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk

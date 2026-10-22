@@ -153,6 +153,7 @@ val syncReaderAssets by tasks.registering(Sync::class) {
 }
 
 val syncReaderTestAssets by tasks.registering(Sync::class) {
+    from(rootProject.layout.projectDirectory.file("../../packages/reader-contracts/fixtures/txt-decoding-v2.json"))
     for (format in listOf("epub", "mobi", "comics", "pdf")) {
         from(rootProject.layout.projectDirectory.dir("../../test-data/library/$format")) {
             // Corpus documentation is not a runtime asset and has duplicate names.
