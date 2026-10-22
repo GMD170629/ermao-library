@@ -155,8 +155,9 @@ def _start_provider_execution(
         attempts=attempts,
         now=now,
     )
+    task_id = str(task["id"])
     with MetadataWriteTransaction(db):
-        if not lookup_persist.lock_active_lookup_task(db, str(task["id"])):
+        if not lookup_persist.lock_active_lookup_task(db, task_id):
             return None
         persisted_id = lookup_persist.write_prepared_provider_execution(db, prepared)
     return persisted_id

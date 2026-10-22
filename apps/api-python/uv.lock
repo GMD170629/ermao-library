@@ -263,7 +263,7 @@ wheels = [
 
 [[package]]
 name = "ermao-books-api-python"
-version = "1.5.7"
+version = "1.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

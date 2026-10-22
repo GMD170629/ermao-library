@@ -41,17 +41,17 @@ def clear_metadata_task_payloads(
         payload = table.c[column_name]
         last_id: str | None = None
         while True:
-            with engine.begin() as connection:
-                page = sa.select(table.c.id).where(payload.is_not(None))
-                if last_id is not None:
-                    page = page.where(table.c.id > last_id)
+            page = sa.select(table.c.id).where(payload.is_not(None))
+            if last_id is not None:
+                page = page.where(table.c.id > last_id)
+            with engine.connect() as connection:
                 ids = list(connection.scalars(page.order_by(table.c.id).limit(batch_size)))
-                if not ids:
-                    break
-                connection.execute(
-                    table.update().where(table.c.id.in_(ids)).values({column_name: None})
-                )
-                last_id = ids[-1]
+            if not ids:
+                break
+            statement = table.update().where(table.c.id.in_(ids)).values({column_name: None})
+            with engine.begin() as db:
+                db.execute(statement)
+            last_id = ids[-1]
             yield table_name, len(ids)
 
 
