@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library, LibraryBook, LibrarySourceNode
+from app.models import LibraryBook, LibrarySourceNode
 from app.models.settings import SystemSetting
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
 )
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 
 def _schema_snapshot(engine: sa.Engine) -> dict[str, object]:
@@ -59,10 +60,7 @@ def test_upgrade_clears_only_unfinished_library_scans(
     try:
         command.upgrade(config, "0039_generated_metadata_fields")
         with Session(engine) as db:
-            db.add(Library(
-                id="library", name="Library", root_path=str(tmp_path / "books"),
-                organization_mode="FLAT",
-            ))
+            historical_library = insert_historical_library(db, root_path=tmp_path / "books")
             db.add(LibrarySourceNode(
                 id="node", library_id="library", relative_path="book.epub",
                 path_key=SourceNodeRelativePath("book.epub").path_key,
@@ -147,7 +145,9 @@ def test_upgrade_clears_only_unfinished_library_scans(
         for task_id, row in after.items():
             assert row == before[task_id]
         with Session(engine) as db:
-            assert db.get(Library, "library") is not None
+            assert db.scalar(sa.select(historical_library.c.id).where(
+                historical_library.c.id == "library",
+            )) == "library"
             assert db.get(LibraryBook, "book") is not None
             assert db.get(LibrarySourceNode, "node") is not None
             assert db.get(LibraryImportScanGap, "library") is not None

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library, LibraryBook, LibrarySourceNode
+from app.models import LibraryBook, LibrarySourceNode
 from app.modules.imports.application.readable_resource.book_work import (
     BookWork,
     encode_book_work,
@@ -23,6 +23,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 _PREVIOUS_REVISION = "0029_file_deletions"
 
@@ -41,14 +42,9 @@ def test_book_task_shape_migration_preserves_legacy_and_enforces_book_shape(
     command.upgrade(config, _PREVIOUS_REVISION)
 
     with Session(engine) as db:
-        library = Library(
-            id="library",
-            name="library",
-            root_path=str(tmp_path / "library"),
-            organization_mode="FLAT",
-            min_file_size_bytes=0,
+        insert_historical_library(
+            db, root_path=tmp_path / "library", name="library", min_file_size_bytes=0,
         )
-        db.add(library)
         db.commit()
 
     old_task = sa.table(

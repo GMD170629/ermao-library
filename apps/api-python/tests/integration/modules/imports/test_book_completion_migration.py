@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
+from tests.historical_library import insert_historical_library
 
 
 @pytest.mark.parametrize("partial_schema", (False, True))
@@ -28,10 +28,7 @@ def test_completion_intent_upgrade_preserves_historical_unknown_state(
     try:
         command.upgrade(config, "0033_book_scan_gate")
         with Session(engine) as db:
-            db.add(Library(
-                id="library", name="Library", root_path=str(tmp_path / "books"),
-                organization_mode="FLAT",
-            ))
+            insert_historical_library(db, root_path=tmp_path / "books")
             db.commit()
         historical = sa.table(
             "LibraryImportTask",

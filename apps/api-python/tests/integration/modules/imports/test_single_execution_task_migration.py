@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library, LibraryBook, LibrarySourceNode
+from app.models import LibraryBook, LibrarySourceNode
 from app.modules.imports.application.readable_resource.book_work import BookWork
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.readable_resource.task_queue import (
@@ -22,6 +22,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 
 def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> None:
@@ -31,10 +32,7 @@ def test_upgrade_removes_single_book_and_queued_scan_keys(tmp_path: Path) -> Non
     try:
         command.upgrade(config, "0035_directory_member_cursor")
         with Session(engine) as db:
-            db.add(Library(
-                id="library", name="Library", root_path=str(tmp_path),
-                organization_mode="FLAT",
-            ))
+            insert_historical_library(db, root_path=tmp_path)
             db.add(LibrarySourceNode(
                 id="node", library_id="library", relative_path="book.epub",
                 path_key=SourceNodeRelativePath("book.epub").path_key,
@@ -94,10 +92,7 @@ def test_upgrade_preserves_only_unstarted_pending_scope(tmp_path: Path) -> None:
     try:
         command.upgrade(config, "0036_import_execution_identity")
         with Session(engine) as db:
-            db.add(Library(
-                id="library", name="Library", root_path=str(tmp_path),
-                organization_mode="FLAT",
-            ))
+            insert_historical_library(db, root_path=tmp_path)
             db.add(LibrarySourceNode(
                 id="node", library_id="library", relative_path="book.epub",
                 path_key=SourceNodeRelativePath("book.epub").path_key,
