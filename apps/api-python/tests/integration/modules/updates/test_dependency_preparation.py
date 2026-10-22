@@ -253,6 +253,12 @@ def finish(downloads):
     while time.monotonic() < deadline:
         state = downloads.worker.status()
         if state.phase in ("ready", "failed"):
+            # The terminal state is persisted before the worker releases its lock.
+            # Installation fixtures need the owned preparation attempt to be finished.
+            thread = downloads.worker.thread
+            if thread is not None:
+                thread.join(max(0, deadline - time.monotonic()))
+                assert not thread.is_alive(), "preparation worker did not finish"
             return state
         time.sleep(0.01)
     raise AssertionError("preparation did not finish")
