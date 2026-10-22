@@ -19,9 +19,7 @@ from app.core.config import Settings
 from app.db.runner import alembic_config_for_engine, apply_schema
 from app.db.sqlite import create_sqlite_engine
 from app.models import (
-    Library,
     LibraryBook,
-    LibraryBookMetadata,
     LibraryImportScanGap,
     LibraryReadableResource,
 )
@@ -33,6 +31,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 LEGACY_REVISION = "0017_reset_default_cover_paths"
 
@@ -114,14 +113,9 @@ def test_legacy_failed_scan_variants_backfill_scopes(tmp_path: Path) -> None:
             for library_id in ("full", "local", "source", "recovered"):
                 library_root = root / library_id
                 library_root.mkdir()
-                db.add(
-                    Library(
-                        id=library_id,
-                        name=library_id,
-                        root_path=str(library_root),
-                        organization_mode="FLAT",
-                        min_file_size_bytes=0,
-                    )
+                insert_historical_library(
+                    db, root_path=library_root, library_id=library_id,
+                    name=library_id, min_file_size_bytes=0,
                 )
             db.flush()
             _add_legacy_source_node(
@@ -206,14 +200,9 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
     try:
         _upgrade_to(engine, LEGACY_REVISION)
         with Session(engine) as db:
-            db.add(
-                Library(
-                    id="legacy",
-                    name="legacy",
-                    root_path=str(root),
-                    organization_mode="FLAT",
-                    min_file_size_bytes=0,
-                )
+            insert_historical_library(
+                db, root_path=root, library_id="legacy", name="legacy",
+                min_file_size_bytes=0,
             )
             db.flush()
             _add_legacy_source_node(
@@ -350,14 +339,9 @@ def test_legacy_failed_scan_backfilled_and_recovered_without_revival(
 def _add_library(db: Session, library_id: str, root: Path) -> None:
     library_root = root / library_id
     library_root.mkdir(parents=True, exist_ok=True)
-    db.add(
-        Library(
-            id=library_id,
-            name=library_id,
-            root_path=str(library_root),
-            organization_mode="FLAT",
-            min_file_size_bytes=0,
-        )
+    insert_historical_library(
+        db, root_path=library_root, library_id=library_id,
+        name=library_id, min_file_size_bytes=0,
     )
     db.flush()
 

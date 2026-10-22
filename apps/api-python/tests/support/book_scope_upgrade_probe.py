@@ -24,8 +24,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
-from app.models import Library
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 _NOW = datetime(2026, 9, 23, tzinfo=UTC)
 _TIMESTAMP = int(_NOW.timestamp() * 1000)
@@ -41,13 +41,9 @@ def run(book_count: int, *, kill_during_upgrade: bool = False) -> None:
         config = alembic_config_for_engine(engine)
         command.upgrade(config, _REVISION)
         with Session(engine) as session:
-            session.add(
-                Library(
-                    id="scale-library",
-                    name="Upgrade scale",
-                    root_path=str(root / "books"),
-                    organization_mode="FLAT",
-                )
+            insert_historical_library(
+                session, root_path=root / "books", library_id="scale-library",
+                name="Upgrade scale",
             )
             session.commit()
             tables = {

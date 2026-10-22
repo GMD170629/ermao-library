@@ -16,9 +16,7 @@ from app.core.config import Settings
 from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
 from app.models import (
-    Library,
     LibraryBook,
-    LibraryBookMetadata,
     LibraryImportScanGap,
     LibraryReadableResource,
     LibraryResourceAsset,
@@ -38,6 +36,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.library.public import SourceNodeRelativePath
+from tests.historical_library import insert_historical_library
 
 _NOW = datetime(2026, 9, 23, tzinfo=UTC)
 _REVISION = "0030_book_import_task_shape"
@@ -84,14 +83,7 @@ def test_upgrade_merges_old_resource_and_identification_tasks_and_is_reentrant(
     try:
         command.upgrade(config, _REVISION)
         with Session(engine) as db:
-            db.add(
-                Library(
-                    id="library",
-                    name="Library",
-                    root_path=str(tmp_path / "books"),
-                    organization_mode="FLAT",
-                )
-            )
+            insert_historical_library(db, root_path=tmp_path / "books")
             _insert_legacy_nodes(db, ("one", "two", "three", "orphan"))
             db.flush()
             db.add_all(
@@ -283,14 +275,7 @@ def test_upgrade_pages_more_than_one_batch_of_pending_books(tmp_path: Path) -> N
     try:
         command.upgrade(config, _REVISION)
         with Session(engine) as db:
-            db.add(
-                Library(
-                    id="library",
-                    name="Library",
-                    root_path=str(tmp_path / "books"),
-                    organization_mode="FLAT",
-                )
-            )
+            insert_historical_library(db, root_path=tmp_path / "books")
             _insert_legacy_nodes(
                 db, tuple(f"node-{index:03d}" for index in range(205))
             )
