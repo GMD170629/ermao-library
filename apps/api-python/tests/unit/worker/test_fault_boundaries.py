@@ -54,6 +54,7 @@ def runtime(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(worker_main, "worker_ready_file", lambda: tmp_path / "ready")
     sessions = []
+    import_sessions = []
 
     def session():
         value = MagicMock()
@@ -63,17 +64,20 @@ def runtime(monkeypatch, tmp_path):
         return value
 
     monkeypatch.setattr(worker_main, "BackgroundSessionLocal", session)
+    cleanup = Mock()
+    cleanup.execute.return_value = False
+    monkeypatch.setattr(worker_main, "build_library_cleanup", lambda db: cleanup)
     monkeypatch.setattr(worker_main, "build_automation_uploads", lambda db: Mock())
     move_worker = Mock()
     move_worker.process_once.return_value = False
     monkeypatch.setattr(worker_main, "build_file_move_worker", lambda db: move_worker)
     processor = Mock()
     processor.process_once.return_value = "idle"
-    monkeypatch.setattr(
-        worker_main,
-        "build_readable_resource_pipeline",
-        lambda db: SimpleNamespace(request_library_scan=None, uow=None),
-    )
+    def build_pipeline(db):
+        import_sessions.append(db)
+        return SimpleNamespace(request_library_scan=None, uow=None)
+
+    monkeypatch.setattr(worker_main, "build_readable_resource_pipeline", build_pipeline)
     monkeypatch.setattr(
         worker_main, "build_readable_resource_worker", lambda graph: processor
     )
@@ -103,6 +107,7 @@ def runtime(monkeypatch, tmp_path):
         organizer=organizer,
         calls=calls,
         sessions=sessions,
+        import_sessions=import_sessions,
         diagnostics=diagnostics,
         handlers=handlers,
         ready=tmp_path / "ready",
@@ -127,7 +132,9 @@ def test_transient_recovery_uses_new_context_before_claim(runtime):
     ]
     worker_main.main()
     assert runtime.processor.startup.call_count == 3
-    assert len(runtime.sessions) == 5  # cleanup, moves and three import recovery attempts
+    assert len(runtime.import_sessions) == 3
+    assert len({id(session) for session in runtime.import_sessions}) == 3
+    assert all(session.close.called for session in runtime.import_sessions)
     assert runtime.processor.process_once.called
 
 

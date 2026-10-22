@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
@@ -59,6 +59,7 @@ from app.modules.system.presentation.schemas import (
     ManagementEventsResponse,
     ManagementOverviewPayload,
     ManagementOverviewResponse,
+    SystemLogArchiveResponse,
     SystemSettingsResponse,
     UpdateLibraryScanSystemSettingsRequest,
     UpdateSystemSettingsRequest,
@@ -303,7 +304,7 @@ def list_system_events(
     )
 
 
-@router.get("/management/events/export", response_class=StreamingResponse)
+@router.get("/management/events/export", response_class=SystemLogArchiveResponse)
 def export_system_log_files(
     request: Request,
     db: Session = Depends(get_db),
@@ -312,9 +313,8 @@ def export_system_log_files(
     _user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    return StreamingResponse(
+    return SystemLogArchiveResponse(
         export_log_files(),
-        media_type="application/zip",
         headers={
             "Content-Disposition": 'attachment; filename="shuku-system-logs.zip"',
             "Cache-Control": "private, no-store",

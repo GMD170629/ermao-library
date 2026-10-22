@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
+from fastapi.responses import StreamingResponse
 from pydantic import BeforeValidator, Field, model_validator
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
@@ -10,6 +11,10 @@ from app.contracts.system_events import SystemEvent
 from app.modules.library.public import LibraryOrganizationMode
 
 SystemSettingValue = str | int | float | bool | list[str] | None
+
+
+class SystemLogArchiveResponse(StreamingResponse):
+    media_type = "application/zip"
 
 
 def _require_integer_scan_interval(value: object) -> int:

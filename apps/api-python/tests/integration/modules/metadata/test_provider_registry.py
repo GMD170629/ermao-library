@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,7 @@ def test_provider_queries_remain_readable_while_another_writer_holds_lock(
         blocker.execute(
             update(SystemSetting)
             .where(SystemSetting.key == "systemName")
-            .values(value="writer owns SQLite slot")
+            .values(value=json.dumps("writer owns SQLite slot"))
         )
 
         with Session(reader_engine) as reader:
@@ -180,8 +181,6 @@ def test_provider_state_and_audit_event_roll_back_together(
 
 
 def test_generate_switch_defaults_off_and_reuses_existing_configuration(db_session):
-    import json
-
     from app.models.import_pipeline import Source
     from app.services.metadata_provider_registry import MetadataProviderRequestError
     db_session.add(Source(id="switch-ai", name="AI", kind="metadata", provider_type="ai", enabled=True,
