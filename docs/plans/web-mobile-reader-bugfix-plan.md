@@ -90,3 +90,7 @@ app/globals.css 仅对 WebKit standalone 的现有 ReaderShell 应用 position:a
 - 新增 release-notes/v1.6.1.md 的 zh-CN/en-US 修复说明与索引条目。普通服务端发布，不设置 code-only 元数据；计划交付服务端镜像、fnOS 和在线更新包。
 - 索引中的时间是准备时填写的预备值，正式公开时须核对实际发布时间；不得把它当作已公开的证据。
 - 本次仅准备候选提交，不推送分支、不创建正式标签、不触发正式工作流、不公开 Release、不改 NAS。正式发布前仍须按既有流程对齐远端 main/develop 到发布提交，再从正式标签运行普通发布门禁；本地验收与版本说明校验不替代正式工作流结果。
+
+## v1.6.1 快速发布执行
+
+用户明确授权快速更新，不保留单独发布分支。采用 code-only，baseVersion=1.6.0，基础镜像固定为 gamersgu/shuku-starship-web@sha256:c88bc42b9e33de0ff62b76ab7f49d5a127b2919b74fc27137515cbf34ee29051；两架构 OCI 镜像标签均核对为 v1.6.0 源码 71d52fe2。应用修复和已有定向验收结果不变。发布冻结后将远端 main/develop 快进至同一提交并创建正式标签；不构建或推广 Docker 镜像，不生成 FPK/APK/IPA，正式快速门禁由同一标签工作流执行。前一节的普通发布计划已被本次用户选择取代。

@@ -5,9 +5,14 @@
     {
       "version": "1.6.1",
       "tag": "v1.6.1",
-      "publishedAt": "2026-10-23T22:08:54+08:00",
+      "publishedAt": "2026-10-23T14:25:50Z",
       "notesPath": "v1.6.1.md",
-      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.6.1"
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.6.1",
+      "serverUpdate": {
+        "mode": "code-only",
+        "baseVersion": "1.6.0",
+        "runtimeImage": "gamersgu/shuku-starship-web@sha256:c88bc42b9e33de0ff62b76ab7f49d5a127b2919b74fc27137515cbf34ee29051"
+      }
     },
     {
       "version": "1.6.0",
