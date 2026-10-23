@@ -408,6 +408,83 @@ test('Readium applies block margins to every page viewport without special-casin
   await expect(frame.contentFrame().locator('#front-contents')).toBeVisible();
 });
 
+test('Readium scroll page turns stay in the visible long chapter after crossing a boundary', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('shuku:reader:device-defaults:user-e2e', JSON.stringify({
+    schemaVersion: 6, epub: { flow: 'scrolled' }
+  })));
+  await installReaderRoutes(page, null, 0, [
+    { href: 'chapter1.xhtml', title: '第一章', body: chapterTwo.replaceAll('第二章', '第一章') },
+    { href: 'chapter2.xhtml', title: '第二章', body: `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1>第二章</h1>${'<p>长章正文，不得跳过尚未阅读的后续段落。</p>'.repeat(100)}</body></html>` },
+    { href: 'chapter3.xhtml', title: '第三章', body: chapterTwo.replaceAll('第二章', '第三章') }
+  ]);
+  await page.goto('/reader/epub-resource');
+  let frame = await visibleReadiumFrame(page);
+  let bounds = await frame.boundingBox();
+  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+  await page.mouse.click(bounds.x + bounds.width - 12, bounds.y + bounds.height / 2);
+  frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().locator('h1')).toHaveText('第二章');
+  bounds = await frame.boundingBox();
+  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+  await page.mouse.click(bounds.x + bounds.width - 12, bounds.y + bounds.height / 2);
+  await expect.poll(() => frame.contentFrame().locator('html').evaluate(() => window.scrollY)).toBeGreaterThan(100);
+  await expect(frame.contentFrame().locator('h1')).toHaveText('第二章');
+  // Returning within the chapter must use that same current document as well.
+  await page.mouse.click(bounds.x + 12, bounds.y + bounds.height / 2);
+  await expect.poll(() => frame.contentFrame().locator('html').evaluate(() => window.scrollY)).toBeLessThan(5);
+  await expect(frame.contentFrame().locator('h1')).toHaveText('第二章');
+});
+
+for (const direction of ['next', 'previous'] as const) {
+  test(`Readium ignores the Safari compatibility click retargeted outside the iframe after ${direction} chapter navigation`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const longBody = '<p>长章正文用于检查跨章后仍停留在目标边缘页。</p>'.repeat(80);
+    await installReaderRoutes(page, null, 0, [
+      { href: 'chapter1.xhtml', title: '第一章', body: `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1>第一章</h1>${longBody}</body></html>` },
+      { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo },
+      { href: 'chapter3.xhtml', title: '第三章', body: `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第三章</title></head><body><h1>第三章</h1>${longBody}</body></html>` }
+    ]);
+    await page.goto('/reader/epub-resource?chapterKey=chapter-1');
+    let frame = await visibleReadiumFrame(page);
+    await expect(frame.contentFrame().locator('h1')).toHaveText('第二章');
+    const bounds = await frame.boundingBox();
+    if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+    const x = bounds.x + bounds.width * (direction === 'next' ? 0.95 : 0.05);
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.click(x, y);
+    frame = await visibleReadiumFrame(page);
+    await expect(frame.contentFrame().locator('h1')).toHaveText(direction === 'next' ? '第三章' : '第一章');
+    const position = await frame.contentFrame().locator('html').evaluate(() => window.scrollX);
+    // On a real iPhone PWA, Safari retargets the touch's compatibility click
+    // to this outer container when the originating chapter iframe is hidden.
+    await page.locator('[data-reader-input-bridge="ready"]').dispatchEvent('click', { clientX: x, clientY: y });
+    await page.waitForTimeout(250);
+    expect(await frame.contentFrame().locator('html').evaluate(() => window.scrollX)).toBe(position);
+  });
+}
+
+test('Readium keeps the same body gutters when switching between paginated and scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installReaderRoutes(page);
+  await page.goto('/reader/epub-resource');
+  let frame = await visibleReadiumFrame(page);
+  const measure = () => frame.contentFrame().locator('p').first().evaluate(p => ({
+    left: p.getBoundingClientRect().left,
+    right: innerWidth - p.getBoundingClientRect().right
+  }));
+  const paginated = await measure();
+  expect(paginated.left).toBeCloseTo(16, 0);
+  expect(paginated.right).toBeCloseTo(paginated.left, 0);
+  await revealReaderControls(page);
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await page.getByRole('group', { name: '阅读方式' }).getByRole('button', { name: '滚动', exact: true }).click();
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+  frame = await visibleReadiumFrame(page);
+  await expect.poll(() => frame.contentFrame().locator('html').evaluate(root => root.style.getPropertyValue('--USER__view'))).toBe('readium-scroll-on');
+  expect(await measure()).toEqual(paginated);
+});
+
 test('Readium iframe routes center and jittered edge mouse taps without leaving a blue selection', async ({ page }) => {
   await installReaderRoutes(page, null, 0, [
     { href: 'chapter1.xhtml', title: '短章', body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>' },
@@ -514,6 +591,70 @@ for (const direction of ['next', 'previous'] as const) {
 
 test.describe('Readium native touch input', () => {
   test.use({ hasTouch: true });
+
+  test('scrolling remains native after reading-mode switches and reopening', async ({ page, context }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installReaderRoutes(page, null, 0, [{
+      href: 'chapter1.xhtml', title: '长章',
+      body: `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>长章</title></head><body><h1>长章</h1>${'<p>滚动的长章正文用于验证手机原生上下滑动不会被切换模式锁住。</p>'.repeat(100)}</body></html>`
+    }]);
+    await page.goto('/reader/epub-resource');
+    const input = await context.newCDPSession(page);
+    for (let round = 0; round < 2; round += 1) {
+      await revealReaderControls(page);
+      await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+      const viewport = page.locator('[data-reader-viewport="stable"]');
+      // The native iframe must remain outside inert while the SDK creates its
+      // replacement frame. The modal still hides background content from AT.
+      await expect(viewport).toHaveJSProperty('inert', false);
+      await expect(viewport).toHaveAttribute('aria-hidden', 'true');
+      const closePanel = page.getByRole('button', { name: '关闭面板', exact: true });
+      await closePanel.focus();
+      await page.keyboard.press('Shift+Tab');
+      await expect.poll(() => page.getByRole('dialog').evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
+      await page.keyboard.press('Tab');
+      await expect(closePanel).toBeFocused();
+      await page.getByRole('group', { name: '阅读方式' }).getByRole('button', { name: '滚动', exact: true }).click();
+      await closePanel.click();
+      await expect(viewport).not.toHaveAttribute('aria-hidden', 'true');
+      // The constructor must choose the same native snapper as a subsequent
+      // submitPreferences call when the saved preference already enables scroll.
+      if (round === 1) await page.reload();
+      const frame = await visibleReadiumFrame(page);
+      await expect.poll(() => frame.contentFrame().locator('html').evaluate((root) => root.style.getPropertyValue('--USER__view'))).toBe('readium-scroll-on');
+      await page.evaluate(() => {
+        document.documentElement.dataset.testScrollBoundaryEvents = '0';
+        window.addEventListener('message', (event: MessageEvent<unknown>) => {
+          const data = event.data;
+          if (!data || typeof data !== 'object' || !('key' in data)) return;
+          if (data.key === 'no_less' || data.key === 'no_more') {
+            const root = document.documentElement;
+            root.dataset.testScrollBoundaryEvents = String(Number(root.dataset.testScrollBoundaryEvents) + 1);
+          }
+        });
+      });
+      const bounds = await frame.boundingBox();
+      if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
+      const before = await frame.contentFrame().locator('html').evaluate(() => window.scrollY);
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height * 0.75;
+      await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 10; step += 1) {
+        await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + step * 1.2, y: y - step * 20 }] });
+        await page.waitForTimeout(16);
+      }
+      await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await expect.poll(() => frame.contentFrame().locator('html').evaluate(() => window.scrollY)).toBeGreaterThan(before + 30);
+      await expect(page.locator('html')).toHaveAttribute('data-test-scroll-boundary-events', '0');
+      await revealReaderControls(page);
+      await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+      await page.getByRole('group', { name: '阅读方式' }).getByRole('button', { name: '分页', exact: true }).click();
+      await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+      const paginated = await visibleReadiumFrame(page);
+      await expect.poll(() => paginated.contentFrame().locator('html').evaluate((root) => root.style.getPropertyValue('--USER__view'))).toBe('readium-paged-on');
+    }
+    await input.detach();
+  });
 
   test('keeps center controls and single-page taps responsive', async ({ page }) => {
     const writes = await installReaderRoutes(page);

@@ -307,6 +307,18 @@ html[data-audio-mini-player='reader'] .shuku-pwa-bottom-overlay {
   box-sizing: border-box;
 }
 
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    /* A fixed-only reader leaves iOS PWA's viewport docked below the status
+       bar. An absolute full-height surface lets WebKit use the whole canvas;
+       the reader's existing safe-area padding still protects its controls. */
+    [data-reader-shell='v3'] {
+      position: absolute;
+      height: 100vh;
+    }
+  }
+}
+
 /* iOS standalone positions bottom: 0 above the home-indicator canvas on some
    versions. Bleed reader chrome through that inset while keeping controls in
    the normal interactive viewport. */

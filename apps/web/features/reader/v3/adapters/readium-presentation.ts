@@ -88,6 +88,8 @@ export function createReadiumEpubPreferences(
       : effective.epub.letterSpacing,
     lineHeight: publisherStyles ? null : effective.epub.lineHeight,
     pageGutter: layout.pageGutter,
+    scrollPaddingLeft: layout.pageGutter,
+    scrollPaddingRight: layout.pageGutter,
     paragraphIndent: publisherStyles ? null : effective.epub.typography.paragraphIndent,
     paragraphSpacing: publisherStyles ? null : effective.epub.typography.paragraphSpacing,
     textAlign: publisherStyles || effective.epub.typography.textAlign === 'publisher'

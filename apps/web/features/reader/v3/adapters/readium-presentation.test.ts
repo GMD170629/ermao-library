@@ -84,6 +84,8 @@ test('Readium maps every native typography preference and submits scrolling', ()
   assert.equal(mapped.fontWeight, 700);
   assert.equal(mapped.letterSpacing, 0.08);
   assert.equal(mapped.pageGutter, 40);
+  assert.equal(mapped.scrollPaddingLeft, 40);
+  assert.equal(mapped.scrollPaddingRight, 40);
   assert.equal(mapped.paragraphIndent, 3);
   assert.equal(mapped.paragraphSpacing, 0.75);
   assert.equal(mapped.textAlign, 'justify');

@@ -226,7 +226,11 @@ function inertWhen(condition: boolean): { inert?: boolean } {
 }
 
 function shouldIgnoreReaderInteraction(target: EventTarget | null) {
-  return isReaderControlTarget(target) || hasActiveTextSelection(window.getSelection());
+  // Safari can retarget a touch's compatibility click to the outer container
+  // after a chapter iframe is hidden. Its input bridge already handled the tap.
+  return (target instanceof Element && target.closest('[data-reader-input-bridge="ready"]') !== null)
+    || isReaderControlTarget(target)
+    || hasActiveTextSelection(window.getSelection());
 }
 
 function secondsValue(value: unknown) {
@@ -794,7 +798,17 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
       }}
       tabIndex={-1}
     >
-      <main ref={readerViewportRef} className="min-h-0 flex-1 w-full overflow-hidden" data-reader-viewport="stable" {...inertWhen(Boolean(panel))}>
+      {/* A Readium frame created under inert keeps its native scrolling disabled
+          in iOS after the panel closes. Keep that host active; the modal scrim,
+          focus trap and input gate block interaction, and aria-hidden excludes
+          its content from accessibility while the panel is open. */}
+      <main
+        ref={readerViewportRef}
+        className="min-h-0 flex-1 w-full overflow-hidden"
+        data-reader-viewport="stable"
+        aria-hidden={panel ? true : undefined}
+        {...inertWhen(Boolean(panel) && readerType !== 'reflowable')}
+      >
         {typeof children === 'function' ? children({ enterImmersive, toggleControls, escape: closePanelOrImmersive, shouldIgnoreInteraction: shouldIgnoreReaderInteraction, isInteractionBlocked }) : children}
       </main>
 

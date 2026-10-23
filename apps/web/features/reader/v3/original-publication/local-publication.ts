@@ -4,6 +4,7 @@ import {
   LocatorLocations,
   Manifest,
   NumberRange,
+  Profile,
   Publication,
   Resource,
   type Fetcher
@@ -162,6 +163,9 @@ export function createLocalPublication(input: Readonly<{
   const manifest = Manifest.deserialize({
     metadata: {
       title: input.title,
+      // The navigator derives effectiveLayout from the publication profile,
+      // including when saved scroll preferences are used during initial load.
+      conformsTo: [Profile.EPUB],
       ...(input.language ? { language: input.language } : {}),
       ...(input.layout ? { layout: input.layout } : {}),
       ...(reflowable ? {

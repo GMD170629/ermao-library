@@ -259,6 +259,26 @@ test('Readium navigation flattening keeps authored order and depth for the reade
   ]);
 });
 
+test('local HTML publications expose their effective layout to the native navigator', () => {
+  for (const layout of [undefined, 'reflowable', 'fixed'] as const) {
+    const opened = createLocalPublication({
+      title: 'Native layout',
+      readingProgression: 'ltr',
+      writingMode: 'horizontal',
+      ...(layout ? { layout } : {}),
+      readingOrder: [{
+        href: 'chapter.xhtml',
+        type: 'application/xhtml+xml',
+        title: 'Chapter',
+        positionLength: 1,
+        read: async () => new Uint8Array()
+      }]
+    });
+    assert.equal(opened.publication.metadata.effectiveLayout, layout ?? 'reflowable');
+    opened.close();
+  }
+});
+
 test('local publication manifests preserve recursive TOC links', () => {
   const publication = createLocalPublication({
     title: 'Nested contents',

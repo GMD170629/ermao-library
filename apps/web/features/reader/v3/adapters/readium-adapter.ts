@@ -332,15 +332,13 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   }
 
   private currentContentDocument() {
-    const frames = Array.from(this.options.container.querySelectorAll('iframe'));
-    const visible = frames.find((frame) => {
-      if (!frame.contentDocument) return false;
-      const bounds = frame.getBoundingClientRect();
-      const viewport = this.options.container.getBoundingClientRect();
-      return bounds.right > viewport.left && bounds.left < viewport.right
-        && bounds.bottom > viewport.top && bounds.top < viewport.bottom;
-    });
-    return visible?.contentDocument ?? frames.find((frame) => frame.contentDocument)?.contentDocument ?? null;
+    // Retained chapters occupy the same rectangle even when hidden. The SDK
+    // owns the active frame; DOM order cannot identify the current chapter.
+    const frame = this.navigator?.pool?.currentFrames[0]?.iframe;
+    if (!frame?.isConnected || !this.options.container.contains(frame)) return null;
+    const view = frame.ownerDocument.defaultView;
+    if (!view || view.getComputedStyle(frame).visibility !== 'visible') return null;
+    return frame.contentDocument;
   }
 
   private navigationAnimationEnabled() {
