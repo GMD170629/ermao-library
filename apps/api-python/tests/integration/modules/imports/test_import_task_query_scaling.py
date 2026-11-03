@@ -164,6 +164,18 @@ def test_library_task_page_uses_ordered_index_and_reuses_summary(db_session, sta
     assert len(tasks) == (2 if state else 10)
     assert len(records) == 2  # One aggregate, one bounded page, no duplicate COUNT.
     assert records[-1]["steps"] < 20_000
+    summary_plan = (
+        db.connection()
+        .exec_driver_sql(
+            "EXPLAIN QUERY PLAN " + records[0]["sql"], records[0]["parameters"]
+        )
+        .all()
+    )
+    assert any(
+        "COVERING INDEX LibraryImportTask_library_state_totals_idx" in row[3]
+        for row in summary_plan
+    )
+    assert not any("TEMP B-TREE" in row[3] for row in summary_plan)
     plan = (
         db.connection()
         .exec_driver_sql(

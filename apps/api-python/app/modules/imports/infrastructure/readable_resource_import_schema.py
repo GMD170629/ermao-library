@@ -236,6 +236,7 @@ class LibraryImportTask(Base):
         Index("LibraryImportTask_libraryId_kind_idx", "libraryId", "kind", "state"),
         Index("LibraryImportTask_library_state_page_idx", "libraryId", "state", "createdAt", "id"),
         Index("LibraryImportTask_library_page_idx", "libraryId", "createdAt", "id"),
+        Index("LibraryImportTask_library_state_totals_idx", "libraryId", "state"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

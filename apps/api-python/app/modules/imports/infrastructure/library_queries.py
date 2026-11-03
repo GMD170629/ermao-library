@@ -312,12 +312,11 @@ def list_import_tasks_page(
     }
     summary_rows = db.execute(
         select(
-            LibraryImportTask.kind,
             LibraryImportTask.state,
             func.count().label("task_count"),
         )
         .where(*scope_filters)
-        .group_by(LibraryImportTask.kind, LibraryImportTask.state)
+        .group_by(LibraryImportTask.library_id, LibraryImportTask.state)
     ).all()
     for summary_row in summary_rows:
         key = summary_keys.get(str(summary_row.state))
