@@ -128,9 +128,11 @@ class LibrarySourceNode(Base):
         ),
         Index("LibrarySourceNode_libraryId_name_idx", "libraryId", "name"),
         Index(
-            "LibrarySourceNode_libraryId_relativePath_idx",
+            "LibrarySourceNode_directory_member_cover_idx",
             "libraryId",
             "relativePath",
+            "id",
+            "physicalKind",
         ),
     )
 

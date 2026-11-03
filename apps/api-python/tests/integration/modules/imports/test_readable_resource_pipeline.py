@@ -4647,6 +4647,12 @@ def test_directory_member_page_reads_only_its_path_range(tmp_path, anchor_name):
                 steps[0] += 100
                 return 0
 
+            statements = []
+
+            def before(_c, _cursor, sql, parameters, _context, _many):
+                statements.append((sql, parameters))
+
+            event.listen(engine, "before_cursor_execute", before)
             raw.set_progress_handler(progress, 100)
             try:
                 repository = SqlAlchemyBookResourceRepository(db)
@@ -4659,6 +4665,10 @@ def test_directory_member_page_reads_only_its_path_range(tmp_path, anchor_name):
             assert {first.members[0].node.name, second.members[0].node.name} == {"01.png", "02.png"}
             assert first.full and second.full
             assert not last.members and not last.full
+            event.remove(engine, "before_cursor_execute", before)
+            member_sql, parameters = next(s for s in statements if "anon_1" in s[0])
+            plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + member_sql, parameters).all()
+            assert any("COVERING INDEX LibrarySourceNode_directory_member_cover_idx" in r[3] for r in plan)
             assert steps[0] < 5000
     finally:
         engine.dispose()
