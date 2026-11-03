@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import sqlite3
@@ -15,7 +16,7 @@ from zipfile import ZipFile
 
 import pytest
 from pypdf import PdfWriter
-from sqlalchemy import delete, event, func, select, update
+from sqlalchemy import delete, event, func, insert, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -4609,5 +4610,55 @@ def test_rescan_does_not_reject_previously_imported_large_sources(tmp_path, monk
             assert db.scalar(select(LibraryResourceAsset.import_state)) == "READY"
             assert db.scalar(select(LibraryReadableResource.import_state)) == "READY"
             assert path.stat().st_size == 2**31 + 1
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("anchor_name", ["Comic_%_中文", "album"])
+def test_directory_member_page_reads_only_its_path_range(tmp_path, anchor_name):
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            folder = root / anchor_name
+            folder.mkdir()
+            (folder / "01.png").write_bytes(b"page")
+            (folder / "02.png").write_bytes(b"page")
+            pipeline, _ = _pipeline(db, adapters=StubAlwaysOkAdapter())
+            pipeline.scan_library_source_tree.execute_library("lib-1")
+            resource_id = db.scalar(select(LibraryReadableResource.id))
+            for offset in range(0, 12000, 1000):
+                db.execute(insert(LibrarySourceNode), [
+                    {
+                        "id": f"aaa-{i:06d}", "library_id": "lib-1", "name": str(i),
+                        "relative_path": f"unrelated/{i}.png",
+                        "path_key": "v1:" + hashlib.sha256(str(i).encode()).hexdigest(),
+                        "physical_kind": "REGULAR_FILE", "observed_size_bytes": 1,
+                        "observed_mtime_ns": 1, "observed_at": datetime.now(UTC),
+                    } for i in range(offset, offset + 1000)
+                ])
+            db.commit()
+            raw = db.connection().connection.driver_connection
+            steps = [0]
+
+            def progress():
+                steps[0] += 100
+                return 0
+
+            raw.set_progress_handler(progress, 100)
+            try:
+                repository = SqlAlchemyBookResourceRepository(db)
+                first = repository.page_directory_members(resource_id, after_id=None, limit=1)
+                second = repository.page_directory_members(resource_id, after_id=first.last_visited_id, limit=1)
+                last = repository.page_directory_members(resource_id, after_id=second.last_visited_id, limit=1)
+            finally:
+                raw.set_progress_handler(None, 0)
+            assert len(first.members) == len(second.members) == 1
+            assert {first.members[0].node.name, second.members[0].node.name} == {"01.png", "02.png"}
+            assert first.full and second.full
+            assert not last.members and not last.full
+            assert steps[0] < 5000
     finally:
         engine.dispose()

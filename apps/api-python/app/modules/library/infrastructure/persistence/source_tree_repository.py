@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import and_, collate, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.contracts.local_metadata_snapshot import (
@@ -1217,27 +1217,45 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         anchor = self._session.get(LibrarySourceNode, resource.source_node_id)
         if anchor is None:
             raise LookupError(resource.source_node_id)
+        # A binary path range uses the existing (libraryId, relativePath)
+        # index. LIKE plus ID ordering otherwise walks unrelated library nodes.
+        # Select the bounded member identities before fetching node/asset data.
+        prefix = anchor.relative_path + "/"
+        member_ids = (
+            select(LibrarySourceNode.id)
+            .where(
+                LibrarySourceNode.library_id == resource.library_id,
+                LibrarySourceNode.relative_path >= prefix,
+                LibrarySourceNode.relative_path < anchor.relative_path + "0",
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+                LibrarySourceNode.id > (after_id or ""),
+            )
+            .order_by(LibrarySourceNode.id)
+            .limit(limit)
+            .subquery()
+        )
         rows = self._session.execute(
             select(
                 LibrarySourceNode,
                 LibraryResourceAsset.processed_source_version,
                 LibraryResourceAsset.import_state,
             )
+            .join(member_ids, member_ids.c.id == LibrarySourceNode.id)
             .outerjoin(
                 LibraryResourceAsset,
                 (LibraryResourceAsset.source_node_id == LibrarySourceNode.id)
                 & (LibraryResourceAsset.resource_id == resource_id),
             )
-            .where(
-                LibrarySourceNode.library_id == resource.library_id,
-                LibrarySourceNode.physical_kind == "REGULAR_FILE",
-                LibrarySourceNode.id > (after_id or ""),
-                LibrarySourceNode.relative_path.startswith(
-                    anchor.relative_path + "/", autoescape=True
-                ),
-            )
+            .options(load_only(
+                LibrarySourceNode.id, LibrarySourceNode.library_id,
+                LibrarySourceNode.parent_id, LibrarySourceNode.relative_path,
+                LibrarySourceNode.path_key, LibrarySourceNode.name,
+                LibrarySourceNode.physical_kind,
+                LibrarySourceNode.observed_size_bytes,
+                LibrarySourceNode.observed_mtime_ns, LibrarySourceNode.observed_at,
+                raiseload=True,
+            ))
             .order_by(LibrarySourceNode.id)
-            .limit(limit)
         ).all()
         members = tuple(
             DirectoryImportMember(
