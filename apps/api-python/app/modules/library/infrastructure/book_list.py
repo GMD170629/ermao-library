@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, Select, exists, func, or_, select
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import InstrumentedAttribute, Session, load_only
 
 from app.core.authorization import (
     AuthorizationContext,
@@ -174,18 +174,23 @@ def _order(
     user: User,
     context: AuthorizationContext,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
+    reverse: bool = False,
 ) -> list[ColumnElement[object]]:
     descending = (query.sort_direction or "").lower() == "desc" or (
         not query.sort_direction
         and query.sort in {"updated", "recent_read", "recent_import", "progress"}
     )
 
+    if reverse:
+        descending = not descending
+
     def direction(column: object) -> ColumnElement[object]:
         expression = cast(ColumnElement[object], column)
         return expression.desc() if descending else expression.asc()
 
     def ascending(column: object) -> ColumnElement[object]:
-        return cast(ColumnElement[object], column).asc()
+        expression = cast(ColumnElement[object], column)
+        return expression.desc() if reverse else expression.asc()
 
     if query.sort == "title":
         return [direction(LibraryBookMetadata.title), ascending(LibraryBook.id)]
@@ -426,20 +431,30 @@ def list_books(
     total = int(db.scalar(select(func.count()).select_from(identities.subquery())) or 0)
     page = max(1, query.page)
     page_size = resolve_page_size(query.requested_page_size, total)
-    if not total:
+    offset = (page - 1) * page_size
+    if offset >= total:
         return BookListResult(
             books=[],
-            total=0,
+            total=total,
             page=page,
             page_size=page_size,
-            total_pages=1,
+            total_pages=max(1, (total + page_size - 1) // page_size),
             progress_sort=query.sort == "progress",
         )
     order = _order(query, user=user, context=context, reader_queries=reader_queries)
+    # The exact count is already needed for the response. Traverse from the
+    # nearer end so a final page never scans every preceding book identity.
+    page_limit = min(page_size, total - offset)
+    reverse = offset > total // 2
+    page_order = (
+        _order(query, user=user, context=context, reader_queries=reader_queries, reverse=True)
+        if reverse else order
+    )
+    page_offset = total - offset - page_limit if reverse else offset
     selected_page = (
-        book_ids_statement(predicates, order)
-        .limit(page_size)
-        .offset((page - 1) * page_size)
+        book_ids_statement(predicates, page_order)
+        .limit(page_limit)
+        .offset(page_offset)
         .subquery()
     )
     row_query: Select[Any] = (
@@ -457,7 +472,7 @@ def list_books(
                 LibraryBookMetadata.cover_status,
             ).label("effective_cover_path")
         )
-    metadata_columns = [
+    metadata_columns: list[InstrumentedAttribute[Any]] = [
         LibraryBookMetadata.book_id,
         LibraryBookMetadata.title,
         LibraryBookMetadata.author,
@@ -486,7 +501,7 @@ def list_books(
         metadata_columns += [LibraryBookMetadata.series_name]
     row_query = row_query.options(load_only(*metadata_columns, raiseload=True))
     if query.projection != "full":
-        book_columns = [LibraryBook.id]
+        book_columns: list[InstrumentedAttribute[Any]] = [LibraryBook.id]
         if query.projection == "import-status":
             book_columns.append(LibraryBook.library_id)
         if query.projection == "management":

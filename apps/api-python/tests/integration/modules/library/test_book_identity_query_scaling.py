@@ -29,7 +29,8 @@ def test_identity_query_joins_metadata_only_for_used_expressions(metadata):
     assert "LEFT OUTER JOIN" in ordered
 
 
-def test_book_count_is_metadata_free_and_page_hydration_is_bounded(db_session):
+@pytest.mark.parametrize("page", [1, 1000])
+def test_book_count_is_metadata_free_and_page_hydration_is_bounded(db_session, page):
     db = db_session
     now = datetime.now(UTC)
     user = User(
@@ -99,7 +100,7 @@ def test_book_count_is_metadata_free_and_page_hydration_is_bounded(db_session):
         result = list_books(
             db,
             user,
-            BookListQuery(page=1, requested_page_size=20),
+            BookListQuery(page=page, requested_page_size=20),
             reader_queries=SqlAlchemyReaderV5LibraryPresentationQueries(db),
         )
     finally:
@@ -108,7 +109,7 @@ def test_book_count_is_metadata_free_and_page_hydration_is_bounded(db_session):
     assert result.total == 20_000
     assert len(result.books) == 20
     assert [b["id"] for b in result.books] == [
-        f"book-{i:06d}" for i in range(19999, 19979, -1)
+        f"book-{i:06d}" for i in range(20000 - (page - 1) * 20 - 1, 20000 - page * 20 - 1, -1)
     ]
     assert "LibraryBookMetadata" not in records[0]["sql"]
     assert "LEFT OUTER JOIN" in records[1]["sql"]
@@ -150,3 +151,48 @@ def test_book_identity_indexes_restart(tmp_path, partial):
         } <= indexes
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("sort", ["updated", "recent_import", "title", "author", "series", "series_index", "recent_read"])
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_nearer_end_pages_preserve_order_nulls_ties_and_partial_last_page(db_session, sort, direction):
+    db = db_session
+    now = datetime.now(UTC)
+    user = User(id="page-admin", email="page@example.test", name="page", role="admin", password_hash="test")
+    db.add(user)
+    for i in range(31):
+        db.add(LibrarySourceNode(
+            id=f"node-{i}", library_id="test-library", name=str(i), relative_path=str(i),
+            path_key="v1:" + f"{i:064x}", physical_kind="DIRECTORY", observed_mtime_ns=1, observed_at=now,
+        ))
+    db.flush()
+    for i in range(31):
+        db.add(LibraryBook(id=f"book-{i:02d}", library_id="test-library", source_node_id=f"node-{i}", created_at=now, updated_at=now))
+    db.flush()
+    for i in range(31):
+        db.add(LibraryBookMetadata(
+            book_id=f"book-{i:02d}", title=f"Title {i % 5}", normalized_title=str(i),
+            author=None if i % 3 else "Author", series_name=None if i % 2 else "Series", series_index=None if i % 3 else 1,
+        ))
+    db.commit()
+    reader = SqlAlchemyReaderV5LibraryPresentationQueries(db)
+
+    def fetch(page, size):
+        return list_books(db, user, BookListQuery(page=page, requested_page_size=size, sort=sort, sort_direction=direction, projection="import-status"), reader_queries=reader)
+
+    whole = [b["id"] for b in fetch(1, 100).books]
+    paged = [b["id"] for page in range(1, 5) for b in fetch(page, 10).books]
+    assert len(whole) == 31
+    assert paged == whole
+    queries = []
+
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        queries.append(sql)
+
+    sa.event.listen(db.get_bind(), "before_cursor_execute", before)
+    try:
+        empty = fetch(5, 10)
+    finally:
+        sa.event.remove(db.get_bind(), "before_cursor_execute", before)
+    assert empty.books == [] and empty.total == 31 and empty.total_pages == 4 and empty.page == 5
+    assert len(queries) == 1
