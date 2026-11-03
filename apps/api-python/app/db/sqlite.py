@@ -22,6 +22,7 @@ except ImportError as _caught_error:  # diagnostics-control-flow: Windows does n
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
+from sqlalchemy.schema import CreateIndex
 
 from app.core.natural_sort import natural_sort_key
 from app.db.maintenance import (
@@ -196,14 +197,18 @@ class _StatementBudgetCursor(sqlite3.Cursor):
     _diagnostic_statement: dict[str, object] | None = None
     _diagnostic_transaction: _TransactionTrace | None = None
     _pre_execute_wait_seconds: float = 0.0
+    _migration_index_build: bool = False
 
     def _start_statement(self) -> None:
         self._budget_exhausted = False
         self._progress_calls = 0
         self._last_progress_at = None
-        self._remaining_seconds = cast(
-            _StatementBudgetConnection, self.connection
-        ).statement_time_budget_seconds
+        if self._migration_index_build:
+            self._remaining_seconds = None
+        else:
+            self._remaining_seconds = cast(
+                _StatementBudgetConnection, self.connection
+            ).statement_time_budget_seconds
         if self._remaining_seconds is not None:
             self._remaining_seconds -= self._pre_execute_wait_seconds
         self._pre_execute_wait_seconds = 0.0
@@ -562,6 +567,12 @@ def create_sqlite_engine(
                     raise
                 trace.lease_wait_ms = (monotonic() - lease_started) * 1000
         if isinstance(cursor, _StatementBudgetCursor):
+            cursor._migration_index_build = bool(
+                info.get("schema_migration_active")
+                and isinstance(
+                    getattr(execution_context.compiled, "statement", None), CreateIndex
+                )
+            )
             cursor._pre_execute_wait_seconds = trace.lease_wait_ms / 1000
         trace.dbapi_started_at = monotonic()
 

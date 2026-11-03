@@ -18,6 +18,7 @@ from app.core.exception_diagnostics import format_exception_diagnostics
 from app.core.logging_config import DailyFileHandler
 from app.core.setting_values import encode_setting_value
 from app.db.diagnostic_session import DiagnosticSession
+from app.db.runner import _run_alembic
 from app.db.sqlite import (
     SQLITE_LOCK_WAIT_SECONDS,
     SQLITE_STATEMENT_TIMEOUT_SECONDS,
@@ -30,6 +31,79 @@ from tests.support.log_events import log_records, one_log
 def test_statement_budget_and_lock_wait_share_thirty_second_cap() -> None:
     assert SQLITE_LOCK_WAIT_SECONDS == 30.0
     assert SQLITE_STATEMENT_TIMEOUT_SECONDS == 30.0
+
+
+@pytest.mark.parametrize("migration", [False, True])
+def test_only_migration_index_build_can_exceed_statement_budget(tmp_path, migration):
+    engine = create_sqlite_engine(
+        tmp_path / "index-budget.sqlite3", statement_time_budget_seconds=.03,
+        slow_write_threshold_seconds=None,
+    )
+    @sa.event.listens_for(engine, "connect")
+    def register_slow_index(connection, _record):
+        def slow(value):
+            time.sleep(.002)
+            return value
+        connection.create_function("slow_index", 1, slow, deterministic=True)
+
+    table = _budget_table(engine)
+    index = sa.Index("budget_index", sa.func.slow_index(table.c.value))
+
+    def build(connection):
+        assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+        index.create(connection)
+        connection.commit()
+        # The exemption must not affect reads, even on the migration connection.
+        with pytest.raises(OperationalError) as failure:
+            connection.execute(sa.select(sa.func.slow_index(table.c.value))).all()
+        assert is_database_operation_timeout(failure.value)
+
+    try:
+        if migration:
+            _run_alembic(engine, lambda config: build(config.attributes["connection"]))
+        else:
+            with engine.connect() as connection, pytest.raises(OperationalError) as failure:
+                build(connection)
+            assert is_database_operation_timeout(failure.value)
+        with engine.connect() as connection:
+            assert not connection.info.get("schema_migration_active")
+            # SQLite inspection omits expression indexes; query the schema catalog.
+            catalog = sa.table("sqlite_master", sa.column("name"), sa.column("type"))
+            names = set(connection.scalars(sa.select(catalog.c.name).where(catalog.c.type == "index")))
+            assert ("budget_index" in names) is migration
+    finally:
+        engine.dispose()
+
+
+def test_failed_migration_restores_connection_budget_scope(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "failed-migration.sqlite3")
+    def fail(config):
+        assert config.attributes["connection"].info["schema_migration_active"]
+        raise RuntimeError("migration failed")
+    try:
+        with pytest.raises(RuntimeError, match="migration failed"):
+            _run_alembic(engine, fail)
+        with engine.connect() as connection:
+            assert "schema_migration_active" not in connection.info
+            assert connection.connection.driver_connection.statement_time_budget_seconds == 30
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+    finally:
+        engine.dispose()
+
+
+def test_migration_index_build_still_obeys_sqlite_lock_wait(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "index-lock.sqlite3", timeout_seconds=.05)
+    table = _budget_table(engine)
+    try:
+        with engine.connect() as holder:
+            holder.execute(sa.update(table).where(table.c.id == 0).values(value=999))
+            with pytest.raises(OperationalError) as failure:
+                _run_alembic(engine, lambda config: sa.Index("locked_index", table.c.value).create(config.attributes["connection"]))
+            assert failure.value.orig.sqlite_errorname == "SQLITE_BUSY"
+        with engine.connect() as connection:
+            assert "schema_migration_active" not in connection.info
+    finally:
+        engine.dispose()
 
 
 def test_external_sqlite_interruption_is_not_a_budget_timeout():

@@ -67,7 +67,17 @@ def _run_alembic(engine: Engine, fn) -> None:
     config = alembic_config_for_engine(engine)
     with engine.connect() as connection:
         config.attributes["connection"] = connection
-        fn(config)
+        # Startup owns this connection until the schema barrier completes.
+        # Only compiled CREATE INDEX statements use the migration exemption.
+        previous = connection.info.get("schema_migration_active")
+        connection.info["schema_migration_active"] = True
+        try:
+            fn(config)
+        finally:
+            if previous is None:
+                connection.info.pop("schema_migration_active", None)
+            else:
+                connection.info["schema_migration_active"] = previous
 
 
 def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
