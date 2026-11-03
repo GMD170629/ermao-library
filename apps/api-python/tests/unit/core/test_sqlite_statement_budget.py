@@ -91,14 +91,18 @@ def test_failed_migration_restores_connection_budget_scope(tmp_path):
         engine.dispose()
 
 
-def test_migration_index_build_still_obeys_sqlite_lock_wait(tmp_path):
+@pytest.mark.parametrize("operation", ["create", "drop"])
+def test_migration_index_ddl_still_obeys_sqlite_lock_wait(tmp_path, operation):
     engine = create_sqlite_engine(tmp_path / "index-lock.sqlite3", timeout_seconds=.05)
     table = _budget_table(engine)
+    index = sa.Index("locked_index", table.c.value)
+    if operation == "drop":
+        index.create(engine)
     try:
         with engine.connect() as holder:
             holder.execute(sa.update(table).where(table.c.id == 0).values(value=999))
             with pytest.raises(OperationalError) as failure:
-                _run_alembic(engine, lambda config: sa.Index("locked_index", table.c.value).create(config.attributes["connection"]))
+                _run_alembic(engine, lambda config: (index.create if operation == "create" else index.drop)(config.attributes["connection"]))
             assert failure.value.orig.sqlite_errorname == "SQLITE_BUSY"
         with engine.connect() as connection:
             assert "schema_migration_active" not in connection.info
@@ -469,4 +473,34 @@ def test_database_failure_event_keeps_preceding_transaction_statements(tmp_path:
         assert trace["transaction_statements"][2]["parameters"][:2] == ["duplicate", encode_setting_value("failed binding")]
     finally:
         diagnostics.reset_exception_storage()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("migration", [False, True])
+def test_only_offline_migration_index_drop_can_exceed_statement_budget(tmp_path, migration):
+    engine = create_sqlite_engine(tmp_path / "drop-budget.sqlite3", statement_time_budget_seconds=.03, slow_write_threshold_seconds=None)
+    table = _budget_table(engine)
+    index = sa.Index("drop_budget_index", table.c.value)
+    index.create(engine)
+
+    def slow_drop(action, _a, _b, _db, _trigger):
+        if action == sqlite3.SQLITE_DROP_INDEX:
+            time.sleep(.06)
+        return sqlite3.SQLITE_OK
+
+    try:
+        with engine.connect() as connection:
+            raw = connection.connection.driver_connection
+            raw.set_authorizer(slow_drop)
+        if migration:
+            _run_alembic(engine, lambda config: index.drop(config.attributes["connection"]))
+        else:
+            with engine.connect() as connection, pytest.raises(OperationalError) as failure:
+                index.drop(connection)
+            assert is_database_operation_timeout(failure.value)
+        with engine.connect() as connection:
+            assert not connection.info.get("schema_migration_active")
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+            connection.connection.driver_connection.set_authorizer(None)
+    finally:
         engine.dispose()

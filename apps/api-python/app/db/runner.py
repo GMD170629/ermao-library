@@ -68,7 +68,7 @@ def _run_alembic(engine: Engine, fn) -> None:
     with engine.connect() as connection:
         config.attributes["connection"] = connection
         # Startup owns this connection until the schema barrier completes.
-        # Only compiled CREATE INDEX statements use the migration exemption.
+        # Only compiled CREATE/DROP INDEX use the offline migration exemption.
         previous = connection.info.get("schema_migration_active")
         connection.info["schema_migration_active"] = True
         try:

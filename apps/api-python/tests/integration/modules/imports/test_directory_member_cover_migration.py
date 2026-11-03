@@ -10,17 +10,22 @@ from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
 
 
-@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize("partial", ["not_started", "created", "complete"])
 def test_directory_member_cover_migration_restarts_and_replaces_prefix_index(tmp_path, partial):
     engine = create_sqlite_engine(tmp_path / "members.sqlite3")
     try:
         config = alembic_config_for_engine(engine)
         command.upgrade(config, "0051_book_search_cover_index")
         migration = importlib.import_module("app.db.alembic.versions.0052_directory_member_cover_index")
-        if partial:
+        if partial != "not_started":
             with engine.begin() as c, Operations.context(MigrationContext.configure(c)):
-                migration.upgrade()
-                migration.upgrade()
+                if partial == "created":
+                    Operations(MigrationContext.configure(c)).create_index(
+                        migration.INDEX, "LibrarySourceNode", ["libraryId", "relativePath", "id", "physicalKind"]
+                    )
+                else:
+                    migration.upgrade()
+                    migration.upgrade()
         command.upgrade(config, "head")
         command.upgrade(config, "head")
         with engine.connect() as c:
