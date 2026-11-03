@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.authorization import (
     AuthorizationContext,
     library_visibility_predicate,
+    visible_library_ids_statement,
 )
 from app.core.exception_diagnostics import capture_exception, record_exception
 from app.models import (
@@ -269,10 +270,7 @@ def list_import_tasks_page(
 ) -> tuple[list[dict[str, object]], int, dict[str, int]]:
     # Evaluate authorization/lifecycle once per library, rather than running a
     # correlated live-library lookup for every historical task in aggregates.
-    visible_libraries = select(Library.id).where(
-        library_visibility_predicate(context, cast(ColumnElement[str], Library.id))
-    )
-    scope = LibraryImportTask.library_id.in_(visible_libraries)
+    scope = LibraryImportTask.library_id.in_(visible_library_ids_statement(context))
     scope_filters = [scope]
     if library_id is not None:
         scope_filters.append(LibraryImportTask.library_id == library_id)

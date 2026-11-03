@@ -334,6 +334,9 @@ class LibraryBook(Base):
             name="fk_LibraryBook_sourceNode_library",
         ),
         Index("LibraryBook_libraryId_idx", "libraryId"),
+        Index("LibraryBook_library_visibility_idx", "libraryId", "visibilityState"),
+        Index("LibraryBook_library_updated_page_idx", "libraryId", "visibilityState", "updatedAt", "id"),
+        Index("LibraryBook_visible_updated_page_idx", "visibilityState", "updatedAt", "id", "libraryId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, exists, false, select
+from sqlalchemy import ColumnElement, Select, exists, false, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
@@ -12,6 +12,7 @@ from sqlalchemy.sql.dml import Insert
 from app.core.exception_diagnostics import capture_exception
 from app.core.library_lifecycle import active_library, library_is_active
 from app.models.auth import User, UserLibraryAccess, UserPreference
+from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryReadableResource,
@@ -86,8 +87,13 @@ def book_visibility_predicate(
     context: AuthorizationContext,
     book: type[LibraryBook] = LibraryBook,
 ) -> ColumnElement[bool]:
-    return library_visibility_predicate(
-        context, cast(ColumnElement[str], book.library_id)
+    return book.library_id.in_(visible_library_ids_statement(context))
+
+
+def visible_library_ids_statement(context: AuthorizationContext) -> Select[tuple[str]]:
+    """Materialize the existing policy per library, not per catalog/history row."""
+    return select(Library.id).where(
+        library_visibility_predicate(context, cast(ColumnElement[str], Library.id))
     )
 
 

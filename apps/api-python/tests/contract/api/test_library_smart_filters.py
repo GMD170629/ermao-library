@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -25,6 +26,7 @@ from app.models import (
 )
 from app.models.auth import User
 from app.modules.library.application.catalog import CatalogBookFilter, ListCatalogBooks
+from app.modules.library.infrastructure.books import resource_import_summaries
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
 
 REMOVED_LIBRARY_FILTER_FIELDS = {
@@ -44,6 +46,71 @@ REMOVED_LIBRARY_FILTER_FIELDS = {
     "createdAt",
     "updatedAt",
 }
+
+
+@pytest.mark.parametrize("view", ["bookshelf", "search", "management"])
+def test_list_projection_does_not_fetch_unused_metadata_or_tags(
+    client, db_session, view
+):
+    _login(client, db_session)
+    _book(db_session, book_id="minimal", title="Minimal", author="Author")
+    _ready_resource(db_session, book_id="minimal", resource_id="minimal-pdf")
+    db_session.commit()
+    statements = []
+
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        response = client.get("/api/books", params={"view": view, "pageSize": 1})
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert response.status_code == 200, response.text
+    assert all('"LibraryBookMetadata".description' not in sql for sql in statements)
+    assert all(
+        '"LibraryBookMetadata"."normalizedTitle"' not in sql for sql in statements
+    )
+    assert not any(
+        sql.startswith(
+            'SELECT "LibraryBookMetadata"."bookId", "LibraryBookMetadata"."coverPath"'
+        )
+        for sql in statements
+    )
+    if view != "management":
+        assert not any("LibraryBookFacet" in sql for sql in statements)
+        assert set(response.json()["data"]["books"][0]) == {
+            "id",
+            "title",
+            "author",
+            "coverUrl",
+            "resourceImportSummary",
+            "progress",
+        }
+
+
+def test_resource_summary_skips_unneeded_formats_and_sums_ready_variants(db_session):
+    _book(db_session, book_id="variants", title="Variants", author=None)
+    _ready_resource(db_session, book_id="variants", resource_id="pdf")
+    epub = _ready_resource(db_session, book_id="variants", resource_id="epub")
+    epub.format = "EPUB"
+    db_session.commit()
+    statements = []
+
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        result = resource_import_summaries(db_session, ("variants",))
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert result["variants"].ready == 2
+    assert result["variants"].failed_files == 0
+    assert len(statements) == 2
+    assert not any("LibraryResourceAsset" in sql for sql in statements)
 
 
 def _book(

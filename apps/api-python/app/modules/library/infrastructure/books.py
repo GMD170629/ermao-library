@@ -7,9 +7,10 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, Select, func, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import visitors
 
 from app.models import (
     LibraryBook,
@@ -25,6 +26,24 @@ from app.modules.library.domain.facets import normalize_facet_name
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
+
+
+def book_ids_statement(
+    predicates: Collection[ColumnElement[bool]],
+    order: Collection[ColumnElement[Any]] = (),
+) -> Select[tuple[str]]:
+    """Filter/count/page identities without hydrating unrelated metadata rows."""
+    statement = select(LibraryBook.id).where(*predicates)
+    needs_metadata = any(
+        getattr(element, "table", None) is LibraryBookMetadata.__table__
+        for expression in (*predicates, *order)
+        for element in visitors.iterate(expression)
+    )
+    if needs_metadata:
+        statement = statement.outerjoin(
+            LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
+        )
+    return statement.order_by(*order)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +74,13 @@ def resource_import_summaries(
     counts: dict[str, dict[str, int]] = {
         book_id: {"READY": 0, "PENDING": 0, "FAILED": 0} for book_id in normalized_ids
     }
+    standard_books: set[str] = set()
+    directory_books: set[str] = set()
     rows = db.execute(
         select(
             LibraryReadableResource.book_id,
             LibraryReadableResource.import_state,
+            LibraryReadableResource.format.label("source_format"),
             func.count().label("resource_count"),
         )
         .where(
@@ -68,44 +90,60 @@ def resource_import_summaries(
         .group_by(
             LibraryReadableResource.book_id,
             LibraryReadableResource.import_state,
+            LibraryReadableResource.format,
         )
     ).all()
     for row in rows:
         state = str(row.import_state)
         if state in counts[str(row.book_id)]:
-            counts[str(row.book_id)][state] = int(row.resource_count or 0)
-    failed_files = dict(
-        db.execute(
-            select(LibraryReadableResource.book_id, func.count(LibraryImportTask.id))
+            counts[str(row.book_id)][state] += int(row.resource_count or 0)
+        if row.source_format in {"IMAGE_DIR", "AUDIOBOOK_DIR"}:
+            directory_books.add(str(row.book_id))
+        else:
+            standard_books.add(str(row.book_id))
+    failed_files: dict[str, int] = {}
+    if standard_books:
+        failed_files.update(
+            dict(
+                db.execute(
+                    select(
+                        LibraryReadableResource.book_id,
+                        func.count(LibraryImportTask.id),
+                    )
+                    .join(
+                        LibraryImportTask,
+                        LibraryImportTask.resource_id == LibraryReadableResource.id,
+                    )
+                    .where(
+                        LibraryReadableResource.book_id.in_(standard_books),
+                        LibraryReadableResource.enablement_state == "ENABLED",
+                        LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
+                        LibraryReadableResource.format.not_in(
+                            ("IMAGE_DIR", "AUDIOBOOK_DIR")
+                        ),
+                        LibraryImportTask.state == "FAILED",
+                    )
+                    .group_by(LibraryReadableResource.book_id)
+                ).all()
+            )
+        )
+    if directory_books:
+        asset_failures = db.execute(
+            select(LibraryReadableResource.book_id, func.count(LibraryResourceAsset.id))
             .join(
-                LibraryImportTask,
-                LibraryImportTask.resource_id == LibraryReadableResource.id,
+                LibraryResourceAsset,
+                LibraryResourceAsset.resource_id == LibraryReadableResource.id,
             )
             .where(
-                LibraryReadableResource.book_id.in_(normalized_ids),
+                LibraryReadableResource.book_id.in_(directory_books),
                 LibraryReadableResource.enablement_state == "ENABLED",
-                LibraryImportTask.kind.in_(("IMPORT_ASSET", "IMPORT_RESOURCE")),
-                LibraryReadableResource.format.not_in(("IMAGE_DIR", "AUDIOBOOK_DIR")),
-                LibraryImportTask.state == "FAILED",
+                LibraryReadableResource.format.in_(("IMAGE_DIR", "AUDIOBOOK_DIR")),
+                LibraryResourceAsset.import_state == "FAILED",
             )
             .group_by(LibraryReadableResource.book_id)
         ).all()
-    )
-    for book_id, count in db.execute(
-        select(LibraryReadableResource.book_id, func.count(LibraryResourceAsset.id))
-        .join(
-            LibraryResourceAsset,
-            LibraryResourceAsset.resource_id == LibraryReadableResource.id,
-        )
-        .where(
-            LibraryReadableResource.book_id.in_(normalized_ids),
-            LibraryReadableResource.enablement_state == "ENABLED",
-            LibraryReadableResource.format.in_(("IMAGE_DIR", "AUDIOBOOK_DIR")),
-            LibraryResourceAsset.import_state == "FAILED",
-        )
-        .group_by(LibraryReadableResource.book_id)
-    ):
-        failed_files[book_id] = failed_files.get(book_id, 0) + count
+        for book_id, count in asset_failures:
+            failed_files[book_id] = failed_files.get(book_id, 0) + count
     return {
         book_id: ResourceImportSummary(
             ready=state_counts["READY"],

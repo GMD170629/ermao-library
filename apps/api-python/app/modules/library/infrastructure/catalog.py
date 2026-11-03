@@ -32,6 +32,7 @@ from app.modules.library.application.catalog import (
     CatalogQueryPort,
     CatalogResource,
 )
+from app.modules.library.infrastructure.books import book_ids_statement
 
 
 class SqlAlchemyCatalogQueries(CatalogQueryPort):
@@ -80,7 +81,7 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
             .where(*predicates)
         )
         total = int(
-            self._db.scalar(select(func.count()).select_from(base.subquery())) or 0
+            self._db.scalar(select(func.count()).select_from(book_ids_statement(predicates).subquery())) or 0
         )
         order: tuple[Any, ...] = (
             LibraryBookMetadata.title.asc(),

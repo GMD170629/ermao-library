@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, and_, exists, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, exists, func, or_, select
+from sqlalchemy.orm import Session, load_only
 
 from app.core.authorization import (
     AuthorizationContext,
@@ -30,11 +31,12 @@ from app.modules.library.application.book_list import (
     resolve_page_size,
 )
 from app.modules.library.infrastructure.book_covers import (
-    SqlAlchemyBookCoverQueries,
     effective_book_cover_exists,
+    effective_book_cover_path,
 )
 from app.modules.library.infrastructure.books import (
     _book_record,
+    book_ids_statement,
     resource_import_summaries,
 )
 from app.modules.library.infrastructure.filter_query import (
@@ -316,11 +318,11 @@ def _project_books(
     context: AuthorizationContext,
     user: User,
     rows: list[tuple[LibraryBook, LibraryBookMetadata | None]],
+    cover_paths: Mapping[str, str],
     projection: str,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> list[dict[str, Any]]:
     book_ids = tuple(str(book.id) for book, _metadata in rows)
-    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids)
     import_summaries = resource_import_summaries(db, book_ids)
     if projection == "full":
         return [
@@ -339,7 +341,9 @@ def _project_books(
         book_ids=book_ids,
         reader_queries=reader_queries,
     )
-    tags_by_book = _tag_names(db, book_ids=book_ids)
+    tags_by_book = (
+        _tag_names(db, book_ids=book_ids) if projection == "management" else {}
+    )
     projected: list[dict[str, Any]] = []
     for book, metadata in rows:
         book_id = str(book.id)
@@ -360,16 +364,12 @@ def _project_books(
             "title": title,
             "author": author,
             "coverPath": cover_path,
-            "coverStatus": (
-                "READY"
-                if effective_cover_path
-                else (metadata.cover_status if metadata is not None else "PENDING")
-            ),
-            "seriesName": metadata.series_name if metadata is not None else None,
-            "tags": tags_by_book[book_id],
+            "coverStatus": "READY"
+            if effective_cover_path
+            else (metadata.cover_status if metadata is not None else "PENDING"),
             "resourceImportSummary": import_summaries[book_id].as_record(),
         }
-        if projection == "bookshelf":
+        if projection in {"bookshelf", "search"}:
             projected.append(
                 {
                     **common,
@@ -380,6 +380,10 @@ def _project_books(
             projected.append(
                 {
                     **common,
+                    "seriesName": metadata.series_name
+                    if metadata is not None
+                    else None,
+                    "tags": tags_by_book[book_id],
                     "gradient": "",
                     "statusValue": status,
                     "lastReadAt": last_read_at,
@@ -398,28 +402,63 @@ def list_books(
 ) -> BookListResult:
     context = authorization_context(db, user)
     predicates = _predicates(db, context, user, query, reader_queries)
-    base = (
-        select(LibraryBook, LibraryBookMetadata)
-        .select_from(LibraryBook)
-        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .where(and_(*predicates))
-    )
-    total = int(db.scalar(select(func.count()).select_from(base.subquery())) or 0)
+    identities = book_ids_statement(predicates)
+    total = int(db.scalar(select(func.count()).select_from(identities.subquery())) or 0)
     page = max(1, query.page)
     page_size = resolve_page_size(query.requested_page_size, total)
-    rows = db.execute(
-        base.order_by(
-            *_order(
-                query,
-                user=user,
-                context=context,
-                reader_queries=reader_queries,
-            )
-        )
+    order = _order(query, user=user, context=context, reader_queries=reader_queries)
+    selected_page = (
+        book_ids_statement(predicates, order)
         .limit(page_size)
         .offset((page - 1) * page_size)
-    ).all()
-    normalized_rows = [(book, metadata) for book, metadata in rows]
+        .subquery()
+    )
+    row_query = (
+        select(
+            LibraryBook,
+            LibraryBookMetadata,
+            effective_book_cover_path(
+                LibraryBook.id,
+                LibraryBookMetadata.cover_path,
+                LibraryBookMetadata.cover_status,
+            ).label("effective_cover_path"),
+        )
+        .select_from(selected_page)
+        .join(LibraryBook, LibraryBook.id == selected_page.c.id)
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .order_by(*order)
+    )
+    metadata_columns = [
+        LibraryBookMetadata.book_id,
+        LibraryBookMetadata.title,
+        LibraryBookMetadata.author,
+        LibraryBookMetadata.cover_path,
+        LibraryBookMetadata.cover_status,
+    ]
+    if query.projection == "full":
+        metadata_columns += [
+            LibraryBookMetadata.description,
+            LibraryBookMetadata.generated_fields,
+            LibraryBookMetadata.protected_fields,
+            LibraryBookMetadata.series_name,
+            LibraryBookMetadata.series_index,
+            LibraryBookMetadata.metadata_quality,
+            LibraryBookMetadata.metadata_state,
+            LibraryBookMetadata.metadata_pending,
+            LibraryBookMetadata.publication_status,
+            LibraryBookMetadata.tracking_status,
+        ]
+    elif query.projection == "management":
+        metadata_columns += [LibraryBookMetadata.series_name]
+    row_query = row_query.options(load_only(*metadata_columns, raiseload=True))
+    if query.projection != "full":
+        book_columns = [LibraryBook.id]
+        if query.projection == "management":
+            book_columns.append(LibraryBook.created_at)
+        row_query = row_query.options(load_only(*book_columns, raiseload=True))
+    rows = db.execute(row_query).all()
+    normalized_rows = [(book, metadata) for book, metadata, _cover_path in rows]
+    cover_paths = {str(book.id): str(path) for book, _metadata, path in rows if path}
     total_pages = max(1, (total + page_size - 1) // page_size)
     return BookListResult(
         books=_project_books(
@@ -427,6 +466,7 @@ def list_books(
             context=context,
             user=user,
             rows=normalized_rows,
+            cover_paths=cover_paths,
             projection=query.projection,
             reader_queries=reader_queries,
         ),
