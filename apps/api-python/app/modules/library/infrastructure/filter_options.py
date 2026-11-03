@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
-
-from sqlalchemy import ColumnElement, distinct, func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -37,11 +35,10 @@ class SqlAlchemyLibraryFilterQueries:
     def schema_options(
         self, context: AuthorizationContext
     ) -> LibraryFilterSchemaOptions:
+        formats, statuses = self._resource_options(context)
         return LibraryFilterSchemaOptions(
-            formats=self._resource_options(context, LibraryReadableResource.format),
-            import_statuses=self._resource_options(
-                context, LibraryReadableResource.import_state
-            ),
+            formats=formats,
+            import_statuses=statuses,
             origins=(),
             libraries=self._library_options(context),
             shelves=self._shelf_options(context),
@@ -66,22 +63,32 @@ class SqlAlchemyLibraryFilterQueries:
         )
 
     def _resource_options(
-        self,
-        context: AuthorizationContext,
-        column: object,
-    ) -> tuple[LibraryFilterOption, ...]:
-        value = func.trim(func.coalesce(cast(ColumnElement[str], column), ""))
-        count = func.count().label("option_count")
+        self, context: AuthorizationContext,
+    ) -> tuple[tuple[LibraryFilterOption, ...], tuple[LibraryFilterOption, ...]]:
+        # Both selectors describe the same authorized readable resources.
+        # Aggregate their compact index once instead of fetching resource rows.
+        source_format = func.trim(func.coalesce(LibraryReadableResource.format, ""))
+        import_state = func.trim(func.coalesce(LibraryReadableResource.import_state, ""))
         rows = self._db.execute(
-            select(value.label("value"), count)
-            .where(resource_visibility_predicate(context), value != "")
-            .group_by(value)
-            .order_by(count.desc(), func.lower(value).asc(), value.asc())
+            select(source_format.label("source_format"), import_state.label("import_state"), func.count().label("option_count"))
+            .where(resource_visibility_predicate(context))
+            .group_by(source_format, import_state)
         ).all()
-        return tuple(
-            LibraryFilterOption(str(row.value), str(row.value), int(row.option_count))
-            for row in rows
-        )
+        formats: dict[str, int] = {}
+        statuses: dict[str, int] = {}
+        for row in rows:
+            for counts, value in [(formats, row.source_format), (statuses, row.import_state)]:
+                if value:
+                    counts[value] = counts.get(value, 0) + int(row.option_count)
+
+        def options(counts: dict[str, int]) -> tuple[LibraryFilterOption, ...]:
+            # Match SQLite's built-in ASCII lower() ordering for wire identifiers.
+            ascii_lower = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+            return tuple(LibraryFilterOption(value, value, counts[value]) for value in sorted(
+                counts, key=lambda value: (-counts[value], value.translate(ascii_lower), value),
+            ))
+
+        return options(formats), options(statuses)
 
     def _library_options(
         self, context: AuthorizationContext

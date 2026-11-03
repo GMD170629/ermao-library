@@ -58,7 +58,7 @@ def authorization_context(db: Session, user: User) -> AuthorizationContext:
     if not is_admin(user):
         rows = db.scalars(
             select(UserLibraryAccess.library_id)
-            .where(UserLibraryAccess.user_id == user.id, active_library(UserLibraryAccess.library_id))
+            .where(UserLibraryAccess.user_id == user.id, active_library(cast(ColumnElement[str], UserLibraryAccess.library_id)))
             .order_by(UserLibraryAccess.library_id)
         )
         library_ids = tuple(str(item) for item in rows)
@@ -106,9 +106,7 @@ def resource_visibility_predicate(
         resource.import_state == "READY",
     )
     return (
-        library_visibility_predicate(
-            context, cast(ColumnElement[str], resource.library_id)
-        )
+        resource.library_id.in_(visible_library_ids_statement(context))
         & state[0]
         & state[1]
     )

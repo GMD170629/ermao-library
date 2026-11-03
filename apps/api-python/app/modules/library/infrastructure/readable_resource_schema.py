@@ -534,6 +534,7 @@ class LibraryReadableResource(Base):
             "libraryId",
         ),
         Index("LibraryReadableResource_libraryId_idx", "libraryId"),
+        Index("LibraryReadableResource_filter_cover_idx", "enablementState", "importState", "bookId", "libraryId", "format"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
