@@ -73,6 +73,7 @@ class Benchmark:
             "generatedBooks": args.generated_books,
             "targetBooks": args.target_books,
             "baselineFailedTasks": [],
+            "baselineCaptured": False,
             "newFailedTasks": [],
             "limitations": [
                 "HTTP measurements do not validate rendering, decoding or playback.",
@@ -124,6 +125,10 @@ class Benchmark:
             page += 1
 
     def check_failed_tasks(self) -> None:
+        final_failed = self.failed_tasks()
+        if not self.results["baselineCaptured"]:
+            self.results["unclassifiedFailedTasks"] = final_failed
+            return
         baseline = {t["id"]: t for t in self.results["baselineFailedTasks"]}
 
         def signature(task: dict[str, Any]) -> tuple[Any, ...]:
@@ -134,7 +139,7 @@ class Benchmark:
 
         self.results["newFailedTasks"] = [
             task
-            for task in self.failed_tasks()
+            for task in final_failed
             if task["id"] not in baseline
             or signature(task) != signature(baseline[task["id"]])
         ]
@@ -430,6 +435,7 @@ class Benchmark:
                 },
             )
             self.results["baselineFailedTasks"] = self.failed_tasks()
+            self.results["baselineCaptured"] = True
             self.snapshot()
             self.measure("import-active", 4)
             self.wait_for_import()
@@ -505,7 +511,7 @@ class Benchmark:
         lines.extend(
             [
                 f"历史失败 / Baseline failures: {len(self.results['baselineFailedTasks'])}",
-                f"新增或变化的失败 / New or changed failures: {len(self.results['newFailedTasks'])}",
+                f"新增或变化的失败 / New or changed failures: {len(self.results['newFailedTasks']) if self.results['baselineCaptured'] else 'unverified (baseline unavailable)'}",
                 "",
                 "| Phase | Clients | Endpoint | Requests | Errors | P95 ms | P99 ms |",
                 "|---|---:|---|---:|---:|---:|---:|",

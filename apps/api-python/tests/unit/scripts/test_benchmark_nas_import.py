@@ -255,6 +255,30 @@ def test_final_diagnostic_failure_does_not_replace_original(controller, monkeypa
     assert result["failedTaskCollectionError"]["message"] == "diagnostics unavailable"
 
 
+def test_missing_baseline_does_not_label_history_as_new(controller, monkeypatch):
+    original = controller.failed_tasks
+    calls = [0]
+
+    def fail_baseline():
+        calls[0] += 1
+        if calls[0] == 1:
+            raise HTTPError(
+                "http://test", 500, "error", {}, io.BytesIO(b"baseline timeout")
+            )
+        return original()
+
+    monkeypatch.setattr(controller, "failed_tasks", fail_baseline)
+    assert controller.execute() == 1
+    result = summary(controller)
+    assert result["failure"]["responseBody"] == "baseline timeout"
+    assert result["baselineCaptured"] is False
+    assert result["newFailedTasks"] == []
+    assert result["unclassifiedFailedTasks"][0]["id"] == "historic"
+    assert "unverified (baseline unavailable)" in (
+        controller.args.output / "report.md"
+    ).read_text(encoding="utf-8")
+
+
 class Response(io.BytesIO):
     def __init__(self, status, payload=b"PDF bytes"):
         super().__init__(payload)
