@@ -279,7 +279,7 @@ class Benchmark:
                     path = self.books_path(
                         pageSize=20,
                         view="search",
-                        search="NASPERF" if n % 2 else "no-such-NASPERF",
+                        search="NASPERF" if (n // 6) % 2 else "no-such-NASPERF",
                     )
                 elif endpoint == "progress":
                     path = "/api/reader/v5/resources/" + resource["id"] + "/progress"
@@ -305,6 +305,8 @@ class Benchmark:
                     path = "/api/assets/" + resource["assets"][0]["id"]
                 started = time.perf_counter()
                 row: dict[str, Any] = {
+                    "path": path,
+                    "method": method,
                     "endpoint": endpoint,
                     "phase": phase,
                     "clients": clients,
@@ -325,7 +327,10 @@ class Benchmark:
                         self.client.api(path, method, body)
                         row.update(status=200, success=True)
                 except Exception as error:  # noqa: BLE001 - record each failed request without losing other samples.
-                    row.update(error=exception_record(error))
+                    row.update(
+                        error=exception_record(error),
+                        status=getattr(error, "code", None),
+                    )
                 row["elapsedMs"] = (time.perf_counter() - started) * 1000
                 with self.lock:
                     rows.append(row)

@@ -56,10 +56,14 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         if filters.search:
             query = f"%{filters.search}%"
             predicates.append(
-                or_(
-                    LibraryBookMetadata.title.ilike(query),
-                    LibraryBookMetadata.author.ilike(query),
-                    LibraryBookMetadata.series_name.ilike(query),
+                LibraryBook.id.in_(
+                    select(LibraryBookMetadata.book_id).where(
+                        or_(
+                            LibraryBookMetadata.title.ilike(query),
+                            LibraryBookMetadata.author.ilike(query),
+                            LibraryBookMetadata.series_name.ilike(query),
+                        )
+                    )
                 )
             )
         if filters.facet_kind and filters.facet_id:
@@ -83,6 +87,8 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         total = int(
             self._db.scalar(select(func.count()).select_from(book_ids_statement(predicates).subquery())) or 0
         )
+        if not total:
+            return CatalogBookPage(books=(), total=0, page=page, page_size=page_size, updated_at=None)
         order: tuple[Any, ...] = (
             LibraryBookMetadata.title.asc(),
             LibraryBook.id.asc(),

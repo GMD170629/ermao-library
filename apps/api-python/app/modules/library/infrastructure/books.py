@@ -10,7 +10,8 @@ from typing import Any
 from sqlalchemy import ColumnElement, Select, func, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import visitors
+from sqlalchemy.sql.elements import ClauseElement
+from sqlalchemy.sql.selectable import ScalarSelect, SelectBase
 
 from app.models import (
     LibraryBook,
@@ -34,10 +35,16 @@ def book_ids_statement(
 ) -> Select[tuple[str]]:
     """Filter/count/page identities without hydrating unrelated metadata rows."""
     statement = select(LibraryBook.id).where(*predicates)
+
+    def needs_outer_metadata(expression: ClauseElement) -> bool:
+        if isinstance(expression, (SelectBase, ScalarSelect)):
+            return False
+        if getattr(expression, "table", None) is LibraryBookMetadata.__table__:
+            return True
+        return any(needs_outer_metadata(child) for child in expression.get_children())
+
     needs_metadata = any(
-        getattr(element, "table", None) is LibraryBookMetadata.__table__
-        for expression in (*predicates, *order)
-        for element in visitors.iterate(expression)
+        needs_outer_metadata(expression) for expression in (*predicates, *order)
     )
     if needs_metadata:
         statement = statement.outerjoin(

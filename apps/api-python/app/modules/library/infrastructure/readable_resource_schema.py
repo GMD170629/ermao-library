@@ -399,6 +399,9 @@ class LibraryBook(Base):
 
 class LibraryBookMetadata(Base):
     __tablename__ = "LibraryBookMetadata"
+    __table_args__ = (
+        Index("LibraryBookMetadata_search_cover_idx", "bookId", "title", "author", "seriesName", "description"),
+    )
 
     book_id: Mapped[str] = mapped_column(
         "bookId",

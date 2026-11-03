@@ -91,18 +91,26 @@ def _predicates(
             book_visibility_predicate(context),
         ]
     term = (query.search or query.keyword or "").strip().casefold()
-    if term:
+    # A pattern containing only '%' matches every row, including absent metadata
+    # through the existing COALESCE branches. Other patterns need real metadata.
+    if term and term.strip("%"):
         pattern = f"%{term}%"
         predicates.append(
-            or_(
-                func.lower(LibraryBookMetadata.title).like(pattern),
-                func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(pattern),
-                func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(
-                    pattern
-                ),
-                func.lower(func.coalesce(LibraryBookMetadata.description, "")).like(
-                    pattern
-                ),
+            LibraryBook.id.in_(
+                select(LibraryBookMetadata.book_id).where(
+                    or_(
+                        func.lower(LibraryBookMetadata.title).like(pattern),
+                        func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(
+                            pattern
+                        ),
+                        func.lower(
+                            func.coalesce(LibraryBookMetadata.series_name, "")
+                        ).like(pattern),
+                        func.lower(
+                            func.coalesce(LibraryBookMetadata.description, "")
+                        ).like(pattern),
+                    )
+                )
             )
         )
     if query.status:
@@ -418,6 +426,15 @@ def list_books(
     total = int(db.scalar(select(func.count()).select_from(identities.subquery())) or 0)
     page = max(1, query.page)
     page_size = resolve_page_size(query.requested_page_size, total)
+    if not total:
+        return BookListResult(
+            books=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=1,
+            progress_sort=query.sort == "progress",
+        )
     order = _order(query, user=user, context=context, reader_queries=reader_queries)
     selected_page = (
         book_ids_statement(predicates, order)

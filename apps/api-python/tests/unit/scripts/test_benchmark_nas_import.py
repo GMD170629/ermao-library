@@ -329,7 +329,7 @@ def test_real_measurement_loop_preserves_range_contract_and_metrics(
     controller, monkeypatch
 ):
     controller.client = MeasurementClient()
-    controller.args.seconds = 0.05
+    controller.args.seconds = 0.15
     monkeypatch.setattr(controller, "measure", Benchmark.measure.__get__(controller))
     assert controller.execute() == 0
     result = summary(controller)
@@ -348,6 +348,18 @@ def test_real_measurement_loop_preserves_range_contract_and_metrics(
         for h in controller.client.range_requests
     )
     assert (controller.args.output / "requests.jsonl").stat().st_size > 0
+    rows = [
+        json.loads(line)
+        for line in (controller.args.output / "requests.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    terms = {
+        parse_qs(urlsplit(row["path"]).query)["search"][0]
+        for row in rows
+        if row["endpoint"] == "search"
+    }
+    assert terms == {"NASPERF", "no-such-NASPERF"}
 
 
 def test_failed_range_keeps_metrics_and_stops_before_rescan(controller, monkeypatch):

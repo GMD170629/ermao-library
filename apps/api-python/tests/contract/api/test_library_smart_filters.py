@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import hash_password
 from app.core.authorization import authorization_context
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookFacet,
     LibraryBookMetadata,
@@ -24,7 +25,7 @@ from app.models import (
     LibrarySourceNode,
     ReaderResourceProgressV5,
 )
-from app.models.auth import User
+from app.models.auth import User, UserLibraryAccess
 from app.modules.library.application.catalog import CatalogBookFilter, ListCatalogBooks
 from app.modules.library.infrastructure.books import resource_import_summaries
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
@@ -147,6 +148,53 @@ def test_import_status_projection_returns_only_acceptance_fields(client, db_sess
         "ReaderResourceProgress" in sql or "LibraryBookFacet" in sql
         for sql in statements
     )
+
+
+@pytest.mark.parametrize(
+    "term,expected",
+    [
+        ("ABC", {"target"}),
+        ("writer", {"target"}),
+        ("series", {"target"}),
+        ("description", {"target"}),
+        ("%", {"target", "other", "missing"}),
+        ("_", {"target", "other"}),
+        ("no-such", set()),
+    ],
+)
+def test_search_preserves_fields_wildcards_and_missing_metadata(
+    client, db_session, term, expected
+):
+    _login(client, db_session)
+    for book_id in ["target", "other", "missing"]:
+        _book(db_session, book_id=book_id, title=book_id, author=None)
+        db_session.get(LibraryBookMetadata, book_id).series_name = None
+    metadata = db_session.get(LibraryBookMetadata, "target")
+    metadata.title = "ABC"
+    metadata.author = "Writer"
+    metadata.series_name = "Series"
+    metadata.description = "Description"
+    db_session.delete(db_session.get(LibraryBookMetadata, "missing"))
+    db_session.commit()
+    response = client.get("/api/books", params={"view": "bookshelf", "search": term})
+    assert response.status_code == 200, response.text
+    assert {b["id"] for b in response.json()["data"]["books"]} == expected
+    assert response.json()["data"]["total"] == len(expected)
+
+
+def test_search_candidates_keep_member_library_scope(client, db_session):
+    user=_login(client,db_session)
+    user.role='member'
+    db_session.add(Library(id='private-search',name='private',root_path='/private-search',organization_mode='FLAT'))
+    db_session.add(UserLibraryAccess(user_id=user.id,library_id='test-library'))
+    db_session.flush()
+    _book(db_session,book_id='allowed-search',title='NASPERF allowed',author=None)
+    _book(db_session,book_id='private-search-book',title='NASPERF private',author=None,library_id='private-search')
+    db_session.commit()
+    response=client.get('/api/books',params={'view':'bookshelf','search':'NASPERF'})
+    assert response.status_code==200,response.text
+    assert [b['id'] for b in response.json()['data']['books']]==['allowed-search']
+    assert response.json()['data']['total']==1
 
 
 def _book(
