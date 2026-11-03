@@ -25,8 +25,8 @@ from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.infrastructure.book_list import list_books
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
 from app.modules.library.infrastructure.dashboard import (
+    SqlAlchemyDashboardActivityQueries,
     continue_reading_progress,
-    recent_books,
 )
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
@@ -235,11 +235,11 @@ def test_member_recent_import_listing_has_bounded_query_work(
     )
     recent, recent_vm_steps = _sqlite_vm_steps(
         db_session,
-        lambda: recent_books(db_session, context, limit=10),
+        lambda: SqlAlchemyDashboardActivityQueries(db_session, reader_queries=reader_queries).recent_book_ids(context=context, limit=10),
     )
 
     assert len(recent) == 10
-    assert recent_vm_steps < 500_000
+    assert recent_vm_steps < 5_000
 
     select_count = 0
 
@@ -265,7 +265,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
             )
         ).execute(
             context=context,
-            book_ids=tuple(str(book["id"]) for book in recent),
+            book_ids=recent,
         )
     finally:
         event.remove(engine, "before_cursor_execute", count_selects)

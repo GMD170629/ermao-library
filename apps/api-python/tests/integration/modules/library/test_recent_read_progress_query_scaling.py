@@ -236,3 +236,34 @@ def test_recent_read_preserves_resource_visibility_actor_scope_and_pagination(
         db.commit()
         revoked = list_books(db, user, query, reader_queries=reader)
         assert revoked.total == 0 and revoked.books == []
+
+
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_dashboard_recent_reading_starts_from_actor_progress(recent_read_session, recent_read_queries, role):
+    from app.core.authorization import authorization_context
+    from app.models import LibraryBook
+
+    db = recent_read_session
+    user = _actor(db, role=role)
+    other = _actor(db, user_id="other-dashboard-reader")
+    _seed_manual_library(db, book_count=5000)
+    now = datetime.now(UTC)
+    for i in [0, 10, 20, 30, 40, 50]:
+        _progress(db, user_id=user.id, index=i, when=now + timedelta(minutes=i))
+    _progress(db, user_id=other.id, index=4999, when=now + timedelta(days=1))
+    db.get(LibraryBook, "scale-book-000040").visibility_state = "HIDDEN"
+    db.get(LibraryReadableResource, "scale-resource-000030").enablement_state = "DISABLED"
+    db.get(LibraryReadableResource, "scale-resource-000020").import_state = "FAILED"
+    db.commit()
+    context = authorization_context(db, user)
+    ids, steps = _sqlite_vm_steps(db, lambda: recent_read_queries.recent_reading_book_ids(context=context, user_id=user.id, limit=3))
+    assert ids == ("scale-book-000050", "scale-book-000010", "scale-book-000000")
+    assert steps < 15000
+    db.get(LibraryReadableResource, "scale-resource-000010").book_id = "scale-book-000050"
+    db.commit()
+    assert recent_read_queries.recent_reading_book_ids(context=context, user_id=user.id, limit=3) == ("scale-book-000050", "scale-book-000000")
+    if role == "member":
+        assert not recent_read_queries.recent_reading_book_ids(context=replace(context, library_ids=()), user_id=user.id, limit=3)
+    db.get(Library, "test-library").deletion_requested_at = now
+    db.commit()
+    assert not recent_read_queries.recent_reading_book_ids(context=context, user_id=user.id, limit=3)

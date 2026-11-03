@@ -91,6 +91,10 @@ class ReaderV5LibraryPresentationQueryPort(ReaderReadingStateQueryPort, Protocol
 
     def latest_progress_at(self, *, user_id: str) -> datetime | None: ...
 
+    def recent_reading_book_ids(
+        self, *, context: AuthorizationContext, user_id: str, limit: int,
+    ) -> tuple[str, ...]: ...
+
     def latest_read_at_expression(
         self,
         *,

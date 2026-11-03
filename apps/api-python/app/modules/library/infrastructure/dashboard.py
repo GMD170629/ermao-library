@@ -93,94 +93,6 @@ def dashboard_summary(
     }
 
 
-def recent_books(
-    db: Session, context: AuthorizationContext, *, limit: int
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryBook.id,
-            LibraryBookMetadata.title,
-            LibraryBookMetadata.author,
-            LibraryBookMetadata.cover_status,
-            LibraryBookMetadata.cover_path,
-            LibraryBook.created_at,
-        )
-        .select_from(LibraryBook)
-        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .where(*_visible_book_filter(context))
-        .order_by(LibraryBook.created_at.desc(), LibraryBook.id.desc())
-        .limit(limit)
-    ).all()
-    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(
-        tuple(str(row.id) for row in rows)
-    )
-    return [
-        {
-            "id": row.id,
-            "title": row.title,
-            "author": row.author,
-            "coverStatus": (
-                "READY" if cover_paths.get(str(row.id)) else row.cover_status
-            ),
-            "coverPath": cover_paths.get(str(row.id)) or row.cover_path,
-            "createdAt": row.created_at,
-        }
-        for row in rows
-    ]
-
-
-def recent_reading(
-    db: Session,
-    context: AuthorizationContext,
-    user_id: str,
-    *,
-    limit: int,
-    reader_queries: ReaderV5LibraryPresentationQueryPort,
-) -> list[dict[str, Any]]:
-    latest_read_at = cast(
-        ColumnElement[object],
-        reader_queries.latest_read_at_expression(
-            context=context,
-            user_id=user_id,
-            book_id_expression=LibraryBook.id,
-        ),
-    ).label("lastReadAt")
-    rows = db.execute(
-        select(
-            LibraryBook.id,
-            LibraryBookMetadata.title,
-            LibraryBookMetadata.author,
-            LibraryBookMetadata.cover_status,
-            LibraryBookMetadata.cover_path,
-            latest_read_at,
-        )
-        .select_from(LibraryBook)
-        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .where(
-            *_visible_book_filter(context),
-            latest_read_at.is_not(None),
-        )
-        .order_by(latest_read_at.desc(), LibraryBook.id.desc())
-        .limit(limit)
-    ).all()
-    cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(
-        tuple(str(row.id) for row in rows)
-    )
-    return [
-        {
-            "id": row.id,
-            "title": row.title,
-            "author": row.author,
-            "coverStatus": (
-                "READY" if cover_paths.get(str(row.id)) else row.cover_status
-            ),
-            "coverPath": cover_paths.get(str(row.id)) or row.cover_path,
-            "lastReadAt": row.lastReadAt,
-        }
-        for row in rows
-    ]
-
-
 def continue_reading_progress(
     db: Session,
     context: AuthorizationContext,
@@ -291,9 +203,12 @@ class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
         context: AuthorizationContext,
         limit: int,
     ) -> tuple[str, ...]:
-        return tuple(
-            str(row["id"]) for row in recent_books(self._db, context, limit=limit)
-        )
+        return tuple(self._db.scalars(
+            select(LibraryBook.id)
+            .where(*_visible_book_filter(context))
+            .order_by(LibraryBook.created_at.desc(), LibraryBook.id.desc())
+            .limit(limit)
+        ))
 
     def recent_reading_book_ids(
         self,
@@ -302,15 +217,8 @@ class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
         user_id: str,
         limit: int,
     ) -> tuple[str, ...]:
-        return tuple(
-            str(row["id"])
-            for row in recent_reading(
-                self._db,
-                context,
-                user_id,
-                limit=limit,
-                reader_queries=self._reader_queries,
-            )
+        return self._reader_queries.recent_reading_book_ids(
+            context=context, user_id=user_id, limit=limit,
         )
 
     def continue_reading(

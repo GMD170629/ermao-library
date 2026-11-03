@@ -363,6 +363,46 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
             .limit(1)
         )
 
+    def recent_reading_book_ids(
+        self, *, context: AuthorizationContext, user_id: str, limit: int,
+    ) -> tuple[str, ...]:
+        # Group only this actor's readable resources before joining Books.
+        # Unread library books must not trigger per-book progress lookups.
+        actor_resources = (
+            select(
+                LibraryReadableResource.id, LibraryReadableResource.book_id,
+                LibraryReadableResource.library_id, LibraryReadableResource.enablement_state,
+                LibraryReadableResource.import_state,
+                ReaderResourceProgressV5.updated_at.label("updated_at"),
+            )
+            .select_from(ReaderResourceProgressV5)
+            .join(LibraryReadableResource, LibraryReadableResource.id == ReaderResourceProgressV5.resource_id)
+            .where(ReaderResourceProgressV5.user_id == user_id)
+            .cte("actor_resources")
+            .prefix_with("MATERIALIZED")
+        )
+        resource = aliased(LibraryReadableResource, actor_resources)
+        activity = (
+            select(
+                resource.book_id.label("book_id"),
+                func.max(actor_resources.c.updated_at).label("last_read_at"),
+            )
+            .select_from(actor_resources)
+            .where(resource_visibility_predicate(context, resource))
+            .group_by(resource.book_id)
+            .subquery()
+        )
+        return tuple(self._db.scalars(
+            select(activity.c.book_id)
+            .where(exists(select(LibraryBook.id).where(
+                LibraryBook.id == activity.c.book_id,
+                LibraryBook.visibility_state == "VISIBLE",
+                book_visibility_predicate(context),
+            )))
+            .order_by(activity.c.last_read_at.desc(), activity.c.book_id.desc())
+            .limit(limit)
+        ))
+
     def latest_read_at_expression(
         self,
         *,

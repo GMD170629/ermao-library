@@ -30,3 +30,21 @@ def test_import_status_page_index_restart(tmp_path, partial):
         )["column_names"] == ["libraryId", "visibilityState", "createdAt", "id"]
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_global_recent_import_page_index_restart(tmp_path, partial):
+    engine = create_sqlite_engine(tmp_path / "recent-import.sqlite3")
+    try:
+        config = alembic_config_for_engine(engine)
+        command.upgrade(config, "0052_directory_member_cover_index")
+        if partial:
+            with engine.begin() as c:
+                Operations(MigrationContext.configure(c)).create_index(
+                    "LibraryBook_visible_imported_page_idx", "LibraryBook", ["visibilityState", "createdAt", "id", "libraryId"]
+                )
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        assert next(i for i in sa.inspect(engine).get_indexes("LibraryBook") if i["name"] == "LibraryBook_visible_imported_page_idx")["column_names"] == ["visibilityState", "createdAt", "id", "libraryId"]
+    finally:
+        engine.dispose()
