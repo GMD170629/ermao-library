@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import event, insert
 from sqlalchemy.orm import Session
 
@@ -109,3 +110,72 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
         for view in views
     )
     assert select_count <= 5
+
+
+@pytest.mark.parametrize("state", [None, "FAILED"])
+def test_library_task_page_uses_ordered_index_and_reuses_summary(db_session, state):
+    db = db_session
+    now = datetime.now(UTC)
+    for start in range(0, 100_000, 1000):
+        db.execute(
+            insert(LibraryImportTask),
+            [
+                {
+                    "id": f"scale-{i:06d}",
+                    "library_id": "test-library",
+                    "kind": "SCAN_LIBRARY",
+                    "state": "FAILED" if i < 2 else "SUCCEEDED",
+                    "created_at": now,
+                }
+                for i in range(start, start + 1000)
+            ],
+        )
+    db.commit()
+    context = AuthorizationContext(
+        user_id="scale-admin",
+        is_admin=True,
+        can_manage_system=True,
+        can_view_manual_imports=True,
+        library_ids=(),
+        authz_version=1,
+    )
+    records = []
+    raw = db.connection().connection.driver_connection
+
+    def progress():
+        records[-1]["steps"] += 100
+        return 0
+
+    def before(_connection, _cursor, statement, parameters, _context, _many):
+        records.append({"sql": statement, "parameters": parameters, "steps": 0})
+        raw.set_progress_handler(progress, 100)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        tasks, total, summary = list_import_tasks_page(
+            db, context, library_id="test-library", state=state, page=1, page_size=10
+        )
+    finally:
+        raw.set_progress_handler(None, 0)
+        event.remove(engine, "before_cursor_execute", before)
+    assert total == (2 if state else 100_000)
+    assert summary == {"queued": 0, "running": 0, "completed": 99_998, "failed": 2}
+    assert len(tasks) == (2 if state else 10)
+    assert len(records) == 2  # One aggregate, one bounded page, no duplicate COUNT.
+    assert records[-1]["steps"] < 20_000
+    plan = (
+        db.connection()
+        .exec_driver_sql(
+            "EXPLAIN QUERY PLAN " + records[-1]["sql"], records[-1]["parameters"]
+        )
+        .all()
+    )
+    expected = (
+        "LibraryImportTask_library_state_page_idx"
+        if state
+        else "LibraryImportTask_library_page_idx"
+    )
+    assert any(expected in row[3] for row in plan)
+    if state:
+        assert any(expected in row[3] and "state=?" in row[3] for row in plan)

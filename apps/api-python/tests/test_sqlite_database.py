@@ -416,10 +416,11 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 45
-    assert script.get_heads() == ["0045_source_children_scan_index"]
-    assert head_revision() == "0045_source_children_scan_index"
+    assert len(revisions) == 46
+    assert script.get_heads() == ["0046_import_task_page_indexes"]
+    assert head_revision() == "0046_import_task_page_indexes"
     assert [revision.revision for revision in revisions] == [
+        "0046_import_task_page_indexes",
         "0045_source_children_scan_index",
         "0044_library_background_deletion",
         "0043_remove_legacy_system_events",
@@ -477,7 +478,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0045_source_children_scan_index"
+        assert _current_revision(engine) == "0046_import_task_page_indexes"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -518,7 +519,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0045_source_children_scan_index"
+        assert _current_revision(engine) == "0046_import_task_page_indexes"
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -569,7 +570,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0045_source_children_scan_index"
+        assert _current_revision(engine) == "0046_import_task_page_indexes"
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)

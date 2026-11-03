@@ -267,10 +267,12 @@ def list_import_tasks_page(
     state: str | None = None,
     keyword: str | None = None,
 ) -> tuple[list[dict[str, object]], int, dict[str, int]]:
-    scope = library_visibility_predicate(
-        context,
-        cast(ColumnElement[str], LibraryImportTask.library_id),
+    # Evaluate authorization/lifecycle once per library, rather than running a
+    # correlated live-library lookup for every historical task in aggregates.
+    visible_libraries = select(Library.id).where(
+        library_visibility_predicate(context, cast(ColumnElement[str], Library.id))
     )
+    scope = LibraryImportTask.library_id.in_(visible_libraries)
     scope_filters = [scope]
     if library_id is not None:
         scope_filters.append(LibraryImportTask.library_id == library_id)
@@ -301,10 +303,6 @@ def list_import_tasks_page(
             )
         )
         filters.append(LibraryImportTask.id.in_(matching_task_ids))
-    total = int(
-        db.scalar(select(func.count()).select_from(LibraryImportTask).where(*filters))
-        or 0
-    )
     summary = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
     summary_keys = {
         "QUEUED": "queued",
@@ -325,6 +323,21 @@ def list_import_tasks_page(
         key = summary_keys.get(str(summary_row.state))
         if key is not None:
             summary[key] += int(summary_row.task_count or 0)
+    if normalized_keyword:
+        total = int(
+            db.scalar(
+                select(func.count()).select_from(LibraryImportTask).where(*filters)
+            )
+            or 0
+        )
+    else:
+        total = sum(
+            int(row.task_count or 0)
+            for row in summary_rows
+            if not normalized_state
+            or normalized_state == "ALL"
+            or row.state == normalized_state
+        )
     total_pages = max(1, (total + page_size - 1) // page_size)
     normalized_page = min(max(1, page), total_pages)
     page_task_ids = (
