@@ -21,7 +21,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.contracts.source_relocation import SourceRelocation
 from app.core.exception_diagnostics import capture_exception, record_exception
-from app.core.library_lifecycle import active_book, library_is_active
+from app.core.library_lifecycle import active_book, active_library, library_is_active
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.infrastructure.file_operation_conflicts import (
     file_operation_blocks_library,
@@ -116,15 +116,26 @@ def load_writeback_cleanup_projection(
 ) -> WritebackCleanupProjection:
     """Walk source nodes by stable primary key, without an asset join/sort."""
     bounded = min(max(limit, 1), WRITEBACK_CLEANUP_PATH_LIMIT)
-    statement = (
-        select(LibrarySourceNode.id, LibrarySourceNode.relative_path, Library.root_path)
-        .join(Library, Library.id == LibrarySourceNode.library_id)
-            .where(Library.deletion_requested_at.is_(None))
+    # Bound the ordered node walk before joining root paths. Otherwise SQLite
+    # may drive the join from active libraries and sort their entire node trees.
+    candidates = (
+        select(
+            LibrarySourceNode.id.label("node_id"),
+            LibrarySourceNode.library_id.label("library_id"),
+            LibrarySourceNode.relative_path.label("relative_path"),
+        )
+        .where(active_library(LibrarySourceNode.library_id))
         .order_by(LibrarySourceNode.id)
         .limit(bounded)
     )
     if after_id is not None:
-        statement = statement.where(LibrarySourceNode.id > after_id)
+        candidates = candidates.where(LibrarySourceNode.id > after_id)
+    page = candidates.subquery()
+    statement = (
+        select(page.c.node_id, page.c.relative_path, Library.root_path)
+        .join(Library, Library.id == page.c.library_id)
+        .order_by(page.c.node_id)
+    )
     rows = db.execute(statement).all()
     return WritebackCleanupProjection(
         sources=tuple((str(relative), str(root)) for _, relative, root in rows),

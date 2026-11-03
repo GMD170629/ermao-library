@@ -115,6 +115,7 @@ class LibrarySourceNode(Base):
             "libraryId", "parentId", "pathKey", "id", "scanSeenGeneration",
         ),
         Index("LibrarySourceNode_parentId_idx", "parentId"),
+        Index("LibrarySourceNode_cleanup_page_idx", "id", "libraryId", "relativePath"),
         Index(
             "LibrarySourceNode_parentId_libraryId_idx",
             "parentId",
