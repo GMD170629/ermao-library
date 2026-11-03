@@ -110,6 +110,10 @@ class LibrarySourceNode(Base):
             name="fk_LibrarySourceNode_parent_directory",
         ),
         Index("LibrarySourceNode_libraryId_parentId_idx", "libraryId", "parentId"),
+        Index(
+            "LibrarySourceNode_parent_path_scan_idx",
+            "libraryId", "parentId", "pathKey", "id", "scanSeenGeneration",
+        ),
         Index("LibrarySourceNode_parentId_idx", "parentId"),
         Index(
             "LibrarySourceNode_parentId_libraryId_idx",
