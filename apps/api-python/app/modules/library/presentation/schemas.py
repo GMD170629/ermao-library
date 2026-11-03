@@ -336,8 +336,22 @@ class UpdateResourceRequest(HttpContractModel):
     resource_index: float | None = Field(default=None, alias="resourceIndex")
 
 
+class BookImportStatusSummary(HttpContractModel):
+    id: str
+    library_id: str = Field(alias="libraryId")
+    metadata_state: str = Field(alias="metadataState")
+    resource_import_summary: ResourceImportSummary = Field(
+        alias="resourceImportSummary"
+    )
+
+
 class BooksPayload(HttpContractModel):
-    books: list[BookView | BookshelfBookSummary | ManagementBookListSummary]
+    books: list[
+        BookView
+        | BookshelfBookSummary
+        | ManagementBookListSummary
+        | BookImportStatusSummary
+    ]
     page: int
     page_size: int = Field(alias="pageSize")
     total: int

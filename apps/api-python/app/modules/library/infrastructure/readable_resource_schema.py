@@ -337,6 +337,7 @@ class LibraryBook(Base):
         Index("LibraryBook_library_visibility_idx", "libraryId", "visibilityState"),
         Index("LibraryBook_library_updated_page_idx", "libraryId", "visibilityState", "updatedAt", "id"),
         Index("LibraryBook_visible_updated_page_idx", "visibilityState", "updatedAt", "id", "libraryId"),
+        Index("LibraryBook_library_imported_page_idx", "libraryId", "visibilityState", "createdAt", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

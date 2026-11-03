@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, exists, func, or_, select
+from sqlalchemy import ColumnElement, Select, exists, func, or_, select
 from sqlalchemy.orm import Session, load_only
 
 from app.core.authorization import (
@@ -324,6 +324,18 @@ def _project_books(
 ) -> list[dict[str, Any]]:
     book_ids = tuple(str(book.id) for book, _metadata in rows)
     import_summaries = resource_import_summaries(db, book_ids)
+    if projection == "import-status":
+        return [
+            {
+                "id": book.id,
+                "libraryId": book.library_id,
+                "metadataState": metadata.metadata_state
+                if metadata is not None
+                else "WAITING_IMPORT",
+                "resourceImportSummary": import_summaries[str(book.id)].as_record(),
+            }
+            for book, metadata in rows
+        ]
     if projection == "full":
         return [
             _book_record(
@@ -413,21 +425,21 @@ def list_books(
         .offset((page - 1) * page_size)
         .subquery()
     )
-    row_query = (
-        select(
-            LibraryBook,
-            LibraryBookMetadata,
-            effective_book_cover_path(
-                LibraryBook.id,
-                LibraryBookMetadata.cover_path,
-                LibraryBookMetadata.cover_status,
-            ).label("effective_cover_path"),
-        )
+    row_query: Select[Any] = (
+        select(LibraryBook, LibraryBookMetadata)
         .select_from(selected_page)
         .join(LibraryBook, LibraryBook.id == selected_page.c.id)
         .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .order_by(*order)
     )
+    if query.projection != "import-status":
+        row_query = row_query.add_columns(
+            effective_book_cover_path(
+                LibraryBook.id,
+                LibraryBookMetadata.cover_path,
+                LibraryBookMetadata.cover_status,
+            ).label("effective_cover_path")
+        )
     metadata_columns = [
         LibraryBookMetadata.book_id,
         LibraryBookMetadata.title,
@@ -435,7 +447,12 @@ def list_books(
         LibraryBookMetadata.cover_path,
         LibraryBookMetadata.cover_status,
     ]
-    if query.projection == "full":
+    if query.projection == "import-status":
+        metadata_columns = [
+            LibraryBookMetadata.book_id,
+            LibraryBookMetadata.metadata_state,
+        ]
+    elif query.projection == "full":
         metadata_columns += [
             LibraryBookMetadata.description,
             LibraryBookMetadata.generated_fields,
@@ -453,12 +470,18 @@ def list_books(
     row_query = row_query.options(load_only(*metadata_columns, raiseload=True))
     if query.projection != "full":
         book_columns = [LibraryBook.id]
+        if query.projection == "import-status":
+            book_columns.append(LibraryBook.library_id)
         if query.projection == "management":
             book_columns.append(LibraryBook.created_at)
         row_query = row_query.options(load_only(*book_columns, raiseload=True))
     rows = db.execute(row_query).all()
-    normalized_rows = [(book, metadata) for book, metadata, _cover_path in rows]
-    cover_paths = {str(book.id): str(path) for book, _metadata, path in rows if path}
+    normalized_rows = [(row[0], row[1]) for row in rows]
+    cover_paths = (
+        {str(row[0].id): str(row[2]) for row in rows if row[2]}
+        if query.projection != "import-status"
+        else {}
+    )
     total_pages = max(1, (total + page_size - 1) // page_size)
     return BookListResult(
         books=_project_books(

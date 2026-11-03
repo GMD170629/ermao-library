@@ -15,6 +15,8 @@ python scripts/benchmark_nas_import.py \
 
 生成数是调用者提供的已核实数量；脚本通过正式 API 分页检查目标书库的发现数、成功导入数。
 成功导入要求存在 READY 资源、没有 pending/failed/failedFiles，且 metadataState 为 COMPLETED。
+验收分页使用 `view=import-status`，只读取图书 ID、书库 ID、元数据状态和资源导入汇总，并按不可变的导入时间与 ID 排序；不加载完整图书详情、封面、标签或阅读进度。
+Acceptance uses the minimal import-status projection and stable import-time ordering rather than full book payloads; all original acceptance conditions remain unchanged.
 Generated count is supplied by the caller; discovered and successful counts are independently checked through library-scoped public APIs. Historical successful task totals are never substituted for successful books.
 
 初始扫描失败或取消立即结束验收，不等待排队任务排空，不提交新扫描。

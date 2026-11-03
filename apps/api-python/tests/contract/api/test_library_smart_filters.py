@@ -113,6 +113,42 @@ def test_resource_summary_skips_unneeded_formats_and_sums_ready_variants(db_sess
     assert not any("LibraryResourceAsset" in sql for sql in statements)
 
 
+def test_import_status_projection_returns_only_acceptance_fields(client, db_session):
+    _login(client, db_session)
+    _book(db_session, book_id="imported", title="Not needed", author="Not needed")
+    _ready_resource(db_session, book_id="imported", resource_id="imported-pdf")
+    db_session.get(LibraryBookMetadata, "imported").metadata_state = "COMPLETED"
+    db_session.commit()
+    statements = []
+
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        response = client.get(
+            "/api/books",
+            params={"view": "import-status", "sort": "recent_import", "pageSize": 100},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert response.status_code == 200, response.text
+    item = response.json()["data"]["books"][0]
+    assert set(item) == {"id", "libraryId", "metadataState", "resourceImportSummary"}
+    assert item["metadataState"] == "COMPLETED"
+    assert item["resourceImportSummary"]["ready"] == 1
+    assert not any(
+        '"LibraryBookMetadata".title' in sql
+        or '"LibraryBookMetadata".description' in sql
+        for sql in statements
+    )
+    assert not any(
+        "ReaderResourceProgress" in sql or "LibraryBookFacet" in sql
+        for sql in statements
+    )
+
+
 def _book(
     db: Session,
     *,

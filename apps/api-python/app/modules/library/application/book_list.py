@@ -8,7 +8,9 @@ from typing import Any, Literal
 from app.modules.library.application.filter_ast import FilterExpression
 
 MAX_LIBRARY_PAGE_SIZE = 500
-BookListProjection = Literal["full", "bookshelf", "management", "search"]
+BookListProjection = Literal[
+    "full", "bookshelf", "management", "search", "import-status"
+]
 
 
 @dataclass(frozen=True)

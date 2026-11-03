@@ -45,6 +45,7 @@ class FakeClient:
             }
         if path.startswith("/api/books?"):
             params = parse_qs(urlsplit(path).query)
+            assert params.get("view", [""])[0] != "full"
             rules = json.loads(params["filters"][0])
             assert rules["conditions"] == [
                 {"field": "library", "operator": "equals", "value": "lib"}

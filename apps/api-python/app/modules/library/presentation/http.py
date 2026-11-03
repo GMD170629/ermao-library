@@ -154,6 +154,7 @@ from app.modules.library.presentation.schemas import (
     BookContentEntryView,
     BookContentsPayload,
     BookContentsResponse,
+    BookImportStatusSummary,
     BookPayload,
     BookResponse,
     BookshelfBookSummary,
@@ -1131,7 +1132,7 @@ def list_library_books(
     facetKind: str | None = None,
     facetId: str | None = None,
     filters: str | None = None,
-    view: Literal["full", "bookshelf", "management", "search"] = "full",
+    view: Literal["full", "bookshelf", "management", "search", "import-status"] = "full",
 ) -> BooksResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
@@ -1169,7 +1170,7 @@ def list_library_books(
             projection=view,
         ),
     )
-    books: list[BookView | BookshelfBookSummary | ManagementBookListSummary] = []
+    books: list[BookView | BookshelfBookSummary | ManagementBookListSummary | BookImportStatusSummary] = []
     if view in {"bookshelf", "search"}:
         for item in result.books:
             books.append(
@@ -1179,6 +1180,8 @@ def list_library_books(
                     )
                 )
             )
+    elif view == "import-status":
+        books.extend(BookImportStatusSummary.model_validate(item) for item in result.books)
     elif view == "management":
         for item in result.books:
             books.append(

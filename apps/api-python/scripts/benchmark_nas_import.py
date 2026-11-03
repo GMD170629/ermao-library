@@ -387,7 +387,9 @@ class Benchmark:
         seen = set()
         while True:
             data = self.client.api(
-                self.books_path(pageSize=100, view="full", page=page)
+                self.books_path(
+                    pageSize=100, view="import-status", sort="recent_import", page=page
+                )
             )
             for book in data["books"]:
                 if book["libraryId"] != self.args.library_id or book["id"] in seen:
