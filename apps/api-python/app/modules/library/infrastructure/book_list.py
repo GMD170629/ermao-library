@@ -7,7 +7,17 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, exists, func, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    String,
+    column,
+    exists,
+    func,
+    or_,
+    select,
+    values,
+)
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only
 
 from app.core.authorization import (
@@ -428,8 +438,22 @@ def list_books(
     context = authorization_context(db, user)
     predicates = _predicates(db, context, user, query, reader_queries)
     identities = book_ids_statement(predicates)
-    total = int(db.scalar(select(func.count()).select_from(identities.subquery())) or 0)
     page = max(1, query.page)
+    complete_match_ids: tuple[str, ...] = ()
+    if query.search and page == 1 and query.requested_page_size is not None:
+        # Reuse counting to return only a complete, page-sized identity set.
+        # A selective search must not walk the full date index to find its
+        # oldest matching book. Large searches still return only the count.
+        matches = identities.cte("matching_books").prefix_with("MATERIALIZED")
+        totals = select(func.count().label("total")).select_from(matches).cte("matching_total")
+        count_rows = db.execute(
+            select(totals.c.total, matches.c.id)
+            .select_from(totals.outerjoin(matches, totals.c.total <= resolve_page_size(query.requested_page_size, 0)))
+        ).all()
+        total = int(count_rows[0].total)
+        complete_match_ids = tuple(str(row.id) for row in count_rows if row.id is not None)
+    else:
+        total = int(db.scalar(select(func.count()).select_from(identities.subquery())) or 0)
     page_size = resolve_page_size(query.requested_page_size, total)
     offset = (page - 1) * page_size
     if offset >= total:
@@ -452,6 +476,8 @@ def list_books(
     )
     page_offset = total - offset - page_limit if reverse else offset
     selected_page = (
+        values(column("id", String())).data([(book_id,) for book_id in complete_match_ids]).cte("selected_matches")
+        if complete_match_ids else
         book_ids_statement(predicates, page_order)
         .limit(page_limit)
         .offset(page_offset)
@@ -464,6 +490,14 @@ def list_books(
         .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .order_by(*order)
     )
+    if complete_match_ids:
+        # Recheck the same scope/filter predicates while hydrating only the
+        # authorized identities determined by the count query.
+        row_query = row_query.where(exists(
+            book_ids_statement(predicates)
+            .where(LibraryBook.id == selected_page.c.id)
+            .correlate(selected_page)
+        ))
     if query.projection != "import-status":
         row_query = row_query.add_columns(
             effective_book_cover_path(

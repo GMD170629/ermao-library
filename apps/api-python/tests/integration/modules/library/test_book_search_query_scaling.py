@@ -17,7 +17,9 @@ from app.modules.reader.infrastructure.v5_library_queries import (
 )
 
 
-def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session):
+@pytest.mark.parametrize("match_count", [1, 10, 5000])
+@pytest.mark.parametrize("sort", ["updated", "recent_import"])
+def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session, match_count, sort):
     db = db_session
     now = datetime.now(UTC)
     user = User(
@@ -61,7 +63,7 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
             [
                 {
                     "book_id": f"book-{i}",
-                    "title": f"NASPERF {i}",
+                    "title": f"NASPERF {i}" if i < match_count else f"Other {i}",
                     "normalized_title": str(i),
                     "description": "metadata " * 100,
                 }
@@ -84,11 +86,13 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
                 page=1,
                 requested_page_size=10,
                 search="NASPERF",
+                sort=sort,
                 projection="import-status",
             ),
             reader_queries=reader,
         )
         count_statement = statements[0]
+        hydration_statement = statements[1]
         statements.clear()
         negative = list_books(
             db,
@@ -103,7 +107,7 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
         )
     finally:
         sa.event.remove(db.get_bind(), "before_cursor_execute", before)
-    assert positive.total == 5000 and len(positive.books) == 10
+    assert positive.total == match_count and len(positive.books) == min(match_count, 10)
     assert negative.total == 0 and negative.books == []
     assert len(statements) == 1
     assert 'LEFT OUTER JOIN "LibraryBookMetadata"' not in count_statement[0]
@@ -118,6 +122,12 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
         for r in plan
     )
     assert not any("SEARCH LibraryBookMetadata" in r[3] for r in plan)
+    if match_count <= 10:
+        hydration_plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + hydration_statement[0], hydration_statement[1]).all()
+        assert "selected_matches" in hydration_statement[0]
+        assert any("SEARCH LibraryBook USING INDEX sqlite_autoindex_LibraryBook_1 (id=?)" in r[3] for r in hydration_plan), hydration_plan
+        assert not any("LibraryBook_visible_imported_page_idx" in r[3] or "LibraryBook_visible_updated_page_idx" in r[3] for r in hydration_plan)
+
     nested = book_ids_statement(
         [LibraryBook.id.in_(sa.select(LibraryBookMetadata.book_id))]
     )
