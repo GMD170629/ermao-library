@@ -104,9 +104,14 @@ def _predicates(
     # A pattern containing only '%' matches every row, including absent metadata
     # through the existing COALESCE branches. Other patterns need real metadata.
     if term and term.strip("%"):
+        matches = matching_search_book_ids(term).cte("search_matches").prefix_with("MATERIALIZED")
+        # An empty IN set may still make older SQLite planners traverse the
+        # library's covering index. The uncorrelated guard ends that scan before
+        # opening the catalog, sharing the same materialized candidate set.
         predicates.append(
-            LibraryBook.id.in_(matching_search_book_ids(term))
+            exists(select(matches.c[0]))
         )
+        predicates.append(LibraryBook.id.in_(select(matches.c[0])))
     if query.status:
         predicates.append(
             reading_status_predicate(

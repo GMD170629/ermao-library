@@ -30,6 +30,7 @@ def test_missing_substring_uses_index_without_catalog_scan(db_session, sort):
     user = User(id="empty-search", email="empty@example.test", name="Empty", role="admin", password_hash="test")
     db.add(user)
     db.commit()
+    db.connection().exec_driver_sql("ANALYZE")
     result, steps = _sqlite_vm_steps(db, lambda: list_books(
         db, user, BookListQuery(1, 20, search="NASPERF-flac-", sort=sort, projection="import-status"),
         reader_queries=SqlAlchemyReaderV5LibraryPresentationQueries(db),
