@@ -23,10 +23,12 @@ import {
 import {
   deleteShelfById,
   fetchShelf,
+  fetchShelfNavigation,
   fetchShelves,
   ShelfApiError,
   writeShelf,
   type ShelfKind,
+  type ShelfNavigationItem,
   type ShelfView
 } from './public';
 import { summarizeSmartShelfRules } from './smart-shelf-rules';
@@ -77,6 +79,7 @@ export function ShelvesPage() {
   const searchParams = useSearchParams();
   const currentSearch = searchParams.toString();
   const [shelves, setShelves] = useState<ShelfView[]>([]);
+  const [shelfNavigation, setShelfNavigation] = useState<ShelfNavigationItem[]>([]);
   const [activeShelf, setActiveShelf] = useState<ShelfView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -136,9 +139,41 @@ export function ShelvesPage() {
   const openShelfFromEffect = useEffectEvent(openShelf);
   const openCreateFromEffect = useEffectEvent(openCreate);
 
+  const requestedShelfId = route.get('shelf');
+  const requestedKind = route.get('create') === '1'
+    ? route.get('kind') === 'collection' ? 'COLLECTION' : 'STATIC'
+    : activeShelf?.id === requestedShelfId ? activeShelf.kind : undefined;
+  const listMode = !requestedShelfId && route.get('create') !== '1'
+    ? 'summary'
+    : (route.get('create') === '1' || route.get('edit') === '1') && requestedKind
+      ? requestedKind === 'COLLECTION' ? 'summary' : 'navigation'
+      : 'none';
+
   useEffect(() => {
-    void loadShelves();
-  }, []);
+    if (listMode === 'none') {
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    const request = listMode === 'summary'
+      ? fetchShelves(controller.signal).then((items) => {
+          if (!controller.signal.aborted) {
+            setShelves(items);
+            setShelfNavigation(items);
+          }
+        })
+      : fetchShelfNavigation(controller.signal).then((items) => {
+          if (!controller.signal.aborted) setShelfNavigation(items);
+        });
+    void request.catch((reason) => {
+      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '读取书架失败');
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
+  }, [listMode]);
 
   useEffect(() => {
     const requestedShelf = route.get('shelf');
@@ -291,7 +326,7 @@ export function ShelvesPage() {
   const initialMemberShelfIds = activeShelf?.memberShelfIds ?? memberShelves.map((shelf) => shelf.id);
   const initialCollectionIds = activeShelf?.collectionIds ?? [];
   const memberShelfOptions = shelves.filter((shelf) => shelf.kind !== 'COLLECTION');
-  const collectionOptions = shelves.filter(
+  const collectionOptions = shelfNavigation.filter(
     (shelf) => (
       shelf.kind === 'COLLECTION'
       && shelf.id !== activeShelf?.id
@@ -333,18 +368,6 @@ export function ShelvesPage() {
     }
   }
 
-  async function loadShelves() {
-    setLoading(true);
-    setError('');
-    try {
-      setShelves(await fetchShelves());
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '读取书架失败');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function openShelf(id: string, page = 1, append = false) {
     const requestId = openRequestRef.current + 1;
     openRequestRef.current = requestId;
@@ -353,7 +376,7 @@ export function ShelvesPage() {
     else setDetailLoading(true);
     setError('');
     try {
-      const knownShelf = activeShelf?.id === id ? activeShelf : shelves.find((item) => item.id === id);
+      const knownShelf = activeShelf?.id === id ? activeShelf : shelfNavigation.find((item) => item.id === id);
       const editingMembers = page === 1 && route.get('edit') === '1';
       const includeIds = editingMembers && knownShelf !== undefined && knownShelf.kind !== 'SMART';
       let shelf = await fetchShelf(id, {
@@ -490,7 +513,6 @@ export function ShelvesPage() {
       setSelectedBookIds(saved.bookIds ?? (saved.books ?? []).map((book) => book.id));
       setSelectedMemberShelfIds(saved.memberShelfIds ?? (saved.shelves ?? []).map((member) => member.id));
       setSelectedCollectionIds(saved.collectionIds ?? []);
-      await loadShelves();
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       toast.success(
         activeIsNew
@@ -533,7 +555,6 @@ export function ShelvesPage() {
     setError('');
     try {
       await deleteShelfById(activeShelf.id);
-      await loadShelves();
       window.dispatchEvent(new Event('shuku:shelves-changed'));
       toast.success(activeIsCollection ? '合集已删除' : '书架已删除');
       router.replace('/shelves', { scroll: false });
