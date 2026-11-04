@@ -286,6 +286,18 @@ def _condition(
         return _number(BOOK_NUMBER_FIELDS[field], condition)
 
     resource = aliased(LibraryReadableResource)
+    if field == "format":
+        negative = condition.operator in {"not_equals", "is_empty"}
+        positive = FilterCondition(
+            field, {"not_equals": "equals", "is_empty": "is_not_empty"}.get(condition.operator, condition.operator),
+            condition.value,
+        )
+        matching_books = select(resource.book_id).where(
+            resource_visibility_predicate(context, resource),
+            _text(resource.format, positive),
+        )
+        membership = LibraryBook.id.in_(matching_books)
+        return ~membership if negative else membership
     source_node = aliased(LibrarySourceNode)
     visible = _visible_resource(context, resource, LibraryBook)
     resource_base = select(resource.id).where(visible)

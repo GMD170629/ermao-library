@@ -11,9 +11,11 @@ from sqlalchemy import (
     ColumnElement,
     Select,
     exists,
+    false,
     func,
     or_,
     select,
+    true,
 )
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only
 
@@ -438,7 +440,31 @@ def list_books(
     identities = book_ids_statement(predicates)
     page = max(1, query.page)
     complete_match_ids: tuple[str, ...] = ()
-    if query.search and page == 1 and query.requested_page_size is not None:
+    if query.sort == "title":
+        # Count and page the same authorized set. Only matching title keys
+        # enter the sort; display metadata is read after selecting the page.
+        matches = identities.cte("matching_books").prefix_with("MATERIALIZED")
+        totals = select(func.count().label("total")).select_from(matches).cte("matching_total")
+        limit = resolve_page_size(query.requested_page_size, 0) if query.requested_page_size is not None else None
+        titles = select(LibraryBookMetadata.book_id, LibraryBookMetadata.title).where(
+            exists(select(matches.c.id).where(matches.c.id == LibraryBookMetadata.book_id)),
+            select(totals.c.total).scalar_subquery() > limit if limit is not None else false(),
+        ).cte("matching_titles").prefix_with("MATERIALIZED")
+        title_order = titles.c.title.desc() if (query.sort_direction or "").lower() == "desc" else titles.c.title.asc()
+        page_ids = (
+            select(matches.c.id, titles.c.title)
+            .select_from(matches.outerjoin(titles, titles.c.book_id == matches.c.id))
+            .order_by(title_order, matches.c.id.asc())
+            .limit(limit)
+            .offset((page - 1) * (limit if limit is not None else select(totals.c.total).scalar_subquery()))
+            .cte("matching_page")
+        )
+        count_rows = db.execute(select(totals.c.total, page_ids.c.id).select_from(
+            totals.outerjoin(page_ids, true())
+        )).all()
+        total = int(count_rows[0].total)
+        complete_match_ids = tuple(str(row.id) for row in count_rows if row.id is not None)
+    elif query.search and page == 1 and query.requested_page_size is not None:
         # Reuse counting to return only a complete, page-sized identity set.
         # A selective search must not walk the full date index to find its
         # oldest matching book. Large searches still return only the count.

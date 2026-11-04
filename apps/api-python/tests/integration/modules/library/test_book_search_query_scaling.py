@@ -15,10 +15,37 @@ from app.modules.library.infrastructure.books import book_ids_statement
 from app.modules.reader.infrastructure.v5_library_queries import (
     SqlAlchemyReaderV5LibraryPresentationQueries,
 )
+from tests.integration.modules.library.test_dashboard_query_scaling import (
+    _seed_manual_library,
+)
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_title_pages_preserve_missing_metadata_ties_and_exact_totals(db_session, direction):
+    db = db_session
+    _seed_manual_library(db, book_count=80)
+    user = User(id="title-user", email="title@example.test", name="Title", role="admin", password_hash="test")
+    db.add(user)
+    for index in (0, 1):
+        db.delete(db.get(LibraryBookMetadata, f"scale-book-{index:06d}"))
+    for index in (2, 3):
+        db.get(LibraryBookMetadata, f"scale-book-{index:06d}").title = "duplicate"
+    db.get(LibraryBook, "scale-book-000004").visibility_state = "HIDDEN"
+    db.commit()
+    order = LibraryBookMetadata.title.desc() if direction == "desc" else LibraryBookMetadata.title.asc()
+    expected = list(db.scalars(sa.select(LibraryBook.id).outerjoin(
+        LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id,
+    ).where(LibraryBook.visibility_state == "VISIBLE").order_by(order, LibraryBook.id.asc())))
+    reader = SqlAlchemyReaderV5LibraryPresentationQueries(db)
+    for page, size in [(1, 20), (2, 20), (4, 20), (99, 20), (1, 100), (1, None), (2, None)]:
+        result = list_books(db, user, BookListQuery(page, size, sort="title", sort_direction=direction, projection="import-status"), reader_queries=reader)
+        actual_size = size or len(expected)
+        assert result.total == 79
+        assert [x["id"] for x in result.books] == expected[(page - 1) * actual_size:page * actual_size]
 
 
 @pytest.mark.parametrize("match_count", [1, 10, 5000])
-@pytest.mark.parametrize("sort", ["updated", "recent_import"])
+@pytest.mark.parametrize("sort", ["updated", "recent_import", "title"])
 def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session, match_count, sort):
     db = db_session
     now = datetime.now(UTC)
