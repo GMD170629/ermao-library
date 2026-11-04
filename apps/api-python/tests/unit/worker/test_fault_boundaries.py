@@ -124,6 +124,37 @@ def test_failed_import_recovery_leaves_independent_workers_running(runtime):
     assert not runtime.ready.exists()
 
 
+@pytest.mark.parametrize("scan_start_fails", [False, True])
+def test_heartbeat_leaves_recovery_before_long_first_task(runtime, monkeypatch, scan_start_fails):
+    heartbeat = Mock()
+    monkeypatch.setattr(worker_main, "QueueHeartbeatPump", lambda *a, **kw: heartbeat)
+    if scan_start_fails:
+        monkeypatch.setattr(
+            worker_main, "LibraryScanCoordinator", Mock(side_effect=RuntimeError("scan startup failed"))
+        )
+
+    def first_task():
+        statuses = [c.kwargs["status"] for c in heartbeat.pulse.call_args_list if "status" in c.kwargs]
+        assert statuses[0] == "recovering"
+        assert statuses[-1] == ("degraded" if scan_start_fails else "running")
+        assert not any(c.kwargs.get("processed") for c in heartbeat.pulse.call_args_list)
+        runtime.handlers[signal.SIGTERM](signal.SIGTERM, None)
+        return "idle"
+
+    runtime.processor.process_once.side_effect = first_task
+    worker_main.main()
+    runtime.processor.process_once.assert_called_once()
+
+
+def test_failed_recovery_never_reports_running(runtime, monkeypatch):
+    heartbeat = Mock()
+    monkeypatch.setattr(worker_main, "QueueHeartbeatPump", lambda *a, **kw: heartbeat)
+    runtime.processor.startup.side_effect = RuntimeError("recovery failure")
+    worker_main.main()
+    assert not any(c.kwargs.get("status") == "running" for c in heartbeat.pulse.call_args_list)
+    assert any(c.kwargs.get("status") == "paused" for c in heartbeat.pulse.call_args_list)
+
+
 def test_transient_recovery_uses_new_context_before_claim(runtime):
     runtime.processor.startup.side_effect = [
         OperationalError("", {}, sqlite3.OperationalError("database is locked")),

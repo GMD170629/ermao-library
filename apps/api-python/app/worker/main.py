@@ -296,6 +296,10 @@ def main() -> None:
                             status="paused" if imports_paused else "degraded",
                             error="scan-start-failed",
                         )
+                if not stop_event.is_set() and not imports_paused and not scan_paused:
+                    # Recovery is complete before the first potentially long scan.
+                    # The heartbeat pump must not repeat "recovering" until it ends.
+                    import_heartbeat.pulse(status="running")
             if stop_event.is_set() or imports_paused:
                 continue
             if (
