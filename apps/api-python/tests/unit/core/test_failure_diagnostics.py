@@ -4,6 +4,7 @@ import json
 import logging
 import sqlite3
 import subprocess
+from copy import copy
 from unittest.mock import Mock
 from urllib.error import URLError
 
@@ -179,6 +180,38 @@ def test_deferred_scope_waits_for_transaction_owner():
     assert pending == [snapshot]
     assert "taskId" not in snapshot.metadata
     assert "step" not in snapshot.metadata
+
+
+def test_enqueue_does_not_scan_existing_snapshots():
+    class AppendOnlyList(list):
+        def __iter__(self):
+            raise AssertionError("enqueue must not scan prior diagnostics")
+
+    items = AppendOnlyList()
+    state = diagnostics._PendingDiagnostics(items=items)
+    token = diagnostics._pending.set(state)
+    try:
+        first = diagnostics.prepare_exception_diagnostic(LOGGER, "first", ValueError("same"))
+        equal_but_distinct = copy(first)
+        diagnostics._enqueue(equal_but_distinct)
+        for _ in range(1000):
+            diagnostics._enqueue(first)
+        assert len(items) == 2
+        assert items[0] is first
+        assert items[1] is equal_but_distinct
+        assert len(state.identities) == 2
+    finally:
+        diagnostics._pending.reset(token)
+
+
+def test_separate_deferred_scopes_do_not_share_identity_index():
+    error = ValueError("same instance across scopes")
+    with diagnostics.deferred_exception_persistence() as first:
+        snapshot = diagnostics.prepare_exception_diagnostic(LOGGER, "first", error)
+    with diagnostics.deferred_exception_persistence() as second:
+        diagnostics.prepare_exception_diagnostic(LOGGER, "second", error)
+    assert first == second == [snapshot]
+    assert first is not second
 
 
 def test_file_write_failure_retains_original_and_outlet_error(monkeypatch, capsys):

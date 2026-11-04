@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import CancelledError as FutureCancelledError
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import FrameType
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
@@ -39,7 +39,13 @@ _DIAGNOSTIC_ATTR = "_ermao_diagnostic_snapshot"
 
 _session_factory: SessionFactory | None = None
 _hooks_installed = False
-_pending: ContextVar[list[DiagnosticSnapshot] | None] = ContextVar(
+@dataclass
+class _PendingDiagnostics:
+    items: list[DiagnosticSnapshot] = field(default_factory=list)
+    identities: set[int] = field(default_factory=set)
+
+
+_pending: ContextVar[_PendingDiagnostics | None] = ContextVar(
     "diagnostic_pending", default=None
 )
 _persisting: ContextVar[str | None] = ContextVar("diagnostic_persisting", default=None)
@@ -54,10 +60,10 @@ def deferred_exception_persistence() -> Iterator[list[DiagnosticSnapshot]]:
     ASGI worker threads through their copied context.
     """
     existing = _pending.get()
-    pending = existing if existing is not None else []
+    pending = existing if existing is not None else _PendingDiagnostics()
     token = _pending.set(pending)
     try:
-        yield pending
+        yield pending.items
     finally:
         _pending.reset(token)
 
@@ -87,8 +93,9 @@ def exception_diagnostic_boundary(
 
 def _enqueue(snapshot: DiagnosticSnapshot) -> None:
     pending = _pending.get()
-    if pending is not None and not any(item is snapshot for item in pending):
-        pending.append(snapshot)
+    if pending is not None and id(snapshot) not in pending.identities:
+        pending.identities.add(id(snapshot))
+        pending.items.append(snapshot)
 
 
 @dataclass
