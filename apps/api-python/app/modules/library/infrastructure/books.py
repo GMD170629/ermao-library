@@ -135,8 +135,7 @@ def resource_import_summaries(
     failed_files: dict[str, int] = {}
     if standard_books:
         failed_files.update(
-            dict(
-                db.execute(
+            {str(book_id): int(count) for book_id, count in db.execute(
                     select(
                         LibraryReadableResource.book_id,
                         func.count(LibraryImportTask.id),
@@ -155,8 +154,7 @@ def resource_import_summaries(
                         LibraryImportTask.state == "FAILED",
                     )
                     .group_by(LibraryReadableResource.book_id)
-                ).all()
-            )
+                ).all()}
         )
     if directory_books:
         asset_failures = db.execute(
