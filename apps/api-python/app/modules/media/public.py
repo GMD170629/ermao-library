@@ -6,6 +6,7 @@ from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
     ResolvedResourcePageIndex,
     ResourcePageIndexProjection,
+    ResourcePageIndexQuery,
     ResourcePageSource,
     ResourcePageUnit,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "ReadOnlyResourcePageIndex",
     "ResolvedResourcePageIndex",
     "ResourcePageIndexProjection",
+    "ResourcePageIndexQuery",
     "ResourcePageSource",
     "ResourcePageUnit",
 ]

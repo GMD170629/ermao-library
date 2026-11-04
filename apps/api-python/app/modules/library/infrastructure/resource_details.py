@@ -42,6 +42,7 @@ from app.modules.library.domain.asset_titles import (
 from app.modules.library.infrastructure.source_paths import (
     resolve_existing_library_file,
 )
+from app.modules.media.public import ResourcePageIndexQuery
 from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
@@ -62,10 +63,32 @@ class SqlAlchemyResourceDetailQueries:
         user_id: str,
         *,
         reader_queries: ReaderV5LibraryPresentationQueryPort,
+        page_index: ResourcePageIndexQuery,
     ) -> None:
         self._db = db
         self._user_id = user_id
         self._reader_queries = reader_queries
+        self._page_index = page_index
+
+    def list_comic_pages(
+        self, *, resource_id: str, limit: int, offset: int
+    ) -> tuple[tuple[ResourceDetailItem, ...], int]:
+        # get_resource has already authorized the immutable resource projection.
+        self._db.expunge_all()
+        self._db.close()
+        index = self._page_index.read(resource_id)
+        return tuple(
+            ResourceDetailItem(
+                id=page.id,
+                unit_type="page",
+                title=page.title,
+                sort_order=page.sort_order,
+                asset_id=page.asset_id,
+                href=page.href,
+                media_type=page.media_type,
+            )
+            for page in index.pages[offset : offset + limit]
+        ), len(index.pages)
 
     def get_resource(
         self,
@@ -275,7 +298,11 @@ class SqlAlchemyResourceDetailQueries:
             return max(0, len(document))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             capture_exception(error, persist=False)
-            record_exception(logging.getLogger(__name__), "modules.library.infrastructure.resource_details.resolve_pdf_page_count.failed", error)
+            record_exception(
+                logging.getLogger(__name__),
+                "modules.library.infrastructure.resource_details.resolve_pdf_page_count.failed",
+                error,
+            )
             return None
         finally:
             if document is not None:

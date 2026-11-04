@@ -104,6 +104,10 @@ class ResourceDetailNotFoundError(Exception):
 
 
 class ResourceDetailQueries(Protocol):
+    def list_comic_pages(
+        self, *, resource_id: str, limit: int, offset: int
+    ) -> tuple[tuple[ResourceDetailItem, ...], int]: ...
+
     def get_resource(
         self,
         *,
@@ -205,10 +209,8 @@ class ListResourceDetails:
                     navigation_key=resource.current_chapter_navigation_key,
                 )
         elif source_format in {"CBZ", "ZIP", "CBR", "RAR"}:
-            units, total = self._queries.list_navigation_units(
+            units, total = self._queries.list_comic_pages(
                 resource_id=resource_id,
-                asset_id=None,
-                unit_type="page",
                 limit=normalized_size,
                 offset=offset,
             )

@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -28,11 +28,30 @@ from app.models import (
     ReadableResourceNavigationUnit,
 )
 from app.modules.media.application.page_index import (
+    ReadOnlyResourcePageIndex,
+    ResolvedResourcePageIndex,
     ResourcePageIndexProjection,
     ResourcePageSource,
     ResourcePageUnit,
 )
 from app.modules.media.infrastructure.http_streaming import stored_path
+
+
+class SqlAlchemyResourcePageIndexQuery:
+    """Release the read transaction before inspecting the archive directory."""
+
+    def __init__(
+        self,
+        sessions: Callable[[], Session],
+        resolver: ReadOnlyResourcePageIndex,
+    ) -> None:
+        self._sessions = sessions
+        self._resolver = resolver
+
+    def read(self, resource_id: str) -> ResolvedResourcePageIndex:
+        with self._sessions() as db:
+            projection = load_read_only_page_index_projection(db, resource_id)
+        return self._resolver.execute(projection)
 
 
 def _stored_path(
@@ -121,7 +140,12 @@ class FilesystemComicArchivePageReader:
                         _, (_, evicted_weight) = self._cache.popitem(last=False)
                         self._cache_bytes -= evicted_weight
             return pages, current_source
-        except (ComicArchiveError, InspectionLimitReached, OSError, ValueError) as error:
+        except (
+            ComicArchiveError,
+            InspectionLimitReached,
+            OSError,
+            ValueError,
+        ) as error:
             capture_exception(error, persist=False)
             record_exception(
                 logging.getLogger(__name__),
@@ -239,7 +263,7 @@ def get_resource_asset(db: Session, asset_id: str) -> dict[str, Any] | None:
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
-            .where(Library.deletion_requested_at.is_(None))
+        .where(Library.deletion_requested_at.is_(None))
         .where(
             LibraryResourceAsset.id == asset_id,
             LibraryResourceAsset.import_state == "READY",
@@ -292,7 +316,7 @@ def load_read_only_page_index_projection(
             LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
         )
         .join(Library, Library.id == LibraryResourceAsset.library_id)
-            .where(Library.deletion_requested_at.is_(None))
+        .where(Library.deletion_requested_at.is_(None))
         .join(
             LibraryReadableResource,
             LibraryReadableResource.id == LibraryResourceAsset.resource_id,

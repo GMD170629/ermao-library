@@ -45,6 +45,11 @@ class FakeQueries:
     def list_assets(self, **_kwargs: object) -> tuple[ResourceAssetDetail, ...]:
         return self.assets
 
+    def list_comic_pages(
+        self, *, limit: int, offset: int, **_kwargs: object
+    ) -> tuple[tuple[ResourceDetailItem, ...], int]:
+        return self.units[offset : offset + limit], len(self.units)
+
     def count_chapters(self, **_kwargs: object) -> int:
         return sum(bool(unit.href) for unit in self.units)
 

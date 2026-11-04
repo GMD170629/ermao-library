@@ -18,8 +18,8 @@ from app.models import (
     LibraryReadableResource,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReadableResourceNavigationUnit,
 )
+from app.modules.media.application.page_index import ResourcePageIndexQuery
 from app.modules.media.application.resource_preview import (
     ResourcePreviewAccessScope,
     ResourcePreviewData,
@@ -43,10 +43,12 @@ class FilesystemResourcePreview:
         db: Session,
         settings: Settings,
         render_coordinator: ResourcePreviewRenderCoordinator,
+        page_index: ResourcePageIndexQuery,
     ) -> None:
         self._db = db
         self._renderer = PageImageRenderer(render_coordinator)
         self._cache = ResourcePreviewCache(settings.resolved_storage_root)
+        self._page_index = page_index
 
     def load(
         self,
@@ -104,19 +106,17 @@ class FilesystemResourcePreview:
                 raise ResourcePreviewNotFoundError
             return PageImageSource(resource_format, asset[0], None)
         if resource_format in {"CBZ", "ZIP", "CBR", "RAR"}:
-            unit = self._db.scalar(
-                select(ReadableResourceNavigationUnit).where(
-                    ReadableResourceNavigationUnit.resource_id == resource_id,
-                    ReadableResourceNavigationUnit.unit_type == "page",
-                    ReadableResourceNavigationUnit.sort_order == page_index,
-                )
-            )
-            if unit is None:
+            self._db.expunge_all()
+            self._db.close()
+            index = self._page_index.read(resource_id)
+            unit = index.page(page_index)
+            source = index.source_for(unit.asset_id) if unit is not None else None
+            if unit is None or source is None:
                 raise ResourcePreviewNotFoundError
-            asset = self._asset_source(resource_id, roles={"PRIMARY"})
-            if asset is None:
+            path = self._safe_source_path(source.source_root, source.path)
+            if path is None:
                 raise ResourcePreviewNotFoundError
-            return PageImageSource(resource_format, asset[0], unit.href)
+            return PageImageSource(resource_format, path, unit.href)
         if resource_format == "IMAGE_DIR":
             assets = self._asset_sources(resource_id, roles={"PAGE"})
             if page_index >= len(assets):

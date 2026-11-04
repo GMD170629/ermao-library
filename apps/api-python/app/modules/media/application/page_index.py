@@ -88,6 +88,10 @@ class ComicArchivePageReader(Protocol):
     ) -> tuple[tuple[ResourcePageUnit, ...], ResourcePageSource]: ...
 
 
+class ResourcePageIndexQuery(Protocol):
+    def read(self, resource_id: str) -> ResolvedResourcePageIndex: ...
+
+
 class ReadOnlyResourcePageIndex:
     """Resolve a persisted index or read an archive directory without DB writes."""
 
@@ -198,6 +202,7 @@ __all__ = [
     "ReadOnlyResourcePageIndex",
     "ResolvedResourcePageIndex",
     "ResourcePageIndexProjection",
+    "ResourcePageIndexQuery",
     "ResourcePageSource",
     "ResourcePageUnit",
 ]

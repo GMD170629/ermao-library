@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.modules.library.application.book_covers import ResolveBookCoverCandidates
@@ -20,6 +20,7 @@ from app.modules.media.infrastructure.first_page_cover import FilesystemFirstPag
 from app.modules.media.infrastructure.page_image import PageImageRenderer
 from app.modules.media.infrastructure.page_index import (
     FilesystemComicArchivePageReader,
+    SqlAlchemyResourcePageIndexQuery,
     get_page_unit,
     get_resource_asset,
     list_page_units_for_resource,
@@ -52,6 +53,12 @@ def resolve_read_only_resource_page_index(
     return _read_only_page_index.execute(projection)
 
 
+def resource_page_index_query(db: Session) -> SqlAlchemyResourcePageIndexQuery:
+    return SqlAlchemyResourcePageIndexQuery(
+        sessionmaker(bind=db.get_bind()), _read_only_page_index
+    )
+
+
 class MediaPageIndex:
     get_resource_asset = staticmethod(get_resource_asset)
     get_page_unit = staticmethod(get_page_unit)
@@ -72,7 +79,9 @@ def media_resource_query(db: Session) -> MediaResourceQuery:
 
 def resource_preview(db: Session, settings: Settings) -> GetResourcePreview:
     return GetResourcePreview(
-        FilesystemResourcePreview(db, settings, resource_preview_render_coordinator)
+        FilesystemResourcePreview(
+            db, settings, resource_preview_render_coordinator, resource_page_index_query(db)
+        )
     )
 
 

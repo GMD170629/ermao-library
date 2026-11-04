@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 from PIL import Image
 from sqlalchemy import select
@@ -1065,6 +1066,62 @@ def test_image_directory_details_and_previews_are_naturally_sorted_and_cached(
     )
     assert cached.status_code == 304
     assert client.get(f"/api/resources/{resource.id}/previews/99").status_code == 404
+
+
+def test_archive_details_use_the_reader_page_index_without_persisted_units(
+    client, db_session, tmp_path: Path
+) -> None:
+    _login(client, db_session, email="archive-detail@example.com")
+    _book, resources = _add_book(db_session, resource_count=1)
+    resource = resources[0]
+    resource.format = "CBZ"
+    resource.adapter_id = "comic-archive"
+    resource_id = resource.id
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(tmp_path)
+    node = db_session.get(LibrarySourceNode, resource.source_node_id)
+    assert node is not None
+    archive = tmp_path / node.relative_path
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with ZipFile(archive, "w") as bundle:
+        for name in ("page10.png", "page2.png", "page1.png"):
+            bundle.writestr(name, _png_cover())
+    node.observed_size_bytes = archive.stat().st_size
+    metadata = db_session.get(LibraryResourceAssetMetadata, f"{resource_id}-asset")
+    assert metadata is not None
+    metadata.mime_type = "application/vnd.comicbook+zip"
+    db_session.commit()
+
+    response = client.get(
+        f"/api/books/detail-book/resources/{resource_id}/reading-units",
+        params={"page": 1, "pageSize": 2},
+    )
+    assert response.status_code == 200, response.text
+    detail = response.json()["data"]
+    assert detail["page"] == {"page": 1, "pageSize": 2, "total": 3, "totalPages": 2}
+    assert [unit["href"] for unit in detail["units"]] == ["page1.png", "page2.png"]
+    assert [unit["pageNumber"] for unit in detail["units"]] == [1, 2]
+    tail = client.get(
+        f"/api/books/detail-book/resources/{resource_id}/reading-units",
+        params={"page": 2, "pageSize": 2},
+    ).json()["data"]
+    assert [unit["href"] for unit in tail["units"]] == ["page10.png"]
+    manifest = client.get(f"/api/reader/v5/resources/{resource_id}/comic/manifest")
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["data"]["pageCount"] == detail["page"]["total"]
+    assert [page["pageIndex"] for page in manifest.json()["data"]["readingOrder"]] == [0, 1, 2]
+    preview = client.get(detail["units"][0]["previewUrl"])
+    assert preview.status_code == 200, preview.text
+    assert (
+        db_session.scalars(
+            select(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                ReadableResourceNavigationUnit.unit_type == "page",
+            )
+        ).all()
+        == []
+    )
 
 
 def test_pdf_details_synthesize_pages_and_render_zero_based_preview(

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.bootstrap.media import build_cover_url_resolver
+from app.bootstrap.media import build_cover_url_resolver, resource_page_index_query
 from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.core.failure_diagnostics import RuntimeFailureDiagnostics
@@ -300,7 +300,10 @@ def resource_details(
 ) -> ListResourceDetails:
     return ListResourceDetails(
         SqlAlchemyResourceDetailQueries(
-            db, user_id, reader_queries=reader_v5_library_queries(db)
+            db,
+            user_id,
+            reader_queries=reader_v5_library_queries(db),
+            page_index=resource_page_index_query(db),
         ),
         navigation,
     )

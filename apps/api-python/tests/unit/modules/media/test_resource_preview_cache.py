@@ -82,7 +82,7 @@ def test_resource_preview_reuses_fresh_and_regenerates_expired_cache(
     original = tmp_path / "original.pdf"
     original.write_bytes(b"original media")
     preview = FilesystemResourcePreview(
-        Mock(), test_settings, ResourcePreviewRenderCoordinator()
+        Mock(), test_settings, ResourcePreviewRenderCoordinator(), Mock()
     )
     monkeypatch.setattr(
         preview, "_source", lambda *args: PageImageSource("PDF", original, None)
