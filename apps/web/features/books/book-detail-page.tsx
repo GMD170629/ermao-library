@@ -228,6 +228,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [resourceDetail, setResourceDetail] = useState<ResourceDetailPage | null>(null);
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
   const [resourceDetailError, setResourceDetailError] = useState('');
+  const [readingStatusRevision, setReadingStatusRevision] = useState(0);
   const resourceCoverInputRef = useRef<HTMLInputElement>(null);
   const [coverUploadResourceId, setCoverUploadResourceId] = useState<string | null>(null);
   const requestedResourceId = searchParams.get('resourceId')?.trim() || null;
@@ -464,7 +465,15 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       })
       .finally(() => { if (!controller.signal.aborted) setResourceDetailLoading(false); });
     return () => controller.abort();
-  }, [requestedResourcePage, resourceDetailBookId, resourceDetailRequestPageSize, resourceDetailResourceId, t]);
+  }, [requestedResourcePage, resourceDetailBookId, resourceDetailRequestPageSize, resourceDetailResourceId, readingStatusRevision, t]);
+
+  const invalidateReadingStatus = () => {
+    // An explicit status change supersedes captures retained across book refreshes.
+    if (pageCaptures.current) pageCaptures.current.records = {};
+    setLocalProgressByResource({});
+    setResourceDetail(null);
+    setReadingStatusRevision((value) => value + 1);
+  };
 
   const updateResourceLocation = (resourceId: string | null, page?: number) => {
     router.push(bookDetailHref(bookId, resourceId, searchParams.get('returnTo'), resourceId ? page ?? 1 : null));
@@ -475,6 +484,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setReadingStatusBusy(true);
     try {
       await updateBookReadingStatus(book.id, status);
+      invalidateReadingStatus();
       await refresh();
       feedback.success(t(status === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
     } catch (reason) {
@@ -765,7 +775,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       request={bookActionRequest}
       canManage={canManage}
       onRequestClose={() => setBookActionRequest(null)}
-      onChanged={async (nextBook) => {
+      onChanged={async (nextBook, action) => {
+        if (action === 'reading-status') invalidateReadingStatus();
         if (nextBook) setBook(nextBook);
         else await refresh();
 

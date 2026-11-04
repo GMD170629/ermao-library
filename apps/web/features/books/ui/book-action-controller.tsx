@@ -75,7 +75,7 @@ export function BookActionController({
   request: BookActionMenuRequest | null;
   canManage: boolean;
   onRequestClose: () => void;
-  onChanged: (book?: BookView) => void | Promise<void>;
+  onChanged: (book?: BookView, action?: BookActionId) => void | Promise<void>;
   onDeleted: (bookId: string) => void | Promise<void>;
 }) {
   const { t } = useI18n();
@@ -178,7 +178,7 @@ export function BookActionController({
         const nextStatus = nextBookReadingStatus(currentRequest.target.status);
         await updateBookReadingStatus(currentRequest.target.id, nextStatus);
         feedback.success(t(nextStatus === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
-        await onChanged();
+        await onChanged(undefined, action);
         return;
       }
       if (action === 'rescan') {
