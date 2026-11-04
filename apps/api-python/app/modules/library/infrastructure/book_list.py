@@ -10,13 +10,10 @@ from typing import Any, cast
 from sqlalchemy import (
     ColumnElement,
     Select,
-    String,
-    column,
     exists,
     func,
     or_,
     select,
-    values,
 )
 from sqlalchemy.orm import InstrumentedAttribute, Session, load_only
 
@@ -48,6 +45,7 @@ from app.modules.library.infrastructure.books import (
     _book_record,
     book_ids_statement,
     resource_import_summaries,
+    selected_book_ids_statement,
 )
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
@@ -476,7 +474,7 @@ def list_books(
     )
     page_offset = total - offset - page_limit if reverse else offset
     selected_page = (
-        values(column("id", String())).data([(book_id,) for book_id in complete_match_ids]).cte("selected_matches")
+        selected_book_ids_statement(complete_match_ids, predicates)
         if complete_match_ids else
         book_ids_statement(predicates, page_order)
         .limit(page_limit)
@@ -490,14 +488,6 @@ def list_books(
         .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .order_by(*order)
     )
-    if complete_match_ids:
-        # Recheck the same scope/filter predicates while hydrating only the
-        # authorized identities determined by the count query.
-        row_query = row_query.where(exists(
-            book_ids_statement(predicates)
-            .where(LibraryBook.id == selected_page.c.id)
-            .correlate(selected_page)
-        ))
     if query.projection != "import-status":
         row_query = row_query.add_columns(
             effective_book_cover_path(

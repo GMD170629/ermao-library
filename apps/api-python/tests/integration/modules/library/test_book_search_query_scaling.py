@@ -124,7 +124,7 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
     assert not any("SEARCH LibraryBookMetadata" in r[3] for r in plan)
     if match_count <= 10:
         hydration_plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + hydration_statement[0], hydration_statement[1]).all()
-        assert "selected_matches" in hydration_statement[0]
+        assert "authorized_selected_books" in hydration_statement[0]
         assert any("SEARCH LibraryBook USING INDEX sqlite_autoindex_LibraryBook_1 (id=?)" in r[3] for r in hydration_plan), hydration_plan
         assert not any("LibraryBook_visible_imported_page_idx" in r[3] or "LibraryBook_visible_updated_page_idx" in r[3] for r in hydration_plan)
 

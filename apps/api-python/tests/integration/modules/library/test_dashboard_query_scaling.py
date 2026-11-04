@@ -38,6 +38,23 @@ from app.modules.reader.infrastructure.v5_library_queries import (
 _ResultT = TypeVar("_ResultT")
 
 
+def test_full_dashboard_projection_only_visits_selected_books(db_session: Session) -> None:
+    _seed_manual_library(db_session, book_count=10_000)
+    context = AuthorizationContext("dashboard-admin", True, True, True, (), 1)
+    reader = SqlAlchemyReaderV5LibraryPresentationQueries(db_session)
+    activity = SqlAlchemyDashboardActivityQueries(db_session, reader_queries=reader)
+    shelf = SqlAlchemyBookshelfItemQueries(db_session, reader_queries=reader)
+    result, steps = _sqlite_vm_steps(db_session, lambda: shelf.list_items(
+        context=context, book_ids=activity.recent_book_ids(context=context, limit=10),
+    ))
+    assert len(result) == 10
+    assert steps < 10_000
+    empty, empty_steps = _sqlite_vm_steps(db_session, lambda: shelf.list_items(
+        context=context, book_ids=(),
+    ))
+    assert empty == () and empty_steps == 0
+
+
 def _seed_manual_library(db: Session, *, book_count: int) -> None:
     now = datetime.now(UTC)
     chunk_size = 500
@@ -252,7 +269,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
         _executemany: bool,
     ) -> None:
         nonlocal select_count
-        if statement.lstrip().upper().startswith("SELECT"):
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
             select_count += 1
 
     engine = db_session.get_bind()

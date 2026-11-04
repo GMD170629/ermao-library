@@ -7,11 +7,21 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, func, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    String,
+    column,
+    exists,
+    func,
+    select,
+    update,
+)
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import values as sql_values
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ClauseElement
-from sqlalchemy.sql.selectable import ScalarSelect, SelectBase
+from sqlalchemy.sql.selectable import CTE, ScalarSelect, SelectBase
 
 from app.models import (
     LibraryBook,
@@ -51,6 +61,20 @@ def book_ids_statement(
             LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
         )
     return statement.order_by(*order)
+
+
+def selected_book_ids_statement(
+    book_ids: Collection[str], predicates: Collection[ColumnElement[bool]],
+) -> CTE:
+    """Recheck scope per supplied identity without scanning a library index."""
+    selected = sql_values(column("id", String())).data(
+        [(book_id,) for book_id in dict.fromkeys(book_ids)]
+    ).cte("selected_book_ids")
+    return select(selected.c.id).where(exists(
+        book_ids_statement(predicates)
+        .where(LibraryBook.id == selected.c.id)
+        .correlate(selected)
+    )).cte("authorized_selected_books")
 
 
 @dataclass(frozen=True, slots=True)

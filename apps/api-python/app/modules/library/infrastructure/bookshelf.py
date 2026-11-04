@@ -24,6 +24,7 @@ from app.modules.library.application.bookshelf import (
     BookshelfItemSummary,
 )
 from app.modules.library.infrastructure.book_covers import effective_book_cover_path
+from app.modules.library.infrastructure.books import selected_book_ids_statement
 from app.modules.reader.public import (
     ReaderV5LibraryPresentationQueryPort,
     ResourceReadingState,
@@ -47,26 +48,27 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
         context: AuthorizationContext,
         book_ids: tuple[str, ...],
     ) -> tuple[BookshelfItemSummary, ...]:
+        if not book_ids:
+            return ()
+        selected = selected_book_ids_statement(book_ids, (
+            LibraryBook.visibility_state == "VISIBLE",
+            book_visibility_predicate(context),
+        ))
         book_rows = self._db.execute(
             select(
                 LibraryBook.id,
                 LibraryBook.updated_at,
                 LibraryBookMetadata.title,
                 LibraryBookMetadata.author,
-                LibraryBookMetadata.cover_path,
                 effective_book_cover_path(
                     LibraryBook.id,
                     LibraryBookMetadata.cover_path,
                     LibraryBookMetadata.cover_status,
                 ).label("effective_cover_path"),
             )
-            .select_from(LibraryBook)
+            .select_from(selected)
+            .join(LibraryBook, LibraryBook.id == selected.c.id)
             .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-            .where(
-                LibraryBook.id.in_(book_ids),
-                LibraryBook.visibility_state == "VISIBLE",
-                book_visibility_predicate(context),
-            )
         ).all()
         book_by_id = {str(row.id): row for row in book_rows}
         visible_book_ids = tuple(
