@@ -1064,23 +1064,19 @@ def test_mobile_is_excluded_from_target_backend_capability_changes() -> None:
 
 
 def test_fresh_runtime_metadata_matches_the_single_baseline(tmp_path: Path) -> None:
-    from alembic.autogenerate import compare_metadata
-    from alembic.migration import MigrationContext
 
     from app.core.config import Settings
-    from app.db.base import Base
     from app.db.bootstrap import bootstrap_database
     from app.db.sqlite import create_sqlite_engine
+    from tests.support.sqlite_schema_contract import (
+        assert_current_schema_matches_metadata,
+    )
 
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     try:
         bootstrap_database(engine, settings)
         with engine.connect() as connection:
-            context = MigrationContext.configure(
-                connection,
-                opts={"compare_type": True, "compare_server_default": True},
-            )
-            assert compare_metadata(context, Base.metadata) == []
+            assert_current_schema_matches_metadata(connection)
     finally:
         engine.dispose()

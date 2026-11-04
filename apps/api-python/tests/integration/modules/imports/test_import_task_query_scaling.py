@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,11 +8,35 @@ from sqlalchemy import event, insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext
+from app.db.runner import apply_schema
+from app.db.sqlite import create_sqlite_engine
 from app.models import Library, LibraryImportTask
 from app.modules.imports.infrastructure.library_queries import (
     list_import_tasks_page,
 )
 from app.modules.imports.presentation.mappers import import_task_view
+
+
+@pytest.fixture
+def migrated_task_session(tmp_path) -> Iterator[Session]:
+    # Index creation order matters to SQLite without optimizer statistics.
+    # Exercise the real migration order, not MetaData's unordered index set.
+    engine = create_sqlite_engine(tmp_path / "task-pages.sqlite3")
+    try:
+        apply_schema(engine)
+        with Session(engine) as db:
+            db.add(
+                Library(
+                    id="test-library",
+                    name="Test",
+                    root_path="/test",
+                    organization_mode="FLAT",
+                )
+            )
+            db.commit()
+            yield db
+    finally:
+        engine.dispose()
 
 
 def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
@@ -113,8 +138,10 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
 
 
 @pytest.mark.parametrize("state", [None, "FAILED"])
-def test_library_task_page_uses_ordered_index_and_reuses_summary(db_session, state):
-    db = db_session
+def test_library_task_page_uses_ordered_index_and_reuses_summary(
+    migrated_task_session, state
+):
+    db = migrated_task_session
     now = datetime.now(UTC)
     for start in range(0, 100_000, 1000):
         db.execute(
@@ -174,7 +201,7 @@ def test_library_task_page_uses_ordered_index_and_reuses_summary(db_session, sta
     assert any(
         "COVERING INDEX LibraryImportTask_library_state_totals_idx" in row[3]
         for row in summary_plan
-    )
+    ), summary_plan
     assert not any("TEMP B-TREE" in row[3] for row in summary_plan)
     plan = (
         db.connection()

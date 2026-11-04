@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import pytest
-from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import (
     Column,
@@ -57,6 +56,10 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
+from tests.support.sqlite_schema_contract import (
+    SEARCH_PROJECTION_TABLES,
+    assert_current_schema_matches_metadata,
+)
 
 TARGET_CORE_TABLES = frozenset(
     {
@@ -109,18 +112,6 @@ LEGACY_TABLES = frozenset(
 def _current_revision(engine) -> str | None:
     with engine.connect() as connection:
         return MigrationContext.configure(connection).get_current_revision()
-
-
-SEARCH_PROJECTION_TABLES = frozenset(
-    {
-        "LibraryBookSearch",
-        "LibraryBookSearch_data",
-        "LibraryBookSearch_idx",
-        "LibraryBookSearch_content",
-        "LibraryBookSearch_docsize",
-        "LibraryBookSearch_config",
-    }
-)
 
 
 def _application_tables(engine) -> set[str]:
@@ -755,22 +746,7 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with engine.connect() as connection:
-            assert SEARCH_PROJECTION_TABLES <= set(
-                inspect(connection).get_table_names()
-            )
-            context = MigrationContext.configure(
-                connection,
-                opts={
-                    "compare_type": True,
-                    "compare_server_default": True,
-                    # FTS and its shadow tables are migration-owned derived data,
-                    # not ORM business tables. Unknown tables still fail this check.
-                    "include_object": lambda obj, name, type_, reflected, compare_to: (
-                        not (type_ == "table" and name in SEARCH_PROJECTION_TABLES)
-                    ),
-                },
-            )
-            assert compare_metadata(context, Base.metadata) == []
+            assert_current_schema_matches_metadata(connection)
     finally:
         engine.dispose()
 

@@ -7,14 +7,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from alembic.autogenerate import compare_metadata
-from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.base import Base
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
 from app.models.library import Library
@@ -27,6 +24,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAsset,
     LibrarySourceNode,
 )
+from tests.support.sqlite_schema_contract import assert_current_schema_matches_metadata
 
 TARGET_CORE_TABLES = {
     "LibrarySourceNode",
@@ -149,17 +147,7 @@ def test_alembic_metadata_has_no_diff_for_target_schema(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     try:
         with engine.connect() as connection:
-            context = MigrationContext.configure(
-                connection,
-                opts={"compare_type": True, "compare_server_default": True},
-            )
-            diff = compare_metadata(context, Base.metadata)
-        target_diff = [
-            item
-            for item in diff
-            if any(table in str(item) for table in TARGET_CORE_TABLES)
-        ]
-        assert target_diff == []
+            assert_current_schema_matches_metadata(connection)
     finally:
         engine.dispose()
 
