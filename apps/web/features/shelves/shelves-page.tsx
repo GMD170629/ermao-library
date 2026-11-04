@@ -4,7 +4,7 @@ import { authorDisplayLabel } from '@/types/book';
 
 import { ArrowLeft, BookOpen, Check, Edit3, Folders, Loader2, Plus, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection, type BookshelfItem } from '../../components/book/bookshelf';
 import { Cover } from '../../components/book/cover';
 import { Badge } from '../../components/ui/badge';
@@ -132,6 +132,9 @@ export function ShelvesPage() {
     [applicableRules]
   );
 
+  const openShelfFromEffect = useEffectEvent(openShelf);
+  const openCreateFromEffect = useEffectEvent(openCreate);
+
   useEffect(() => {
     void loadShelves();
   }, []);
@@ -140,7 +143,7 @@ export function ShelvesPage() {
     const requestedShelf = route.get('shelf');
     if (route.get('create') === '1') {
       openRequestRef.current += 1;
-      openCreate(
+      openCreateFromEffect(
         route.get('kind') === 'smart'
           ? 'SMART'
           : route.get('kind') === 'collection'
@@ -148,7 +151,7 @@ export function ShelvesPage() {
             : 'STATIC'
       );
     } else if (requestedShelf) {
-      void openShelf(requestedShelf);
+      void openShelfFromEffect(requestedShelf);
     } else {
       openRequestRef.current += 1;
       setActiveId(null);
@@ -266,7 +269,7 @@ export function ShelvesPage() {
     if (!sentinel || detailLoading || loadingMore || !activeShelf || currentPage >= totalPages) return;
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
-      void openShelf(activeShelf.id, currentPage + 1, true);
+      void openShelfFromEffect(activeShelf.id, currentPage + 1, true);
     }, { rootMargin: '700px 0px' });
     observer.observe(sentinel);
     return () => observer.disconnect();
