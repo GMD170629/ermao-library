@@ -6,8 +6,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Literal, cast
 
-from sqlalchemy import and_, exists, func, literal, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import and_, case, exists, func, literal, select
+from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
+from sqlalchemy.sql.selectable import CTE
 
 from app.core.authorization import (
     AuthorizationContext,
@@ -21,6 +22,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
 )
 from app.modules.reader.application.v5_library_queries import (
+    ReaderContinueReadingView,
     ReaderV5LibraryPresentationQueryPort,
     ReaderV5PresentationView,
     ReaderV5StatusView,
@@ -65,6 +67,26 @@ def _status_view(row: ReaderResourceReadingStatusV5) -> ReaderV5StatusView:
         status=cast(Literal["UNREAD", "FINISHED"], row.status),
         updated_at=row.updated_at,
     )
+
+
+def _actor_resource_progress(
+    user_id: str,
+    progress_columns: tuple[InstrumentedAttribute[datetime] | InstrumentedAttribute[float], ...],
+) -> CTE:
+    # Keep authorization/state filters outside the materialization barrier.
+    # Otherwise SQLite chooses the global READY-resource index before looking
+    # up actor progress. Equal bounds allow covering identity lookups.
+    return select(
+        LibraryReadableResource.id, LibraryReadableResource.book_id,
+        LibraryReadableResource.library_id, LibraryReadableResource.enablement_state,
+        LibraryReadableResource.import_state, *progress_columns,
+    ).select_from(ReaderResourceProgressV5).join(
+        LibraryReadableResource, LibraryReadableResource.id.between(
+            ReaderResourceProgressV5.resource_id, ReaderResourceProgressV5.resource_id,
+        ),
+    ).where(ReaderResourceProgressV5.user_id == user_id).cte(
+        "actor_resources"
+    ).prefix_with("MATERIALIZED")
 
 
 def reader_v5_latest_read_at_expression(
@@ -248,38 +270,39 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def latest_continue_reading_presentation(
+    def latest_continue_reading(
         self, *, context: AuthorizationContext, user_id: str
-    ) -> ReaderV5PresentationView | None:
-        statement = (
-            select(ReaderResourceProgressV5)
-            .join(
-                LibraryReadableResource,
-                LibraryReadableResource.id == ReaderResourceProgressV5.resource_id,
-            )
-            .join(
-                LibraryReadableResourceMetadata,
-                LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
-            )
-            .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
-            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-            .where(
-                ReaderResourceProgressV5.user_id == user_id,
+    ) -> ReaderContinueReadingView | None:
+        actor_progress = _actor_resource_progress(user_id, (
+            ReaderResourceProgressV5.display_percent,
+            ReaderResourceProgressV5.updated_at,
+        ))
+        resource = aliased(LibraryReadableResource, actor_progress)
+        readable = and_(
+            resource_visibility_predicate(context, resource),
+            exists(select(LibraryReadableResourceMetadata.resource_id).where(
+                LibraryReadableResourceMetadata.resource_id == resource.id,
+            )),
+            exists(select(LibraryBook.id).where(
+                LibraryBook.id == resource.book_id,
                 LibraryBook.visibility_state == "VISIBLE",
                 book_visibility_predicate(context),
-                resource_visibility_predicate(context),
-            )
-            .order_by(
-                ReaderResourceProgressV5.updated_at.desc(),
-                ReaderResourceProgressV5.resource_id.desc(),
-            )
-            .limit(1)
+                exists(select(LibraryBookMetadata.book_id).where(
+                    LibraryBookMetadata.book_id == LibraryBook.id,
+                )),
+            )),
         )
-        unfinished = self._db.scalar(
-            statement.where(ReaderResourceProgressV5.display_percent < 100)
-        )
-        selected = unfinished if unfinished is not None else self._db.scalar(statement)
-        return _presentation_view(selected) if selected is not None else None
+        selected = self._db.execute(select(
+            actor_progress.c.id.label("resource_id"), actor_progress.c.display_percent, actor_progress.c.updated_at,
+        ).where(readable).order_by(
+            case((actor_progress.c.display_percent < 100, 0), else_=1),
+            actor_progress.c.updated_at.desc(), actor_progress.c.id.desc(),
+        ).limit(1)).one_or_none()
+        return ReaderContinueReadingView(
+            resource_id=selected.resource_id,
+            display_percent=selected.display_percent,
+            updated_at=selected.updated_at,
+        ) if selected is not None else None
 
     def list_reading_states(
         self, *, user_id: str, resource_ids: Sequence[str]
@@ -368,24 +391,7 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
     ) -> tuple[str, ...]:
         # Group only this actor's readable resources before joining Books.
         # Unread library books must not trigger per-book progress lookups.
-        actor_resources = (
-            select(
-                LibraryReadableResource.id, LibraryReadableResource.book_id,
-                LibraryReadableResource.library_id, LibraryReadableResource.enablement_state,
-                LibraryReadableResource.import_state,
-                ReaderResourceProgressV5.updated_at.label("updated_at"),
-            )
-            .select_from(ReaderResourceProgressV5)
-            # Equal range bounds retain identity equality while allowing SQLite
-            # to use the covering identity index rather than its heap-backed
-            # unique equality index. Drive these lookups from actor progress.
-            .join(LibraryReadableResource, LibraryReadableResource.id.between(
-                ReaderResourceProgressV5.resource_id, ReaderResourceProgressV5.resource_id,
-            ))
-            .where(ReaderResourceProgressV5.user_id == user_id)
-            .cte("actor_resources")
-            .prefix_with("MATERIALIZED")
-        )
+        actor_resources = _actor_resource_progress(user_id, (ReaderResourceProgressV5.updated_at,))
         resource = aliased(LibraryReadableResource, actor_resources)
         activity = (
             select(

@@ -28,7 +28,6 @@ from app.modules.library.application.dashboard import (
     DashboardActivityQueryPort,
     DashboardContinueReading,
 )
-from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
@@ -100,7 +99,7 @@ def continue_reading_progress(
     *,
     reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any] | None:
-    selected_progress = reader_queries.latest_continue_reading_presentation(
+    selected_progress = reader_queries.latest_continue_reading(
         context=context, user_id=user_id
     )
     if selected_progress is None:
@@ -114,9 +113,6 @@ def continue_reading_progress(
             LibraryBook.id.label("book_id"),
             LibraryBookMetadata.title.label("book_title"),
             LibraryBookMetadata.author,
-            LibraryBookMetadata.cover_path,
-            LibraryBookMetadata.cover_status,
-            LibraryBook.updated_at.label("book_updated_at"),
         )
         .select_from(LibraryReadableResource)
         .join(
@@ -133,19 +129,11 @@ def continue_reading_progress(
     ).one_or_none()
     if selected is None:
         return None
-    cover_path = (
-        SqlAlchemyBookCoverQueries(db)
-        .preferred_paths((str(selected.book_id),))
-        .get(str(selected.book_id))
-    )
     reader_type = require_reader_type_for_format(str(selected.resource_format))
     return {
         "bookId": selected.book_id,
         "title": selected.book_title,
         "author": selected.author,
-        "coverPath": cover_path or selected.cover_path,
-        "coverStatus": "READY" if cover_path else selected.cover_status,
-        "bookUpdatedAt": selected.book_updated_at,
         "resourceFormat": selected.resource_format,
         "readerType": reader_type.value,
         "resourceId": selected.resource_id,

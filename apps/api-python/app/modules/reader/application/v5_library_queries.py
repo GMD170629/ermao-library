@@ -19,6 +19,13 @@ from app.modules.reader.domain.resource_progress import ResourceReadingState
 
 
 @dataclass(frozen=True, slots=True)
+class ReaderContinueReadingView:
+    resource_id: str
+    display_percent: float
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ReaderV5PresentationView:
     """The client-authored presentation projection used by Library views."""
 
@@ -78,9 +85,9 @@ class ReaderReadingStateQueryPort(Protocol):
 class ReaderV5LibraryPresentationQueryPort(ReaderReadingStateQueryPort, Protocol):
     """Reader-owned query API for Library's display and filter projections."""
 
-    def latest_continue_reading_presentation(
+    def latest_continue_reading(
         self, *, context: AuthorizationContext, user_id: str
-    ) -> ReaderV5PresentationView | None: ...
+    ) -> ReaderContinueReadingView | None: ...
 
     def list_presentations(
         self, *, user_id: str, resource_ids: Sequence[str]

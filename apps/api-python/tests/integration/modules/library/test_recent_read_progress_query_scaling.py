@@ -169,6 +169,45 @@ def test_recent_reading_resource_identities_use_covering_point_lookups(recent_re
     assert any("COVERING INDEX LibraryReadableResource_identity_cover_idx" in row[3] for row in plan), plan
 
 
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_continue_reading_selects_actor_scalars_before_resource_metadata(recent_read_session, role):
+    db = recent_read_session
+    user = _actor(db, role=role)
+    other = _actor(db, user_id="other-continue-reader")
+    _seed_manual_library(db, book_count=10_000)
+    now = datetime.now(UTC)
+    for index in range(100):
+        _progress(db, user_id=user.id, index=index, when=now + timedelta(seconds=index))
+        _progress(db, user_id=other.id, index=index + 100, when=now + timedelta(days=1))
+    db.get(LibraryReadableResource, "scale-resource-000099").enablement_state = "DISABLED"
+    db.get(LibraryReadableResource, "scale-resource-000098").import_state = "FAILED"
+    db.get(LibraryBook, "scale-book-000097").visibility_state = "HIDDEN"
+    db.get(ReaderResourceProgressV5, f"recent-progress-{user.id}-96").display_percent = 100
+    db.commit()
+    context = authorization_context(db, user)
+    statements = []
+
+    def before(_c, _cursor, sql, args, _context, _many):
+        statements.append((sql, args))
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        result, steps = _sqlite_vm_steps(db, lambda: SqlAlchemyReaderV5LibraryPresentationQueries(db).latest_continue_reading(context=context, user_id=user.id))
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert result is not None and result.resource_id == "scale-resource-000095"
+    assert result.display_percent == 40
+    assert len(statements) == 1
+    sql, args = statements[0]
+    assert "MATERIALIZED" in sql
+    assert not any(name in sql for name in ("presentationJson", "locatorJson", "chapterTitle", "coverPath"))
+    plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + sql, args).all()
+    assert steps < 20_000, plan
+    assert any("COVERING INDEX LibraryReadableResource_identity_cover_idx" in row[3] for row in plan), plan
+    assert not any("LibraryBook_visible_" in row[3] for row in plan), plan
+
+
 @pytest.mark.parametrize("search", [None, "Scale book"])
 @pytest.mark.parametrize("role", ["admin", "member"])
 def test_recent_read_work_does_not_multiply_books_by_progress(

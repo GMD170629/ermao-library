@@ -15,6 +15,7 @@ from app.modules.reader.application.resource_reader import (
 )
 from app.modules.reader.application.v5_dto import ReaderV5PresentationDto
 from app.modules.reader.application.v5_library_queries import (
+    ReaderContinueReadingView,
     ReaderV5LibraryPresentationQueryPort,
     ReaderV5PresentationView,
     ReaderV5StatusView,
@@ -30,6 +31,7 @@ from app.modules.reader.domain.resource_progress import (
 
 __all__ = [
     "ReaderAccessScope",
+    "ReaderContinueReadingView",
     "ReaderExternalProgressDto",
     "ReaderProgressDateConflict",
     "ReaderResourceFormatUnsupported",
