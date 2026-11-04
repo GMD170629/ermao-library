@@ -105,7 +105,11 @@ def test_search_index_population_exemption_is_offline_and_explicit(tmp_path, mig
 
     source = _budget_table(engine)
     target = sa.Table("LibraryBookSearch", sa.MetaData(), sa.Column("value", sa.Integer))
-    target.create(engine)
+    setup_engine = create_sqlite_engine(tmp_path / "search-index-budget.sqlite3", statement_time_budget_seconds=None, slow_write_threshold_seconds=None)
+    try:
+        target.create(setup_engine)
+    finally:
+        setup_engine.dispose()
     statement = target.insert().from_select(["value"], sa.select(sa.func.slow_search(source.c.value)))
     if marked:
         statement = statement.execution_options(schema_index_build=True)
@@ -527,7 +531,11 @@ def test_only_offline_migration_index_drop_can_exceed_statement_budget(tmp_path,
     engine = create_sqlite_engine(tmp_path / "drop-budget.sqlite3", statement_time_budget_seconds=.03, slow_write_threshold_seconds=None)
     table = _budget_table(engine)
     index = sa.Index("drop_budget_index", table.c.value)
-    index.create(engine)
+    setup_engine = create_sqlite_engine(tmp_path / "drop-budget.sqlite3", statement_time_budget_seconds=None, slow_write_threshold_seconds=None)
+    try:
+        index.create(setup_engine)
+    finally:
+        setup_engine.dispose()
 
     def slow_drop(action, _a, _b, _db, _trigger):
         if action == sqlite3.SQLITE_DROP_INDEX:
