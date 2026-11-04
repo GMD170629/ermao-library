@@ -530,6 +530,20 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0042_remove_metadata_task_payloads.py",
         "0043_remove_legacy_system_events.py",
         "0044_library_background_deletion.py",
+        "0045_source_children_scan_index.py",
+        "0046_import_task_page_indexes.py",
+        "0047_source_cleanup_page_index.py",
+        "0048_import_task_state_totals.py",
+        "0049_book_list_identity_indexes.py",
+        "0050_book_import_status_page.py",
+        "0051_book_search_cover_index.py",
+        "0052_directory_member_cover_index.py",
+        "0053_book_recent_import_page.py",
+        "0054_resource_filter_cover_index.py",
+        "0055_resource_book_summary_cover.py",
+        "0056_resource_identity_cover.py",
+        "0057_book_substring_search.py",
+        "0058_search_candidate_covers.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

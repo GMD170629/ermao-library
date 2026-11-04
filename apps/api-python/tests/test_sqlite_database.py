@@ -111,8 +111,14 @@ def _current_revision(engine) -> str | None:
         return MigrationContext.configure(connection).get_current_revision()
 
 
+SEARCH_PROJECTION_TABLES = frozenset({
+    "LibraryBookSearch", "LibraryBookSearch_data", "LibraryBookSearch_idx",
+    "LibraryBookSearch_content", "LibraryBookSearch_docsize", "LibraryBookSearch_config",
+})
+
+
 def _application_tables(engine) -> set[str]:
-    return set(inspect(engine).get_table_names()) - {"alembic_version"}
+    return set(inspect(engine).get_table_names()) - {"alembic_version"} - SEARCH_PROJECTION_TABLES
 
 
 def _sqlite_journal_mode(engine) -> str:
@@ -210,6 +216,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
         inspector = inspect(engine)
         table_names = set(inspector.get_table_names())
         assert TARGET_CORE_TABLES <= table_names
+        assert SEARCH_PROJECTION_TABLES <= table_names
         assert {
             "Library",
             "LibrarySourceNode",
@@ -416,10 +423,12 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 56
-    assert script.get_heads() == ["0056_resource_identity_cover"]
-    assert head_revision() == "0056_resource_identity_cover"
+    assert len(revisions) == 58
+    assert script.get_heads() == ["0058_search_candidate_covers"]
+    assert head_revision() == "0058_search_candidate_covers"
     assert [revision.revision for revision in revisions] == [
+        "0058_search_candidate_covers",
+        "0057_book_substring_search",
         "0056_resource_identity_cover",
         "0055_resource_book_summary_cover",
         "0054_resource_filter_cover_index",
@@ -488,7 +497,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0056_resource_identity_cover"
+        assert _current_revision(engine) == head_revision(engine)
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -529,7 +538,7 @@ def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
         }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0056_resource_identity_cover"
+        assert _current_revision(engine) == head_revision(engine)
         source_node_indexes = {
             index["name"]: tuple(index["column_names"])
             for index in inspect(engine).get_indexes("LibrarySourceNode")
@@ -580,7 +589,7 @@ def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None
             }
 
         runner_module.apply_schema(engine)
-        assert _current_revision(engine) == "0056_resource_identity_cover"
+        assert _current_revision(engine) == head_revision(engine)
         for table_name, index_name in expected_indexes.items():
             assert index_name in {
                 index["name"] for index in inspect(engine).get_indexes(table_name)
@@ -736,9 +745,18 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with engine.connect() as connection:
+            assert SEARCH_PROJECTION_TABLES <= set(inspect(connection).get_table_names())
             context = MigrationContext.configure(
                 connection,
-                opts={"compare_type": True, "compare_server_default": True},
+                opts={
+                    "compare_type": True,
+                    "compare_server_default": True,
+                    # FTS and its shadow tables are migration-owned derived data,
+                    # not ORM business tables. Unknown tables still fail this check.
+                    "include_object": lambda obj, name, type_, reflected, compare_to: not (
+                        type_ == "table" and name in SEARCH_PROJECTION_TABLES
+                    ),
+                },
             )
             assert compare_metadata(context, Base.metadata) == []
     finally:
