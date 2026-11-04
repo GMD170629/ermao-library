@@ -15,9 +15,11 @@ import pytest
 from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.orm import Session
 
+from app.core.authorization import authorization_context
 from app.db.base import Base
 from app.models import (
     Library,
+    LibraryBook,
     LibraryReadableResource,
     ReaderResourceProgressV5,
     ReaderResourceReadingStatusV5,
@@ -133,6 +135,38 @@ def test_reading_state_batch_selects_only_required_scalars(recent_read_session):
     assert states["scale-resource-000002"].display_percent == 100
     assert states["scale-resource-000002"].last_read_at is None
     assert states["scale-resource-000004"].percent == 0
+
+
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_recent_reading_resource_identities_use_covering_point_lookups(recent_read_session, role):
+    db = recent_read_session
+    user = _actor(db, role=role)
+    _seed_manual_library(db, book_count=1_000)
+    now = datetime.now(UTC)
+    for index in range(5):
+        _progress(db, user_id=user.id, index=index, when=now)
+    db.get(LibraryBook, "scale-book-000002").visibility_state = "HIDDEN"
+    db.get(LibraryReadableResource, "scale-resource-000003").import_state = "FAILED"
+    db.get(LibraryReadableResource, "scale-resource-000004").enablement_state = "DISABLED"
+    db.commit()
+    context = authorization_context(db, user)
+    statements = []
+
+    def before(_c, _cursor, sql, args, _context, _many):
+        statements.append((sql, args))
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        result, steps = _sqlite_vm_steps(db, lambda: SqlAlchemyReaderV5LibraryPresentationQueries(db).recent_reading_book_ids(context=context, user_id=user.id, limit=10))
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert result == ("scale-book-000001", "scale-book-000000")
+    assert steps < 5_000
+    assert len(statements) == 1
+    sql, args = statements[0]
+    plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + sql, args).all()
+    assert any("COVERING INDEX LibraryReadableResource_identity_cover_idx" in row[3] for row in plan), plan
 
 
 @pytest.mark.parametrize("search", [None, "Scale book"])

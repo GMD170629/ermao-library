@@ -376,7 +376,12 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
                 ReaderResourceProgressV5.updated_at.label("updated_at"),
             )
             .select_from(ReaderResourceProgressV5)
-            .join(LibraryReadableResource, LibraryReadableResource.id == ReaderResourceProgressV5.resource_id)
+            # Equal range bounds retain identity equality while allowing SQLite
+            # to use the covering identity index rather than its heap-backed
+            # unique equality index. Drive these lookups from actor progress.
+            .join(LibraryReadableResource, LibraryReadableResource.id.between(
+                ReaderResourceProgressV5.resource_id, ReaderResourceProgressV5.resource_id,
+            ))
             .where(ReaderResourceProgressV5.user_id == user_id)
             .cte("actor_resources")
             .prefix_with("MATERIALIZED")
