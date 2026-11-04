@@ -141,7 +141,7 @@ export function ShelvesPage() {
 
   const requestedShelfId = route.get('shelf');
   const requestedKind = route.get('create') === '1'
-    ? route.get('kind') === 'collection' ? 'COLLECTION' : 'STATIC'
+    ? activeIsNew ? draftKind : route.get('kind') === 'collection' ? 'COLLECTION' : 'STATIC'
     : activeShelf?.id === requestedShelfId ? activeShelf.kind : undefined;
   const listMode = !requestedShelfId && route.get('create') !== '1'
     ? 'summary'
