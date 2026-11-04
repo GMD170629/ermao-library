@@ -50,19 +50,20 @@ def resource_reading_state(
     *,
     resource_id: str,
     sort_order: int,
-    presentation: ReaderV5PresentationView | None,
-    status: ReaderV5StatusView | None,
+    display_percent: float | None,
+    updated_at: datetime | None,
+    explicit_status: Literal["UNREAD", "FINISHED"] | None,
 ) -> ResourceReadingState:
     """Combine actor-scoped display and explicit status through the domain owner."""
 
     return ResourceReadingState(
         resource_id=resource_id,
         sort_order=sort_order,
-        percent=min(100.0, max(0.0, presentation.display_percent))
-        if presentation
+        percent=min(100.0, max(0.0, display_percent))
+        if display_percent is not None
         else 0,
-        last_read_at=presentation.updated_at if presentation else None,
-        explicit_status=status.status if status else None,
+        last_read_at=updated_at,
+        explicit_status=explicit_status,
     )
 
 

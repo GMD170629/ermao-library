@@ -12,7 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
@@ -97,6 +97,42 @@ def _progress(db: Session, *, user_id: str, index: int, when: datetime) -> None:
             revision=1,
         )
     )
+
+
+def test_reading_state_batch_selects_only_required_scalars(recent_read_session):
+    db = recent_read_session
+    user = _actor(db)
+    other = _actor(db, user_id="other-scalar-reader")
+    _seed_manual_library(db, book_count=6)
+    now = datetime.now(UTC)
+    for index in (0, 1):
+        _progress(db, user_id=user.id, index=index, when=now)
+    _progress(db, user_id=other.id, index=4, when=now)
+    for index, status in [(0, "UNREAD"), (1, "FINISHED"), (2, "FINISHED")]:
+        db.add(ReaderResourceReadingStatusV5(user_id=user.id, resource_id=f"scale-resource-{index:06d}", status=status, updated_at=now))
+    db.commit()
+    statements = []
+
+    def before(_c, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        states = SqlAlchemyReaderV5LibraryPresentationQueries(db).list_reading_states(
+            user_id=user.id, resource_ids=[*(f"scale-resource-{i:06d}" for i in range(5)), "missing"],
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert len(statements) == 1
+    assert not any(name in statements[0] for name in ("presentationJson", "locatorJson", "clientId", "mutationId", "chapterTitle"))
+    assert len(states) == 5
+    assert states["scale-resource-000000"].percent == 40
+    assert states["scale-resource-000000"].display_percent == 0
+    assert states["scale-resource-000001"].display_percent == 100
+    assert states["scale-resource-000002"].display_percent == 100
+    assert states["scale-resource-000002"].last_read_at is None
+    assert states["scale-resource-000004"].percent == 0
 
 
 @pytest.mark.parametrize("search", [None, "Scale book"])

@@ -292,8 +292,9 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
         rows = self._db.execute(
             select(
                 LibraryReadableResource.id,
-                ReaderResourceProgressV5,
-                ReaderResourceReadingStatusV5,
+                ReaderResourceProgressV5.display_percent,
+                ReaderResourceProgressV5.updated_at,
+                ReaderResourceReadingStatusV5.status,
             )
             .select_from(LibraryReadableResource)
             .outerjoin(
@@ -317,12 +318,11 @@ class SqlAlchemyReaderV5LibraryPresentationQueries(
             resource_id: resource_reading_state(
                 resource_id=resource_id,
                 sort_order=0,
-                presentation=_presentation_view(progress)
-                if progress is not None
-                else None,
-                status=_status_view(status) if status is not None else None,
+                display_percent=display_percent,
+                updated_at=updated_at,
+                explicit_status=cast(Literal["UNREAD", "FINISHED"] | None, status),
             )
-            for resource_id, progress, status in rows
+            for resource_id, display_percent, updated_at, status in rows
         }
 
     def list_presentations(

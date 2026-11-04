@@ -36,19 +36,22 @@ def test_resource_summary_visits_only_page_books_in_all_import_states(db_session
 
 
 @pytest.mark.parametrize("partial", [False, True])
-def test_resource_summary_cover_migration_restarts(tmp_path, partial):
+@pytest.mark.parametrize("previous,index,columns", [
+    ("0054_resource_filter_cover_index", "LibraryReadableResource_book_summary_cover_idx", ["enablementState", "bookId", "importState", "format", "id"]),
+    ("0055_resource_book_summary_cover", "LibraryReadableResource_identity_cover_idx", ["id", "bookId", "libraryId", "enablementState", "importState"]),
+])
+def test_resource_summary_cover_migration_restarts(tmp_path, partial, previous, index, columns):
     engine = create_sqlite_engine(tmp_path / "summary.sqlite3")
     try:
         config = alembic_config_for_engine(engine)
-        command.upgrade(config, "0054_resource_filter_cover_index")
+        command.upgrade(config, previous)
         if partial:
             with engine.begin() as c:
                 Operations(MigrationContext.configure(c)).create_index(
-                    "LibraryReadableResource_book_summary_cover_idx", "LibraryReadableResource",
-                    ["enablementState", "bookId", "importState", "format", "id"],
+                    index, "LibraryReadableResource", columns,
                 )
         command.upgrade(config, "head")
         command.upgrade(config, "head")
-        assert next(i for i in sa.inspect(engine).get_indexes("LibraryReadableResource") if i["name"] == "LibraryReadableResource_book_summary_cover_idx")["column_names"] == ["enablementState", "bookId", "importState", "format", "id"]
+        assert next(i for i in sa.inspect(engine).get_indexes("LibraryReadableResource") if i["name"] == index)["column_names"] == columns
     finally:
         engine.dispose()
