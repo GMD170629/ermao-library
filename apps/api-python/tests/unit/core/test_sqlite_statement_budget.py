@@ -91,6 +91,52 @@ def test_failed_migration_restores_connection_budget_scope(tmp_path):
         engine.dispose()
 
 
+@pytest.mark.parametrize("migration", [False, True])
+@pytest.mark.parametrize("marked", [False, True])
+def test_search_index_population_exemption_is_offline_and_explicit(tmp_path, migration, marked):
+    engine = create_sqlite_engine(tmp_path / "search-index-budget.sqlite3", statement_time_budget_seconds=.03, slow_write_threshold_seconds=None)
+
+    @sa.event.listens_for(engine, "connect")
+    def register_slow(connection, _record):
+        def slow(value):
+            time.sleep(.002)
+            return value
+        connection.create_function("slow_search", 1, slow)
+
+    source = _budget_table(engine)
+    target = sa.Table("LibraryBookSearch", sa.MetaData(), sa.Column("value", sa.Integer))
+    target.create(engine)
+    statement = target.insert().from_select(["value"], sa.select(sa.func.slow_search(source.c.value)))
+    if marked:
+        statement = statement.execution_options(schema_index_build=True)
+
+    def populate(connection):
+        assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+        connection.execute(statement)
+        connection.commit()
+
+    def execute():
+        if migration:
+            _run_alembic(engine, lambda config: populate(config.attributes["connection"]))
+        else:
+            with engine.connect() as connection:
+                populate(connection)
+
+    try:
+        if migration and marked:
+            execute()
+        else:
+            with pytest.raises(OperationalError) as failure:
+                execute()
+            assert is_database_operation_timeout(failure.value)
+        with engine.connect() as connection:
+            assert not connection.info.get("schema_migration_active")
+            with pytest.raises(OperationalError):
+                connection.execute(sa.select(sa.func.slow_search(source.c.value))).all()
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("operation", ["create", "drop"])
 def test_migration_index_ddl_still_obeys_sqlite_lock_wait(tmp_path, operation):
     engine = create_sqlite_engine(tmp_path / "index-lock.sqlite3", timeout_seconds=.05)

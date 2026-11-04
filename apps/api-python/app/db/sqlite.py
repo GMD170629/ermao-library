@@ -23,6 +23,7 @@ except ImportError as _caught_error:  # diagnostics-control-flow: Windows does n
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy.schema import CreateIndex, DropIndex
+from sqlalchemy.sql.dml import Insert
 
 from app.core.natural_sort import natural_sort_key
 from app.db.maintenance import (
@@ -567,10 +568,16 @@ def create_sqlite_engine(
                     raise
                 trace.lease_wait_ms = (monotonic() - lease_started) * 1000
         if isinstance(cursor, _StatementBudgetCursor):
+            compiled_statement = getattr(execution_context.compiled, "statement", None)
             cursor._migration_index_ddl = bool(
                 info.get("schema_migration_active")
-                and isinstance(
-                    getattr(execution_context.compiled, "statement", None), (CreateIndex, DropIndex)
+                and (
+                    isinstance(compiled_statement, (CreateIndex, DropIndex))
+                    or (
+                        isinstance(compiled_statement, Insert)
+                        and compiled_statement.table.name == "LibraryBookSearch"
+                        and execution_context.execution_options.get("schema_index_build")
+                    )
                 )
             )
             cursor._pre_execute_wait_seconds = trace.lease_wait_ms / 1000

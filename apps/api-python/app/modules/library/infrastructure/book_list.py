@@ -13,7 +13,6 @@ from sqlalchemy import (
     exists,
     false,
     func,
-    or_,
     select,
     true,
 )
@@ -43,6 +42,7 @@ from app.modules.library.infrastructure.book_covers import (
     effective_book_cover_exists,
     effective_book_cover_path,
 )
+from app.modules.library.infrastructure.book_search import matching_search_book_ids
 from app.modules.library.infrastructure.books import (
     _book_record,
     book_ids_statement,
@@ -104,24 +104,8 @@ def _predicates(
     # A pattern containing only '%' matches every row, including absent metadata
     # through the existing COALESCE branches. Other patterns need real metadata.
     if term and term.strip("%"):
-        pattern = f"%{term}%"
         predicates.append(
-            LibraryBook.id.in_(
-                select(LibraryBookMetadata.book_id).where(
-                    or_(
-                        func.lower(LibraryBookMetadata.title).like(pattern),
-                        func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(
-                            pattern
-                        ),
-                        func.lower(
-                            func.coalesce(LibraryBookMetadata.series_name, "")
-                        ).like(pattern),
-                        func.lower(
-                            func.coalesce(LibraryBookMetadata.description, "")
-                        ).like(pattern),
-                    )
-                )
-            )
+            LibraryBook.id.in_(matching_search_book_ids(term))
         )
     if query.status:
         predicates.append(

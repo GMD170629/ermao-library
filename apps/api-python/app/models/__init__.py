@@ -58,6 +58,7 @@ from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportScanGap,
     LibraryImportTask,
 )
+from app.modules.library.infrastructure.book_search_schema import book_search_index
 from app.modules.library.infrastructure.file_delete_schema import FileDeletePlanRow
 from app.modules.library.infrastructure.file_move_schema import (
     LibraryFileMoveOperation,
@@ -155,4 +156,5 @@ __all__ = [
     "User",
     "UserLibraryAccess",
     "UserPreference",
+    "book_search_index",
 ]

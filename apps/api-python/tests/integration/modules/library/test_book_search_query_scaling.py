@@ -12,13 +12,85 @@ from app.models import LibraryBook, LibraryBookMetadata, LibrarySourceNode, User
 from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.infrastructure.book_list import list_books
+from app.modules.library.infrastructure.book_search import matching_search_book_ids
 from app.modules.library.infrastructure.books import book_ids_statement
 from app.modules.reader.infrastructure.v5_library_queries import (
     SqlAlchemyReaderV5LibraryPresentationQueries,
 )
 from tests.integration.modules.library.test_dashboard_query_scaling import (
     _seed_manual_library,
+    _sqlite_vm_steps,
 )
+
+
+@pytest.mark.parametrize("sort", ["title", "recent_read"])
+def test_missing_substring_uses_index_without_catalog_scan(db_session, sort):
+    db = db_session
+    _seed_manual_library(db, book_count=5000)
+    user = User(id="empty-search", email="empty@example.test", name="Empty", role="admin", password_hash="test")
+    db.add(user)
+    db.commit()
+    result, steps = _sqlite_vm_steps(db, lambda: list_books(
+        db, user, BookListQuery(1, 20, search="NASPERF-flac-", sort=sort, projection="import-status"),
+        reader_queries=SqlAlchemyReaderV5LibraryPresentationQueries(db),
+    ))
+    assert result.total == 0 and result.books == []
+    assert steps < 5000, steps
+
+
+def test_substring_index_preserves_like_unicode_null_and_wildcard_semantics(db_session):
+    db = db_session
+    samples = ["ASCII ABC", "École café", "中文阅读器💡", "Straße", "a%b_c", "Other"]
+    _seed_manual_library(db, book_count=len(samples))
+    for index, title in enumerate(samples):
+        metadata = db.get(LibraryBookMetadata, f"scale-book-{index:06d}")
+        metadata.title = title
+        metadata.author = "Writer ABC" if index == 1 else None
+        metadata.series_name = "Series 中文" if index == 2 else None
+        metadata.description = "Description abc" if index == 3 else None
+    db.commit()
+    for term in ["ABC", "école", "café", "阅读器", "中文", "💡", "straße", "strasse", "%b_c", "a%b", "_", "%%", "abc\0"]:
+        term = term.casefold()
+        pattern = f"%{term}%"
+        expected = set(db.scalars(sa.select(LibraryBookMetadata.book_id).where(sa.or_(
+            sa.func.lower(LibraryBookMetadata.title).like(pattern),
+            *(sa.func.lower(sa.func.coalesce(field, "")).like(pattern) for field in (
+                LibraryBookMetadata.author, LibraryBookMetadata.series_name, LibraryBookMetadata.description,
+            )),
+        ))))
+        assert set(db.scalars(matching_search_book_ids(term))) == expected, term
+    metadata = db.get(LibraryBookMetadata, "scale-book-000000")
+    metadata.title = "replacement unique"
+    db.flush()
+    assert set(db.scalars(matching_search_book_ids("replacement"))) == {metadata.book_id}
+    db.rollback()
+    assert not list(db.scalars(matching_search_book_ids("replacement")))
+    db.delete(db.get(LibraryBookMetadata, "scale-book-000001"))
+    db.commit()
+    assert not list(db.scalars(matching_search_book_ids("writer")))
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_substring_index_migration_backfills_and_restarts(tmp_path, partial):
+    from sqlalchemy.orm import Session
+    engine = create_sqlite_engine(tmp_path / "substring.sqlite3")
+    try:
+        config = alembic_config_for_engine(engine)
+        command.upgrade(config, "0056_resource_identity_cover")
+        from app.models import Library
+        with Session(engine) as db:
+            db.add(Library(id="test-library", name="Test", root_path="/test", organization_mode="FLAT"))
+            db.commit()
+            _seed_manual_library(db, book_count=2)
+        if partial:
+            with engine.begin() as connection:
+                connection.execute(sa.DDL('CREATE VIRTUAL TABLE "LibraryBookSearch" USING fts5("bookId" UNINDEXED, title, author, "seriesName", description, tokenize=trigram, detail=none)'))
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        with Session(engine) as db:
+            assert len(list(db.scalars(matching_search_book_ids("scale")) )) == 2
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize("direction", ["asc", "desc"])
@@ -147,11 +219,7 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
         .exec_driver_sql("EXPLAIN QUERY PLAN " + count_statement[0], count_statement[1])
         .all()
     )
-    assert any(
-        "SCAN LibraryBookMetadata USING COVERING INDEX LibraryBookMetadata_search_cover_idx"
-        in r[3]
-        for r in plan
-    )
+    assert sum("LibraryBookSearch VIRTUAL TABLE INDEX" in r[3] and "L" in r[3] for r in plan) == 4, plan
     assert not any("SEARCH LibraryBookMetadata" in r[3] for r in plan)
     if match_count <= 10:
         hydration_plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + hydration_statement[0], hydration_statement[1]).all()
