@@ -107,12 +107,12 @@ class ShelfNavigationItem:
 
 
 class ShelfNavigationQueryPort(Protocol):
-    def list_navigation(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]: ...
+    def list_navigation(self, *, user_id: str) -> tuple[ShelfNavigationItem, ...]: ...
 
 
 @dataclass(frozen=True)
 class ListShelfNavigation:
     query: ShelfNavigationQueryPort
 
-    def execute(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]:
-        return self.query.list_navigation(context=context)
+    def execute(self, *, user_id: str) -> tuple[ShelfNavigationItem, ...]:
+        return self.query.list_navigation(user_id=user_id)

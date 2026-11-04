@@ -33,9 +33,9 @@ class SqlAlchemyCatalogShelfQueries:
         self._db = db
         self._smart_book_ids = smart_book_ids
 
-    def list_navigation(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]:
+    def list_navigation(self, *, user_id: str) -> tuple[ShelfNavigationItem, ...]:
         rows = self._db.execute(select(Shelf.id, Shelf.name, Shelf.kind).where(
-            Shelf.owner_user_id == context.user_id,
+            Shelf.owner_user_id == user_id,
         ).order_by(func.coalesce(Shelf.pinned, False).desc(), Shelf.updated_at.desc(), Shelf.id.asc())).all()
         if not rows:
             return ()
@@ -45,7 +45,7 @@ class SqlAlchemyCatalogShelfQueries:
             ShelfCollectionMembership.shelf_id, ShelfCollectionMembership.collection_id,
         ).join(collection, collection.id == ShelfCollectionMembership.collection_id).where(
             ShelfCollectionMembership.shelf_id.in_([row.id for row in rows]),
-            collection.owner_user_id == context.user_id,
+            collection.owner_user_id == user_id,
         ).order_by(ShelfCollectionMembership.created_at, ShelfCollectionMembership.collection_id)):
             memberships.setdefault(shelf_id, []).append(collection_id)
         return tuple(ShelfNavigationItem(

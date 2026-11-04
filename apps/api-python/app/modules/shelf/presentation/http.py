@@ -570,7 +570,7 @@ def get_shelf_navigation(
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    items = shelf_navigation(db).execute(context=authorization_context(db, user))
+    items = shelf_navigation(db).execute(user_id=user.id)
     return ok({"shelves": [{"id": item.id, "name": item.name, "kind": item.kind,
         "collectionIds": list(item.collection_ids)} for item in items]})
 
