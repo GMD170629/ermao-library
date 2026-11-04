@@ -430,13 +430,13 @@ def list_books(
     )
     page = max(1, query.page)
     complete_match_ids: tuple[str, ...] = ()
-    if query.sort == "title" or (
+    if query.sort == "title" or (query.sort == "recent_read" and bool(query.search)) or (
         query.sort in {"recent_import", "updated"}
         and (query.search or query.keyword or query.filter_expression is not None)
     ):
         # Count and page the same authorized set, retaining only required sort
         # keys. Display metadata is read after selecting the page.
-        date_sort = query.sort != "title"
+        date_sort = query.sort not in {"title", "recent_read"}
         if date_sort:
             identities = identities.add_columns((
                 LibraryBook.created_at if query.sort == "recent_import" else LibraryBook.updated_at
@@ -449,6 +449,14 @@ def list_books(
             page_query = select(matches.c.id).order_by(
                 matches.c.ordered_at.desc() if descending else matches.c.ordered_at.asc(),
                 matches.c.id.desc() if descending else matches.c.id.asc(),
+            )
+        elif query.sort == "recent_read":
+            latest_read = cast(ColumnElement[object], reader_queries.latest_read_at_expression(
+                context=context, user_id=user.id, book_id_expression=matches.c.id,
+            ))
+            page_query = select(matches.c.id).order_by(
+                latest_read.asc() if (query.sort_direction or "desc").lower() == "asc" else latest_read.desc(),
+                matches.c.id.asc(),
             )
         else:
             title = select(LibraryBookMetadata.title).where(

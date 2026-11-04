@@ -234,9 +234,18 @@ def test_recent_read_work_does_not_multiply_books_by_progress(
     for index in range(800):
         _progress(db, user_id=user.id, index=index, when=now + timedelta(seconds=index))
     db.commit()
-    populated, populated_steps = _sqlite_vm_steps(
-        db, lambda: list_books(db, user, query, reader_queries=reader)
-    )
+    statements = []
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+    event.listen(db.get_bind(), "before_cursor_execute", before)
+    try:
+        populated, populated_steps = _sqlite_vm_steps(
+            db, lambda: list_books(db, user, query, reader_queries=reader)
+        )
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", before)
+    if search:
+        assert sum("LibraryBookSearch" in sql for sql in statements) == 1
     assert empty.total == populated.total == 1_000
     assert len(populated.books) == query.requested_page_size
     assert [book["id"] for book in populated.books] == [
@@ -316,6 +325,12 @@ def test_recent_read_preserves_resource_visibility_actor_scope_and_pagination(
         replace(query, search="Scale book", requested_page_size=20),
         reader_queries=reader,
     )
+    hit_ascending = list_books(
+        db, user, replace(query, search="Scale book", requested_page_size=20, sort_direction="asc"), reader_queries=reader,
+    )
+    hit_second = list_books(
+        db, user, replace(query, search="Scale book", page=2), reader_queries=reader,
+    )
     miss = list_books(
         db,
         user,
@@ -337,6 +352,8 @@ def test_recent_read_preserves_resource_visibility_actor_scope_and_pagination(
     assert [book["id"] for book in ascending.books] == [
         f"scale-book-{index:06d}" for index in (3, 4, 5, 6, 7, 8, 1, 2, 0)
     ]
+    assert [book["id"] for book in hit_ascending.books] == [book["id"] for book in ascending.books]
+    assert [book["id"] for book in hit_second.books] == [book["id"] for book in second.books]
     assert miss.total == 0 and miss.books == []
     if role == "member":
         db.execute(
