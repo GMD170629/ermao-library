@@ -10,6 +10,7 @@ from app.db.runner import alembic_config_for_engine
 from app.db.sqlite import create_sqlite_engine
 from app.models import LibraryBook, LibraryBookMetadata, LibrarySourceNode, User
 from app.modules.library.application.book_list import BookListQuery
+from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.infrastructure.book_list import list_books
 from app.modules.library.infrastructure.books import book_ids_statement
 from app.modules.reader.infrastructure.v5_library_queries import (
@@ -21,7 +22,8 @@ from tests.integration.modules.library.test_dashboard_query_scaling import (
 
 
 @pytest.mark.parametrize("direction", ["asc", "desc"])
-def test_title_pages_preserve_missing_metadata_ties_and_exact_totals(db_session, direction):
+@pytest.mark.parametrize("sort", ["title", "recent_import", "updated"])
+def test_filtered_pages_preserve_missing_metadata_ties_and_exact_totals(db_session, direction, sort):
     db = db_session
     _seed_manual_library(db, book_count=80)
     user = User(id="title-user", email="title@example.test", name="Title", role="admin", password_hash="test")
@@ -32,13 +34,15 @@ def test_title_pages_preserve_missing_metadata_ties_and_exact_totals(db_session,
         db.get(LibraryBookMetadata, f"scale-book-{index:06d}").title = "duplicate"
     db.get(LibraryBook, "scale-book-000004").visibility_state = "HIDDEN"
     db.commit()
-    order = LibraryBookMetadata.title.desc() if direction == "desc" else LibraryBookMetadata.title.asc()
+    key = LibraryBookMetadata.title if sort == "title" else (LibraryBook.created_at if sort == "recent_import" else LibraryBook.updated_at)
+    order = key.desc() if direction == "desc" else key.asc()
+    tie = LibraryBook.id.desc() if sort != "title" and direction == "desc" else LibraryBook.id.asc()
     expected = list(db.scalars(sa.select(LibraryBook.id).outerjoin(
         LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id,
-    ).where(LibraryBook.visibility_state == "VISIBLE").order_by(order, LibraryBook.id.asc())))
+    ).where(LibraryBook.visibility_state == "VISIBLE").order_by(order, tie)))
     reader = SqlAlchemyReaderV5LibraryPresentationQueries(db)
     for page, size in [(1, 20), (2, 20), (4, 20), (99, 20), (1, 100), (1, None), (2, None)]:
-        result = list_books(db, user, BookListQuery(page, size, sort="title", sort_direction=direction, projection="import-status"), reader_queries=reader)
+        result = list_books(db, user, BookListQuery(page, size, sort=sort, sort_direction=direction, projection="import-status", filter_expression=FilterExpression("ALL", (FilterCondition("library", "equals", "test-library"),))), reader_queries=reader)
         actual_size = size or len(expected)
         assert result.total == 79
         assert [x["id"] for x in result.books] == expected[(page - 1) * actual_size:page * actual_size]

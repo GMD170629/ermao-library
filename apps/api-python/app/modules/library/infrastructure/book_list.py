@@ -440,21 +440,37 @@ def list_books(
     identities = book_ids_statement(predicates)
     page = max(1, query.page)
     complete_match_ids: tuple[str, ...] = ()
-    if query.sort == "title":
-        # Count and page the same authorized set. Only matching title keys
-        # enter the sort; display metadata is read after selecting the page.
+    if query.sort == "title" or (
+        query.sort in {"recent_import", "updated"}
+        and (query.search or query.keyword or query.filter_expression is not None)
+    ):
+        # Count and page the same authorized set, retaining only required sort
+        # keys. Display metadata is read after selecting the page.
+        date_sort = query.sort != "title"
+        if date_sort:
+            identities = identities.add_columns((
+                LibraryBook.created_at if query.sort == "recent_import" else LibraryBook.updated_at
+            ).label("ordered_at"))
         matches = identities.cte("matching_books").prefix_with("MATERIALIZED")
         totals = select(func.count().label("total")).select_from(matches).cte("matching_total")
         limit = resolve_page_size(query.requested_page_size, 0) if query.requested_page_size is not None else None
-        titles = select(LibraryBookMetadata.book_id, LibraryBookMetadata.title).where(
-            exists(select(matches.c.id).where(matches.c.id == LibraryBookMetadata.book_id)),
-            select(totals.c.total).scalar_subquery() > limit if limit is not None else false(),
-        ).cte("matching_titles").prefix_with("MATERIALIZED")
-        title_order = titles.c.title.desc() if (query.sort_direction or "").lower() == "desc" else titles.c.title.asc()
+        if date_sort:
+            descending = (query.sort_direction or "desc").lower() == "desc"
+            page_query = select(matches.c.id).order_by(
+                matches.c.ordered_at.desc() if descending else matches.c.ordered_at.asc(),
+                matches.c.id.desc() if descending else matches.c.id.asc(),
+            )
+        else:
+            titles = select(LibraryBookMetadata.book_id, LibraryBookMetadata.title).where(
+                exists(select(matches.c.id).where(matches.c.id == LibraryBookMetadata.book_id)),
+                select(totals.c.total).scalar_subquery() > limit if limit is not None else false(),
+            ).cte("matching_titles").prefix_with("MATERIALIZED")
+            title_order = titles.c.title.desc() if (query.sort_direction or "").lower() == "desc" else titles.c.title.asc()
+            page_query = select(matches.c.id).select_from(
+                matches.outerjoin(titles, titles.c.book_id == matches.c.id)
+            ).order_by(title_order, matches.c.id.asc())
         page_ids = (
-            select(matches.c.id, titles.c.title)
-            .select_from(matches.outerjoin(titles, titles.c.book_id == matches.c.id))
-            .order_by(title_order, matches.c.id.asc())
+            page_query
             .limit(limit)
             .offset((page - 1) * (limit if limit is not None else select(totals.c.total).scalar_subquery()))
             .cte("matching_page")
