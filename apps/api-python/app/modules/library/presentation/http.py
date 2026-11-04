@@ -32,6 +32,7 @@ from app.bootstrap.library import (
     library_filter_options,
     library_filter_schema,
     library_groupings,
+    library_navigation_sources,
     list_books,
     merge_library_facets,
     recognize_source_node_metadata,
@@ -194,6 +195,9 @@ from app.modules.library.presentation.schemas import (
     LibraryGroupingPagePayload,
     LibraryGroupingPageResponse,
     LibraryGroupingView,
+    LibraryNavigationSourcePayload,
+    LibraryNavigationSourcesPayload,
+    LibraryNavigationSourcesResponse,
     LibraryOperationUndoPayload,
     LibraryOperationUndoResponse,
     LocalCoverRegenerationPayload,
@@ -996,6 +1000,19 @@ def list_library_groupings(
             totalPages=max(1, (result.total + pageSize - 1) // pageSize),
         )
     )
+
+
+@router.get("/library/navigation-sources", response_model=LibraryNavigationSourcesResponse)
+def get_library_navigation_sources(
+    request: Request, db: DatabaseSession, settings: ApplicationSettings,
+) -> LibraryNavigationSourcesResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return cast(LibraryNavigationSourcesResponse, auth_error)
+    sources = library_navigation_sources(db).execute(authorization_context(db, user))
+    return LibraryNavigationSourcesResponse(data=LibraryNavigationSourcesPayload(
+        sources=[LibraryNavigationSourcePayload(id=source.id, name=source.name) for source in sources]
+    ))
 
 
 @router.get("/library/filter-schema", response_model=FilterSchemaResponse)

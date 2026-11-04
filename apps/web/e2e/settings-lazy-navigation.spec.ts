@@ -480,12 +480,9 @@ for (const locale of ['zh-CN', 'en-US'] as const) {
       { id: 'library-2', name: 'Second', rootPath: '/second', enabled: true, organizationMode: 'FLAT', ignoreHidden: true }
     ];
     const orderRequests: unknown[] = [];
-    await page.route('**/api/library/filter-schema', (route) => route.fulfill({ json: {
+    await page.route('**/api/library/navigation-sources', (route) => route.fulfill({ json: {
       ok: true,
-      data: { maxConditions: 20, fields: [{
-        key: 'library', label: 'Library', group: 'basic', type: 'select', operators: ['equals'],
-        options: libraries.map((library) => ({ value: library.id, label: library.name }))
-      }] }
+      data: { sources: libraries.map((library) => ({ id: library.id, name: library.name })) }
     } }));
     await page.route('**/api/libraries/order', async (route) => {
       const body = route.request().postDataJSON() as { libraryIds: string[] };

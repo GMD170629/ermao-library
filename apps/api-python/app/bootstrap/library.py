@@ -32,6 +32,7 @@ from app.modules.library.application.facet_sync import (
 )
 from app.modules.library.application.filter_options import (
     GetLibraryFilterSchema,
+    ListLibraryNavigationSources,
     SearchLibraryFilterOptions,
 )
 from app.modules.library.application.groupings import ListLibraryGroupings
@@ -212,6 +213,10 @@ def smart_shelf_book_ids(
 
 def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
     return GetLibraryFilterSchema(SqlAlchemyLibraryFilterQueries(db))
+
+
+def library_navigation_sources(db: Session) -> ListLibraryNavigationSources:
+    return ListLibraryNavigationSources(SqlAlchemyLibraryFilterQueries(db))
 
 
 def library_filter_options(db: Session) -> SearchLibraryFilterOptions:
@@ -402,6 +407,7 @@ __all__ = [
     "library_facet_queries",
     "library_filter_options",
     "library_filter_schema",
+    "library_navigation_sources",
     "library_operation_store",
     "library_projections",
     "library_request_mutations",

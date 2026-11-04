@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,
+    library_visibility_predicate,
     resource_visibility_predicate,
 )
 from app.models import (
@@ -23,6 +27,7 @@ from app.modules.library.application.filter_options import (
     LibraryFilterOptionPage,
     LibraryFilterOptionSource,
     LibraryFilterSchemaOptions,
+    LibraryNavigationSource,
 )
 
 
@@ -43,6 +48,16 @@ class SqlAlchemyLibraryFilterQueries:
             libraries=self._library_options(context),
             shelves=self._shelf_options(context),
         )
+
+    def navigation_sources(
+        self, context: AuthorizationContext
+    ) -> tuple[LibraryNavigationSource, ...]:
+        rows = self._db.execute(
+            select(Library.id, Library.name)
+            .where(library_visibility_predicate(context, cast(ColumnElement[str], Library.id)))
+            .order_by(Library.sort_order.asc(), Library.created_at.desc(), Library.id.desc())
+        )
+        return tuple(LibraryNavigationSource(row.id, row.name) for row in rows)
 
     def search_options(
         self,

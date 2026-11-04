@@ -49,6 +49,37 @@ REMOVED_LIBRARY_FILTER_FIELDS = {
 }
 
 
+@pytest.mark.parametrize("role,granted,expected", [
+    ("admin", False, ["test-library"]),
+    ("member", True, ["test-library"]),
+    ("member", False, []),
+])
+def test_navigation_sources_only_query_scoped_library_names(client, db_session, role, granted, expected):
+    user = _login(client, db_session)
+    user.role = role
+    if granted:
+        db_session.add(UserLibraryAccess(user_id=user.id, library_id="test-library"))
+    db_session.add(Library(id="deleted", name="Deleted", root_path="/deleted", organization_mode="FLAT", deletion_requested_at=datetime.now(UTC)))
+    db_session.commit()
+    statements = []
+
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        response = client.get("/api/library/navigation-sources")
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert response.status_code == 200, response.text
+    sources = response.json()["data"]["sources"]
+    assert [source["id"] for source in sources] == expected
+    assert all(set(source) == {"id", "name"} for source in sources)
+    assert all("LibraryReadableResource" not in sql and "LibraryBook" not in sql and "Shelf" not in sql for sql in statements)
+    assert not any('"Library"."rootPath"' in sql for sql in statements)
+
+
 @pytest.mark.parametrize("view", ["bookshelf", "search", "management"])
 def test_list_projection_does_not_fetch_unused_metadata_or_tags(
     client, db_session, view

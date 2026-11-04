@@ -1,6 +1,5 @@
 import type { LibraryNavigationSource } from '../model/library-source-navigation';
-import type { LibraryFilterSchema } from '../model/filter-schema';
-import { fetchLibraryFilterSchema } from './filtering';
+import { readLibraryQueryResponse } from './filtering';
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -9,19 +8,24 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-export function libraryNavigationSourcesFromFilterSchema(schema: LibraryFilterSchema): LibraryNavigationSource[] {
-  const libraryField = schema.fields.find((field) => field.key === 'library');
-  if (!libraryField) {
+export function parseLibraryNavigationSources(payload: unknown): LibraryNavigationSource[] {
+  if (!payload || typeof payload !== 'object' || !('sources' in payload) || !Array.isArray(payload.sources)) {
     throw new Error('LIBRARY_NAVIGATION_SOURCES_INVALID');
   }
-  return (libraryField.options ?? []).map((option) => {
+  return payload.sources.map((source: unknown) => {
+    if (!source || typeof source !== 'object' || !('id' in source) || !('name' in source)) {
+      throw new Error('LIBRARY_NAVIGATION_SOURCES_INVALID');
+    }
     return {
-      id: requiredString(option.value, 'id'),
-      name: requiredString(option.label, 'name')
+      id: requiredString(source.id, 'id'),
+      name: requiredString(source.name, 'name')
     };
   });
 }
 
 export async function fetchLibraryNavigationSources(signal?: AbortSignal): Promise<LibraryNavigationSource[]> {
-  return libraryNavigationSourcesFromFilterSchema(await fetchLibraryFilterSchema(signal));
+  const response = await fetch('/api/library/navigation-sources', {
+    cache: 'no-store', credentials: 'same-origin', signal
+  });
+  return parseLibraryNavigationSources(await readLibraryQueryResponse(response, '读取筛选维度失败'));
 }

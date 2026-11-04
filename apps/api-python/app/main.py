@@ -99,6 +99,7 @@ def _requires_system_manager(path: str, method: str) -> bool:
         "/api/library/facets",
         "/api/library/groupings",
         "/api/library/filter-schema",
+        "/api/library/navigation-sources",
         "/api/library/filter-options",
         "/api/library/operations/books/reading-status",
         "/api/library/operations/books/shelf-membership",

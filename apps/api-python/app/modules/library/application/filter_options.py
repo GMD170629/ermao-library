@@ -56,6 +56,26 @@ class LibraryFilterOption:
 
 
 @dataclass(frozen=True)
+class LibraryNavigationSource:
+    id: str
+    name: str
+
+
+class LibraryNavigationSourceQueries(Protocol):
+    def navigation_sources(
+        self, context: AuthorizationContext
+    ) -> tuple[LibraryNavigationSource, ...]: ...
+
+
+class ListLibraryNavigationSources:
+    def __init__(self, queries: LibraryNavigationSourceQueries) -> None:
+        self._queries = queries
+
+    def execute(self, context: AuthorizationContext) -> tuple[LibraryNavigationSource, ...]:
+        return self._queries.navigation_sources(context)
+
+
+@dataclass(frozen=True)
 class LibraryFilterFieldDefinition:
     key: str
     label: str

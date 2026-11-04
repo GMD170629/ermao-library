@@ -23,6 +23,19 @@ from app.modules.library.application.recognized_metadata import (
 FacetKind = Literal["AUTHOR", "TAG", "SERIES"]
 
 
+class LibraryNavigationSourcePayload(HttpContractModel):
+    id: str
+    name: str
+
+
+class LibraryNavigationSourcesPayload(HttpContractModel):
+    sources: list[LibraryNavigationSourcePayload]
+
+
+class LibraryNavigationSourcesResponse(SuccessEnvelope[LibraryNavigationSourcesPayload]):
+    pass
+
+
 class LibraryFacetView(HttpContractModel):
     id: str
     kind: FacetKind

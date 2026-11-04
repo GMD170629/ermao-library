@@ -50,6 +50,12 @@ async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
       await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
       return;
     }
+    if (pathname.endsWith('/api/library/navigation-sources')) {
+      await route.fulfill({ json: { ok: true, data: { sources: [
+        { id: 'main-library', name: '主书库' }, { id: 'comic-library', name: '漫画库' }
+      ] } } });
+      return;
+    }
     if (pathname.endsWith('/api/library/filter-schema')) {
       await route.fulfill({
         json: {

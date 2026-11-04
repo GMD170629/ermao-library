@@ -121,7 +121,7 @@ export function parseLibraryFilterOptionPage(value: unknown): LibraryFilterOptio
   };
 }
 
-async function readData(response: Response, fallback: string): Promise<unknown> {
+export async function readLibraryQueryResponse(response: Response, fallback: string): Promise<unknown> {
   const payload: unknown = await response.json().catch(() => null);
   if (!isObject(payload) || payload.ok !== true || !('data' in payload)) {
     const message = isObject(payload) && isObject(payload.error) && typeof payload.error.message === 'string'
@@ -139,7 +139,7 @@ export async function fetchLibraryFilterSchema(signal?: AbortSignal): Promise<Li
     credentials: 'same-origin',
     signal
   });
-  return parseLibraryFilterSchema(await readData(response, '读取筛选维度失败'));
+  return parseLibraryFilterSchema(await readLibraryQueryResponse(response, '读取筛选维度失败'));
 }
 
 export async function fetchLibraryFilterOptions(
@@ -154,5 +154,5 @@ export async function fetchLibraryFilterOptions(
     credentials: 'same-origin',
     signal
   });
-  return parseLibraryFilterOptionPage(await readData(response, '读取筛选建议失败'));
+  return parseLibraryFilterOptionPage(await readLibraryQueryResponse(response, '读取筛选建议失败'));
 }
