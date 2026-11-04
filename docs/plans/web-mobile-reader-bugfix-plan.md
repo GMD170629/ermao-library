@@ -94,3 +94,12 @@ app/globals.css 仅对 WebKit standalone 的现有 ReaderShell 应用 position:a
 ## v1.6.1 快速发布执行
 
 用户明确授权快速更新，不保留单独发布分支。采用 code-only，baseVersion=1.6.0，基础镜像固定为 gamersgu/shuku-starship-web@sha256:c88bc42b9e33de0ff62b76ab7f49d5a127b2919b74fc27137515cbf34ee29051；两架构 OCI 镜像标签均核对为 v1.6.0 源码 71d52fe2。应用修复和已有定向验收结果不变。发布冻结后将远端 main/develop 快进至同一提交并创建正式标签；不构建或推广 Docker 镜像，不生成 FPK/APK/IPA，正式快速门禁由同一标签工作流执行。前一节的普通发布计划已被本次用户选择取代。
+
+## v1.6.1 快速发布结果
+
+- 正式源码 / tag：3e2608a34f5ffef6014eff5ce7c223386f9a4d54；main/develop 在推送正式标签时同步到该提交，未推送或保留单独发布分支。
+- Actions：39969639232，全部本次快速门禁成功；Web 模块检查通过，双架构应用构建与依赖身份/产物校验通过，GHCR 上传及所有 blob 匿名校验通过。
+- 不可变 bundle artifact：12508807642，sha256:02c45b8485189908f66129216c55c127441eb9f2dc7b17b1bb05b6a21b3649cd。
+- linux-x86_64 OCI：sha256:3c4e67aff5d62d01ded3f3d8ad848b7b852fc79a6071bcc24f126b2c2ff86410；linux-aarch64 OCI：sha256:a23ab242eb32e10678ea44abd368873f3559a8e5624d456c5475ff1cee14f1cd。
+- GitHub Release 实际公开时间：2026-10-23T14:41:20Z；release-feed 已含 1.6.1 和两架构固定引用。当前补记只校准时间与结果，不修改已公开标签及制品；元数据提交使用 skip ci 避免标签后的普通开发镜像构建。
+- 本次运行总体 15 分 53 秒；发布预检 53 秒，双架构构建步骤 10 分 23 秒，候选 job 11 分 7 秒，汇总 50 秒，发布 job 2 分 53 秒，其中 GHCR 上传与匿名校验 1 分 19 秒。后端完整测试、镜像构建/运行验收、移动检查/安装包按 code-only 计划跳过。未运行的新平台/安装验收不宣称通过；未执行 NAS 更新安装。无 Docker 构建缓存收益可报告，未以并行或缓存估算节省时间。
