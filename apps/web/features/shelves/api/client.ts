@@ -70,7 +70,7 @@ export async function writeShelf(
   input: ShelfWriteInput
 ): Promise<ShelfView> {
   const data = await readEnvelope(
-    await fetch(id ? `/api/shelves/${encodeURIComponent(id)}` : '/api/shelves', {
+    await fetch(`${id ? `/api/shelves/${encodeURIComponent(id)}` : '/api/shelves'}?includeBookIds=false`, {
       method: id ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input)

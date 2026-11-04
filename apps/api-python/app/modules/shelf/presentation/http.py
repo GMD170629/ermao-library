@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import bookshelf_items as get_bookshelf_items
-from app.bootstrap.library import get_book, smart_shelf_book_ids
+from app.bootstrap.library import get_book, smart_shelf_book_ids, smart_shelf_book_page
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
@@ -198,15 +198,22 @@ def _shelf_book_ids(
     rules = _parse_json(shelf.get("rulesJson"), {})
     if kind == "SMART" and _unsupported_rule_fields(rules):
         return []
-    book_ids = (
-        smart_shelf_book_ids(db, rules, user_id=user.id)
-        if kind == "SMART"
-        else shelf_store.list_static_shelf_book_ids(db, str(shelf["id"]))
-    )
+    if kind == "SMART":
+        return smart_shelf_book_ids(db, rules, user_id=user.id)
+    book_ids = shelf_store.list_static_shelf_book_ids(db, str(shelf["id"]))
     if not book_ids:
         return []
     visibility = context or authorization_context(db, user)
     return shelf_store.filter_visible_book_ids(db, book_ids, visibility)
+
+
+def _smart_shelf_book_page(
+    db: Session, shelf: dict[str, Any], user: User, *, page: int, page_size: int,
+) -> tuple[list[str], int]:
+    rules = _parse_json(shelf.get("rulesJson"), {})
+    if _unsupported_rule_fields(rules):
+        return [], 0
+    return smart_shelf_book_page(db, rules, user_id=user.id, page=page, page_size=page_size)
 
 
 def _shelf_book_views(
@@ -270,8 +277,7 @@ def _shelf_summary_view(
             page_size=3,
         )
     else:
-        all_book_ids = _shelf_book_ids(db, shelf, user, context=context)
-        book_ids, total = all_book_ids[:3], len(all_book_ids)
+        book_ids, total = _smart_shelf_book_page(db, shelf, user, page=1, page_size=3)
     return {
         **_shelf_base_view(shelf),
         "bookCount": total,
@@ -352,6 +358,9 @@ def _shelf_detail_view(
             page_size=page_size,
         )
         book_ids: list[str] = []
+    elif kind == "SMART" and not include_book_ids:
+        page_ids, total = _smart_shelf_book_page(db, shelf, user, page=page, page_size=page_size)
+        book_ids = []
     else:
         book_ids = _shelf_book_ids(db, shelf, user, context=context)
         total = len(book_ids)
@@ -587,6 +596,7 @@ def get_shelf(
 def create_shelf(
     request_payload: ShelfWriteRequest,
     request: Request,
+    includeBookIds: bool = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ShelfResponse | Response:
@@ -697,7 +707,7 @@ def create_shelf(
             now=now,
         )
     )
-    return ok({"shelf": _shelf_detail_view(db, shelf, user)}, status_code=201)
+    return ok({"shelf": _shelf_detail_view(db, shelf, user, include_book_ids=includeBookIds)}, status_code=201)
 
 
 @router.patch("/shelves/{shelf_id}", response_model=ShelfResponse)
@@ -705,6 +715,7 @@ def update_shelf(
     shelf_id: str,
     request_payload: ShelfWriteRequest,
     request: Request,
+    includeBookIds: bool = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ShelfResponse | Response:
@@ -857,7 +868,7 @@ def update_shelf(
     )
     if not shelf:
         return fail("书架不存在", status_code=404)
-    return ok({"shelf": _shelf_detail_view(db, shelf, user)})
+    return ok({"shelf": _shelf_detail_view(db, shelf, user, include_book_ids=includeBookIds)})
 
 
 @router.delete("/shelves/{shelf_id}", response_model=DeletedShelfResponse)

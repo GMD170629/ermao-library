@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import Select, and_, case, exists, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import (
@@ -33,15 +33,15 @@ class SqlAlchemyLibraryQueries:
         self._db = db
         self._reader_queries = reader_queries
 
-    def matching_book_ids(
+    def _matching_statement(
         self,
         criteria: SmartShelfCriteria,
         *,
         user_id: str | None,
-    ) -> list[str]:
+    ) -> Select[tuple[str]] | None:
         user = self._db.get(User, user_id) if user_id else None
         if user_id and user is None:
-            return []
+            return None
         context = authorization_context(self._db, user) if user else None
         if context is None:
             from app.core.authorization import AuthorizationContext
@@ -141,36 +141,49 @@ class SqlAlchemyLibraryQueries:
             )
             if dynamic is not None:
                 predicates.append(dynamic)
-        matched_ids = list(
-            self._db.scalars(
-                select(LibraryBook.id)
-                .join(
-                    LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
-                )
-                .where(and_(*predicates))
-                .order_by(LibraryBook.updated_at.desc(), LibraryBook.id.desc())
-            )
+        matched = (
+            select(LibraryBook.id)
+            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .where(and_(*predicates))
+            .order_by(LibraryBook.updated_at.desc(), LibraryBook.id.desc())
         )
         if not criteria.included_book_ids:
-            return matched_ids
-        included = set(
-            self._db.scalars(
-                select(LibraryBook.id).where(
-                    LibraryBook.id.in_(criteria.included_book_ids),
-                    LibraryBook.visibility_state == "VISIBLE",
-                    book_visibility_predicate(context),
-                )
-            )
+            return matched
+        # Explicit inclusions follow rule matches, in their supplied order.
+        matches = matched.order_by(None).cte("smart_shelf_matches").prefix_with("MATERIALIZED")
+        combined = union_all(
+            select(LibraryBook.id.label("id"), literal(0).label("kind"),
+                   LibraryBook.updated_at.label("updated_at"), literal(0).label("ordinal"))
+            .join(matches, matches.c.id == LibraryBook.id),
+            select(LibraryBook.id.label("id"), literal(1).label("kind"),
+                   literal(None).label("updated_at"),
+                   case({book_id: position for position, book_id in enumerate(criteria.included_book_ids)}, value=LibraryBook.id).label("ordinal"))
+            .where(
+                LibraryBook.id.in_(criteria.included_book_ids),
+                LibraryBook.visibility_state == "VISIBLE",
+                book_visibility_predicate(context),
+                ~LibraryBook.id.in_(select(matches.c.id)),
+            ),
+        ).subquery()
+        return select(combined.c.id).order_by(
+            combined.c.kind, combined.c.ordinal, combined.c.updated_at.desc(), combined.c.id.desc()
         )
-        return list(
-            dict.fromkeys(
-                [
-                    *matched_ids,
-                    *(
-                        book_id
-                        for book_id in criteria.included_book_ids
-                        if book_id in included
-                    ),
-                ]
-            )
-        )
+
+    def matching_book_ids(
+        self, criteria: SmartShelfCriteria, *, user_id: str | None,
+    ) -> list[str]:
+        statement = self._matching_statement(criteria, user_id=user_id)
+        return list(self._db.scalars(statement)) if statement is not None else []
+
+    def matching_book_page(
+        self, criteria: SmartShelfCriteria, *, user_id: str | None,
+        page: int, page_size: int,
+    ) -> tuple[list[str], int]:
+        statement = self._matching_statement(criteria, user_id=user_id)
+        if statement is None:
+            return [], 0
+        total = int(self._db.scalar(select(func.count()).select_from(statement.order_by(None).subquery())) or 0)
+        if not total:
+            return [], 0
+        ids = list(self._db.scalars(statement.limit(page_size).offset((page - 1) * page_size)))
+        return ids, total

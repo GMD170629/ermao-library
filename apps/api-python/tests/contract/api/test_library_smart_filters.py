@@ -813,3 +813,67 @@ def test_smart_shelf_admin_scope_and_member_authorization(db_session: Session) -
     assert smart_shelf_book_ids(
         db_session, {"search": "Visible", "authors": ["Author"]}, user_id=member.id
     ) == ["visible"]
+
+
+def test_smart_shelf_page_and_writes_do_not_materialize_all_ids(client, db_session, monkeypatch):
+    from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
+
+    _login(client, db_session)
+    for position in range(65):
+        _book(db_session, book_id=f"bounded-{position:03}", title="Bounded", author="Author")
+    _book(db_session, book_id="hidden-bounded", title="Bounded", author="Author", visibility_state="HIDDEN")
+    db_session.commit()
+    statements = []
+    def before(_c, _cursor, sql, parameters, _context, _many):
+        statements.append((sql, parameters))
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Paged shelf must not load the complete ID list")
+    with monkeypatch.context() as patch:
+        patch.setattr(SqlAlchemyLibraryQueries, "matching_book_ids", forbidden)
+        try:
+            created = client.post("/api/shelves?includeBookIds=false", json={"name": "Bounded", "kind": "SMART", "rules": {}})
+            assert created.status_code == 201, created.text
+            shelf = created.json()["data"]["shelf"]
+            assert shelf["bookCount"] == 65 and len(shelf["books"]) == 24
+            assert "bookIds" not in shelf
+            patched = client.patch(f"/api/shelves/{shelf['id']}?includeBookIds=false", json={"description": "Updated"})
+            assert patched.status_code == 200, patched.text
+            assert "bookIds" not in patched.json()["data"]["shelf"]
+            seen = []
+            for page in (1, 2, 3):
+                response = client.get(f"/api/shelves/{shelf['id']}", params={"page": page, "pageSize": 24, "includeBookIds": False})
+                assert response.status_code == 200, response.text
+                detail = response.json()["data"]["shelf"]
+                assert detail["total"] == 65 and "bookIds" not in detail
+                seen.extend(item["id"] for item in detail["books"])
+            assert len(set(seen)) == len(seen) == 65
+            summary = client.get("/api/shelves").json()["data"]["shelves"][0]
+            assert summary["bookCount"] == 65 and len(summary["books"]) == 3
+        finally:
+            event.remove(engine, "before_cursor_execute", before)
+    # Full IDs remain available when explicitly requested, including the old default.
+    full = client.get(f"/api/shelves/{shelf['id']}").json()["data"]["shelf"]
+    assert set(full["bookIds"]) == set(seen)
+    page_queries = [(sql, params) for sql, params in statements if 'ORDER BY "LibraryBook"."updatedAt" DESC' in sql]
+    assert page_queries and all("LIMIT" in sql for sql, _ in page_queries)
+
+
+def test_smart_shelf_included_ids_preserve_order_and_scope_in_pages(db_session):
+    from app.bootstrap.library import smart_shelf_book_ids, smart_shelf_book_page
+    user = User(id="included-admin", email="included@example.com", name="Included", password_hash="unused", role="admin")
+    db_session.add(user)
+    for book_id, author in [("match", "Match"), ("included-a", "Other"), ("included-b", "Other")]:
+        _book(db_session, book_id=book_id, title=book_id, author=author)
+    _book(db_session, book_id="hidden", title="hidden", author="Other", visibility_state="HIDDEN")
+    db_session.commit()
+    rules = {"authors": ["Match"], "includedBookIds": ["included-b", "match", "hidden", "included-a", "included-b", "missing"]}
+    expected = ["match", "included-b", "included-a"]
+    assert smart_shelf_book_ids(db_session, rules, user_id=user.id) == expected
+    for page in (1, 2, 3, 4):
+        assert smart_shelf_book_page(db_session, rules, user_id=user.id, page=page, page_size=1) == (expected[page-1:page], 3)
+    user.role = "member"
+    db_session.commit()
+    assert smart_shelf_book_page(db_session, rules, user_id=user.id, page=1, page_size=24) == ([], 0)
+    assert smart_shelf_book_page(db_session, rules, user_id="missing", page=1, page_size=24) == ([], 0)

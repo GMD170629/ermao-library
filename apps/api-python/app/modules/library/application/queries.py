@@ -63,6 +63,11 @@ class SmartShelfQueryPort(Protocol):
         user_id: str | None,
     ) -> list[str]: ...
 
+    def matching_book_page(
+        self, criteria: SmartShelfCriteria, *, user_id: str | None,
+        page: int, page_size: int,
+    ) -> tuple[list[str], int]: ...
+
 
 @dataclass(frozen=True)
 class GetSmartShelfBookIds:
@@ -75,3 +80,16 @@ class GetSmartShelfBookIds:
         user_id: str | None,
     ) -> list[str]:
         return self.query.matching_book_ids(criteria, user_id=user_id)
+
+
+@dataclass(frozen=True)
+class GetSmartShelfBookPage:
+    query: SmartShelfQueryPort
+
+    def execute(
+        self, criteria: SmartShelfCriteria, *, user_id: str | None,
+        page: int, page_size: int,
+    ) -> tuple[list[str], int]:
+        return self.query.matching_book_page(
+            criteria, user_id=user_id, page=page, page_size=page_size,
+        )

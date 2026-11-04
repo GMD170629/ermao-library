@@ -44,6 +44,7 @@ from app.modules.library.application.management_commands import (
 )
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
+    GetSmartShelfBookPage,
     SmartShelfCriteria,
 )
 from app.modules.library.application.recognized_metadata import (
@@ -209,6 +210,15 @@ def smart_shelf_book_ids(
     return GetSmartShelfBookIds(
         SqlAlchemyLibraryQueries(db, reader_queries=reader_v5_library_queries(db))
     ).execute(SmartShelfCriteria.from_external(rules), user_id=user_id)
+
+
+def smart_shelf_book_page(
+    db: Session, rules: object, *, user_id: str | None = None,
+    page: int, page_size: int,
+) -> tuple[list[str], int]:
+    return GetSmartShelfBookPage(
+        SqlAlchemyLibraryQueries(db, reader_queries=reader_v5_library_queries(db))
+    ).execute(SmartShelfCriteria.from_external(rules), user_id=user_id, page=page, page_size=page_size)
 
 
 def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
@@ -427,6 +437,7 @@ __all__ = [
     "resource_metadata",
     "resource_view",
     "smart_shelf_book_ids",
+    "smart_shelf_book_page",
     "update_book",
     "update_source_node_metadata",
     "update_source_node_presentation",

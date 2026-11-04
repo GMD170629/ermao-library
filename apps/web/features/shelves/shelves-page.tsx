@@ -346,11 +346,19 @@ export function ShelvesPage() {
     else setDetailLoading(true);
     setError('');
     try {
-      const shelf = await fetchShelf(id, {
+      const knownShelf = activeShelf?.id === id ? activeShelf : shelves.find((item) => item.id === id);
+      const editingMembers = page === 1 && route.get('edit') === '1';
+      const includeIds = editingMembers && knownShelf !== undefined && knownShelf.kind !== 'SMART';
+      let shelf = await fetchShelf(id, {
         page,
         pageSize: 24,
-        includeIds: page === 1
+        includeIds
       });
+      if (requestId !== openRequestRef.current) return;
+      // Only membership editors need the complete selection; smart shelves edit rules.
+      if (editingMembers && !includeIds && shelf.kind !== 'SMART') {
+        shelf = await fetchShelf(id, { page, pageSize: 24, includeIds: true });
+      }
       if (requestId !== openRequestRef.current) return;
       setActiveShelf((current) => {
         if (!append || !current || current.id !== shelf.id) return shelf;

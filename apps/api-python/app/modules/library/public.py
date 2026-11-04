@@ -135,6 +135,7 @@ from app.modules.library.application.groupings import (
 )
 from app.modules.library.application.queries import (
     GetSmartShelfBookIds,
+    GetSmartShelfBookPage,
     SmartShelfCriteria,
     SmartShelfQueryPort,
 )
@@ -254,6 +255,7 @@ __all__ = [
     "GetLibraryFilterSchema",
     "GetMetadataSchema",
     "GetSmartShelfBookIds",
+    "GetSmartShelfBookPage",
     "IdentifyImportedBook",
     "InterpretationRecord",
     "InvalidBulkBookOperationError",
