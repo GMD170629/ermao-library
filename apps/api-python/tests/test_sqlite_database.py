@@ -111,14 +111,24 @@ def _current_revision(engine) -> str | None:
         return MigrationContext.configure(connection).get_current_revision()
 
 
-SEARCH_PROJECTION_TABLES = frozenset({
-    "LibraryBookSearch", "LibraryBookSearch_data", "LibraryBookSearch_idx",
-    "LibraryBookSearch_content", "LibraryBookSearch_docsize", "LibraryBookSearch_config",
-})
+SEARCH_PROJECTION_TABLES = frozenset(
+    {
+        "LibraryBookSearch",
+        "LibraryBookSearch_data",
+        "LibraryBookSearch_idx",
+        "LibraryBookSearch_content",
+        "LibraryBookSearch_docsize",
+        "LibraryBookSearch_config",
+    }
+)
 
 
 def _application_tables(engine) -> set[str]:
-    return set(inspect(engine).get_table_names()) - {"alembic_version"} - SEARCH_PROJECTION_TABLES
+    return (
+        set(inspect(engine).get_table_names())
+        - {"alembic_version"}
+        - SEARCH_PROJECTION_TABLES
+    )
 
 
 def _sqlite_journal_mode(engine) -> str:
@@ -745,7 +755,9 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
     try:
         bootstrap_database(engine, settings)
         with engine.connect() as connection:
-            assert SEARCH_PROJECTION_TABLES <= set(inspect(connection).get_table_names())
+            assert SEARCH_PROJECTION_TABLES <= set(
+                inspect(connection).get_table_names()
+            )
             context = MigrationContext.configure(
                 connection,
                 opts={
@@ -753,8 +765,8 @@ def test_alembic_baseline_matches_sqlalchemy_metadata(tmp_path) -> None:
                     "compare_server_default": True,
                     # FTS and its shadow tables are migration-owned derived data,
                     # not ORM business tables. Unknown tables still fail this check.
-                    "include_object": lambda obj, name, type_, reflected, compare_to: not (
-                        type_ == "table" and name in SEARCH_PROJECTION_TABLES
+                    "include_object": lambda obj, name, type_, reflected, compare_to: (
+                        not (type_ == "table" and name in SEARCH_PROJECTION_TABLES)
                     ),
                 },
             )
