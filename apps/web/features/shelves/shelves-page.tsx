@@ -102,6 +102,7 @@ export function ShelvesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const openRequestRef = useRef(0);
+  const savedRouteRef = useRef<string | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
   const toast = useToast();
@@ -141,6 +142,8 @@ export function ShelvesPage() {
 
   useEffect(() => {
     const requestedShelf = route.get('shelf');
+    const savedShelf = savedRouteRef.current;
+    savedRouteRef.current = null;
     if (route.get('create') === '1') {
       openRequestRef.current += 1;
       openCreateFromEffect(
@@ -151,6 +154,7 @@ export function ShelvesPage() {
             : 'STATIC'
       );
     } else if (requestedShelf) {
+      if (savedShelf === requestedShelf && route.get('edit') !== '1') return;
       void openShelfFromEffect(requestedShelf);
     } else {
       openRequestRef.current += 1;
@@ -497,6 +501,7 @@ export function ShelvesPage() {
             ? '合集更改已保存'
             : '书架更改已保存'
       );
+      savedRouteRef.current = saved.id;
       router.replace(`/shelves?shelf=${encodeURIComponent(saved.id)}`, { scroll: false });
     } catch (reason) {
       const nextError = shelfErrorMessage(reason, '保存书架失败');

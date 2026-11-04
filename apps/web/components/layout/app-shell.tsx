@@ -163,8 +163,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   ], [librarySources]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [searchBooks, setSearchBooks] = useState<BookSearchItem[]>([]);
-  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchResult, setSearchResult] = useState<{ keyword: string; books: BookSearchItem[]; total: number } | null>(null);
+  const currentSearchResult = searchResult?.keyword === librarySearch.trim() ? searchResult : null;
+  const searchBooks = currentSearchResult?.books ?? [];
+  const searchTotal = currentSearchResult?.total ?? 0;
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('checking');
@@ -607,8 +609,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const keyword = librarySearch.trim();
     if (!keyword) {
-      setSearchBooks([]);
-      setSearchTotal(0);
+      setSearchResult(null);
       setSearchLoading(false);
       setSearchActiveIndex(0);
       return;
@@ -620,14 +621,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         .then((response) => response.json() as Promise<BooksPayload>)
         .then((payload) => {
           if (!payload.ok) throw new Error(payload.error?.message ?? '搜索书库失败');
-          setSearchBooks(payload.data?.books ?? []);
-          setSearchTotal(payload.data?.total ?? 0);
+          if (controller.signal.aborted) return;
+          setSearchResult({ keyword, books: payload.data?.books ?? [], total: payload.data?.total ?? 0 });
           setSearchActiveIndex(0);
         })
         .catch((reason) => {
-          if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
-            setSearchBooks([]);
-            setSearchTotal(0);
+          if (!controller.signal.aborted && !(reason instanceof DOMException && reason.name === 'AbortError')) {
+            setSearchResult(null);
             toast.error('搜索书库失败', reason instanceof Error ? reason.message : '请稍后重试');
           }
         })
