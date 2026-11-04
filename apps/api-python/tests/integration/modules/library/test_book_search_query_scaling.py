@@ -230,7 +230,7 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
     if match_count <= 10:
         hydration_plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + hydration_statement[0], hydration_statement[1]).all()
         assert "authorized_selected_books" in hydration_statement[0]
-        assert any("SEARCH LibraryBook USING INDEX sqlite_autoindex_LibraryBook_1 (id=?)" in r[3] for r in hydration_plan), hydration_plan
+        assert any("COVERING INDEX LibraryBook_identity_scope_cover_idx (id=?" in r[3] for r in hydration_plan), hydration_plan
         assert not any("LibraryBook_visible_imported_page_idx" in r[3] or "LibraryBook_visible_updated_page_idx" in r[3] for r in hydration_plan)
 
     nested = book_ids_statement(
@@ -259,5 +259,26 @@ def test_search_cover_index_restart(tmp_path, partial):
             for i in sa.inspect(engine).get_indexes("LibraryBookMetadata")
             if i["name"] == "LibraryBookMetadata_search_cover_idx"
         )["column_names"] == ["bookId", "title", "author", "seriesName", "description"]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("partial", [0, 1, 2])
+def test_candidate_cover_migration_preserves_restart_and_columns(tmp_path, partial):
+    engine = create_sqlite_engine(tmp_path / "covers.sqlite3")
+    indexes = [
+        ("LibraryBook_identity_scope_cover_idx", "LibraryBook", ["id", "visibilityState", "libraryId"]),
+        ("LibraryBookMetadata_identity_title_cover_idx", "LibraryBookMetadata", ["bookId", "title"]),
+    ]
+    try:
+        config = alembic_config_for_engine(engine)
+        command.upgrade(config, "0057_book_substring_search")
+        with engine.begin() as connection:
+            for name, table, columns in indexes[:partial]:
+                Operations(MigrationContext.configure(connection)).create_index(name, table, columns)
+        command.upgrade(config, "head")
+        command.upgrade(config, "head")
+        for name, table, columns in indexes:
+            assert next(i for i in sa.inspect(engine).get_indexes(table) if i["name"] == name)["column_names"] == columns
     finally:
         engine.dispose()

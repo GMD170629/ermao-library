@@ -72,6 +72,7 @@ def _status_view(row: ReaderResourceReadingStatusV5) -> ReaderV5StatusView:
 def _actor_resource_progress(
     user_id: str,
     progress_columns: tuple[InstrumentedAttribute[datetime] | InstrumentedAttribute[float], ...],
+    *, name: str | None = "actor_resources",
 ) -> CTE:
     # Keep authorization/state filters outside the materialization barrier.
     # Otherwise SQLite chooses the global READY-resource index before looking
@@ -85,7 +86,7 @@ def _actor_resource_progress(
             ReaderResourceProgressV5.resource_id, ReaderResourceProgressV5.resource_id,
         ),
     ).where(ReaderResourceProgressV5.user_id == user_id).cte(
-        "actor_resources"
+        name
     ).prefix_with("MATERIALIZED")
 
 
@@ -95,23 +96,21 @@ def reader_v5_latest_read_at_expression(
     user_id: str,
     book_id_expression: object,
 ) -> object:
-    resource = aliased(LibraryReadableResource)
-    progress = aliased(ReaderResourceProgressV5)
-    return (
-        select(func.max(progress.updated_at))
-        .select_from(progress)
-        .join(resource, resource.id == progress.resource_id)
-        .where(
-            progress.user_id == user_id,
-            resource.book_id == book_id_expression,
-            resource_visibility_predicate(context, resource),
-        )
-        # Scope MAX to the correlated book rather than rescanning the actor's
-        # full time index for every candidate book (SQLite MIN/MAX optimization).
-        .group_by(resource.book_id)
-        .correlate_except(progress, resource)
-        .scalar_subquery()
+    actor_resources = _actor_resource_progress(
+        user_id, (ReaderResourceProgressV5.updated_at,), name=None,
     )
+    resource = aliased(LibraryReadableResource, actor_resources)
+    latest = (
+        select(resource.book_id.label("book_id"), func.max(actor_resources.c.updated_at).label("last_read_at"))
+        .select_from(actor_resources)
+        .where(resource_visibility_predicate(context, resource))
+        .group_by(resource.book_id)
+        .cte().prefix_with("MATERIALIZED")
+    )
+    return select(latest.c.last_read_at).where(
+        latest.c.book_id == book_id_expression,
+    ).correlate_except(latest).scalar_subquery()
+
 
 
 def reader_v5_progress_expression(

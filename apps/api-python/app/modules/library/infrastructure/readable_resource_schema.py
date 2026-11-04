@@ -322,6 +322,7 @@ class LibrarySourceNodeInterpretation(Base):
 class LibraryBook(Base):
     __tablename__ = "LibraryBook"
     __table_args__ = (
+        Index("LibraryBook_identity_scope_cover_idx", "id", "visibilityState", "libraryId"),
         UniqueConstraint("sourceNodeId", name="LibraryBook_sourceNodeId_key"),
         UniqueConstraint(
             "id",
@@ -403,6 +404,7 @@ class LibraryBook(Base):
 class LibraryBookMetadata(Base):
     __tablename__ = "LibraryBookMetadata"
     __table_args__ = (
+        Index("LibraryBookMetadata_identity_title_cover_idx", "bookId", "title"),
         Index("LibraryBookMetadata_search_cover_idx", "bookId", "title", "author", "seriesName", "description"),
     )
 
