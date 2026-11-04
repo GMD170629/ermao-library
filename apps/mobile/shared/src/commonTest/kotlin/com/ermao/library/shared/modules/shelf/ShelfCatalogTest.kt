@@ -74,6 +74,7 @@ class ShelfCatalogTest {
 
     @Test fun createCollectionSendsOnlyShelfMembershipNeverBookIds() = runBlocking {
         val repository = repository("""{"ok":true,"data":{"shelf":{"id":"created"}}}""") { request ->
+            assertEquals("false", request.url.parameters["includeBookIds"])
             val body = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
             assertEquals("""{"name":"Plan","description":"","kind":"COLLECTION","memberShelfIds":["s1"]}""", body)
         }

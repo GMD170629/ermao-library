@@ -37,9 +37,17 @@ class KtorShelfRepository(
         context: ShelfRequestContext,
         bookId: String,
     ): ShelfResult<List<ShelfSummary>> = coroutineScope {
-        when (val result = request(context) { client ->
-            client.execute(ApiRequest(ApiMethod.Get, "/api/shelves", JsonElement.serializer()))
-        }) {
+        val navigation = request(context) { client ->
+            client.execute(ApiRequest(ApiMethod.Get, "/api/shelves/navigation", JsonElement.serializer()))
+        }
+        // Compatibility with protocol 3 servers predating navigation projections;
+        // remove when support for those servers is retired. Other failures propagate.
+        val result = if (navigation is ApiResult.Failure && navigation.error.kind == AppErrorKind.NotFoundOrUnavailable) {
+            request(context) { client ->
+                client.execute(ApiRequest(ApiMethod.Get, "/api/shelves", JsonElement.serializer()))
+            }
+        } else navigation
+        when (result) {
             is ApiResult.Failure -> ShelfResult.Failure(result.error.toShelfError())
             is ApiResult.Success -> {
                 val shelves = (result.value as? JsonObject)?.get("shelves") as? JsonArray

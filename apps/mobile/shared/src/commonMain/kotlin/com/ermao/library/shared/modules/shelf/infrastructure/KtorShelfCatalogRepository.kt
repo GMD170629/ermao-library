@@ -60,6 +60,7 @@ class KtorShelfCatalogRepository(
         ))
         return when (val result = request(context, ApiRequest(
             ApiMethod.Post, "/api/shelves", JsonElement.serializer(), requestBody = body,
+            queryParameters = mapOf("includeBookIds" to listOf("false")),
         ))) {
             is ApiResult.Failure -> ShelfResult.Failure(result.error.toShelfError())
             is ApiResult.Success -> decode(result.value) { element ->

@@ -37,7 +37,7 @@ class KtorShelfRepositoryTest {
         assertEquals(true, shelf.containsBook)
         assertEquals(listOf("Favorites", "Smart", "Collection"), result.filterIsInstance<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>().map { it.name })
         assertEquals(
-            listOf("/base/api/shelves", "/base/api/shelves/shelf-1", "/base/api/shelves/smart-1"),
+            listOf("/base/api/shelves/navigation", "/base/api/shelves/shelf-1", "/base/api/shelves/smart-1"),
             harness.requests.map(Request::path),
         )
         val collection = result.filterIsInstance<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>().last()
@@ -64,6 +64,20 @@ class KtorShelfRepositoryTest {
         )
     }
 
+    @Test
+    fun oldProtocolThreeServerUsesLegacyListOnlyWhenNavigationIsMissing() = runBlocking {
+        val harness = Harness(SHELVES, STATIC_DETAIL, SMART_DETAIL, navigationStatus = HttpStatusCode.NotFound)
+        assertIs<ShelfResult.Content<*>>(harness.repository.loadShelves(context(), "book-1"))
+        assertEquals(listOf("/base/api/shelves/navigation", "/base/api/shelves"), harness.requests.take(2).map(Request::path))
+    }
+
+    @Test
+    fun unauthorizedNavigationDoesNotTryLegacyEndpoint() = runBlocking {
+        val harness = Harness(navigationStatus = HttpStatusCode.Unauthorized)
+        assertIs<ShelfResult.Failure>(harness.repository.loadShelves(context(), "book-1"))
+        assertEquals(listOf("/base/api/shelves/navigation"), harness.requests.map(Request::path))
+    }
+
     private fun context() = createShelfRequestContext(
         profileId = "profile-1",
         displayName = "Books",
@@ -74,7 +88,7 @@ class KtorShelfRepositoryTest {
         authorizationVersion = 7,
     )
 
-    private class Harness(vararg responses: String) {
+    private class Harness(vararg responses: String, val navigationStatus: HttpStatusCode = HttpStatusCode.OK) {
         val requests = mutableListOf<Request>()
         private val pending = ArrayDeque(responses.toList())
         val repository = KtorShelfRepository { profile ->
@@ -86,7 +100,11 @@ class KtorShelfRepositoryTest {
                         request.url.encodedPath,
                         (request.body as? OutgoingContent.ByteArrayContent)?.bytes()?.decodeToString().orEmpty(),
                     )
-                    respond(
+                    if (request.url.encodedPath.endsWith("/navigation") && navigationStatus != HttpStatusCode.OK) respond(
+                        """{"ok":false,"error":{"code":"HTTP_${navigationStatus.value}","message":"Unavailable"}}""",
+                        navigationStatus,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    ) else respond(
                         pending.removeFirst(),
                         HttpStatusCode.OK,
                         headersOf(HttpHeaders.ContentType, "application/json"),

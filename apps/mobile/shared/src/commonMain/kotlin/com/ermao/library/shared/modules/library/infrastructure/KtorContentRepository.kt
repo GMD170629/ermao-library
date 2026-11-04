@@ -5,6 +5,7 @@ import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
+import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.library.AuthenticatedCover
 import com.ermao.library.shared.modules.library.BookDetailQuery
 import com.ermao.library.shared.modules.library.BookContentEntry
@@ -93,6 +94,21 @@ class KtorContentRepository(
         }
 
     override suspend fun loadLibraryOptions(
+        context: ContentRequestContext,
+    ): ContentResult<List<LibraryOption>> = when (val result = withClient(context) { client ->
+        client.execute(ApiRequest(
+            ApiMethod.Get, "/api/library/navigation-sources", LibraryNavigationSourcesWire.serializer(),
+        ))
+    }) {
+        is ApiResult.Success -> ContentResult.Content(result.value.sources.map { LibraryOption(it.id, it.name) })
+        is ApiResult.Failure -> if (result.error.kind == AppErrorKind.NotFoundOrUnavailable) {
+            // Protocol 3 servers shipped before navigation projections. Remove
+            // this adapter when support for those protocol 3 servers is retired.
+            loadLegacyLibraryOptions(context)
+        } else ContentResult.Failure(result.error)
+    }
+
+    private suspend fun loadLegacyLibraryOptions(
         context: ContentRequestContext,
     ): ContentResult<List<LibraryOption>> = when (val result = withClient(context) { client ->
         client.execute(
@@ -377,6 +393,12 @@ internal fun bookContentsParameters(query: BookContentsQuery): Map<String, List<
     put("page", listOf(query.page.toString()))
     put("pageSize", listOf(query.pageSize.toString()))
 }
+
+@Serializable
+private data class LibraryNavigationSourcesWire(val sources: List<LibraryNavigationSourceWire>)
+
+@Serializable
+private data class LibraryNavigationSourceWire(val id: String, val name: String)
 
 @Serializable
 private data class LibraryFilterSchemaWire(
