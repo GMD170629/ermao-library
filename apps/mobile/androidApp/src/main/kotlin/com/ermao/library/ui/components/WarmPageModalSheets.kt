@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,23 +45,40 @@ fun WarmPageModalBottomSheet(
 ) {
     val theme = WarmPageThemeValues
     val useDarkSystemBarIcons = useDarkSystemBarForeground(theme.colors.surface)
+    val currentCanDismiss by rememberUpdatedState(canDismiss)
+    val currentOnDismiss by rememberUpdatedState(onDismissRequest)
+    val currentOnDismissCompleted by rememberUpdatedState(onDismissCompleted)
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = skipPartiallyExpanded,
+        confirmValueChange = { it != SheetValue.Hidden || currentCanDismiss() },
     )
     val coroutineScope = rememberCoroutineScope()
     var dismissRequested by remember { mutableStateOf(false) }
+    var dismissCompleted by remember { mutableStateOf(false) }
+    val completeDismiss: () -> Unit = {
+        if (!dismissCompleted) {
+            dismissCompleted = true
+            currentOnDismiss()
+            currentOnDismissCompleted?.invoke()
+        }
+    }
     val requestDismiss: () -> Unit = {
-        if (canDismiss() && !dismissRequested) {
+        if (currentCanDismiss() && !dismissRequested && !dismissCompleted) {
             dismissRequested = true
             coroutineScope.launch {
-                sheetState.hide()
-                onDismissRequest()
-                onDismissCompleted?.invoke()
+                try {
+                    sheetState.hide()
+                    if (!sheetState.isVisible) completeDismiss()
+                } finally {
+                    dismissRequested = false
+                }
             }
         }
     }
     ModalBottomSheet(
-        onDismissRequest = requestDismiss,
+        // Material has already finished its hide animation before this callback.
+        // Starting another hide here races with a second back/scrim dismissal.
+        onDismissRequest = { if (currentCanDismiss()) completeDismiss() },
         modifier = modifier,
         sheetState = sheetState,
         containerColor = theme.colors.surface,
