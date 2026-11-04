@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.exception_diagnostics import (
     SessionFactory,
     capture_exception,
+    flush_deferred_exception_diagnostics,
     persist_exception_diagnostic,
     prepare_exception_diagnostic,
     record_exception,
@@ -74,6 +75,11 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
             raise RuntimeError("release_before_io called with pending session changes")
         if session.in_transaction():
             session.rollback()
+        self._flush_diagnostics()
+
+    def _flush_diagnostics(self) -> None:
+        if not self._session.in_transaction():
+            flush_deferred_exception_diagnostics(logger)
 
     @contextmanager
     def transaction(
@@ -106,13 +112,17 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
                 )
                 persist_exception_diagnostic(logger, secondary)
                 raise rollback_error from error
+            self._flush_diagnostics()
             raise
+        else:
+            self._flush_diagnostics()
 
     def rollback(self) -> None:
         self._session.rollback()
+        self._flush_diagnostics()
 
     def recover_after_failure(self) -> None:
-        self._session.rollback()
+        self.rollback()
 
 
 class InMemorySidecarWriteback(SidecarWritebackPort):

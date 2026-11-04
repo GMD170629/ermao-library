@@ -5,11 +5,14 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import create_engine, event, insert
+import pytest
+from sqlalchemy import create_engine, event, insert, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.exception_diagnostics import (
+    capture_exception,
     configure_exception_storage,
+    deferred_exception_persistence,
     reset_exception_storage,
 )
 from app.core.setting_values import encode_setting_value
@@ -192,5 +195,89 @@ def test_worker_prepares_then_rolls_back_then_persists(tmp_path: Path, monkeypat
         ].metadata_json["diagnostics"]["traceback"]
     finally:
         recorder.close()
+        business_engine.dispose()
+        recorder_engine.dispose()
+
+
+@pytest.mark.parametrize("finish", ["commit", "rollback", "release"])
+def test_scan_batches_flush_only_after_transaction_release(tmp_path, monkeypatch, finish):
+    from app.modules.system.infrastructure import log_files
+
+    business_engine, recorder_engine = _engines(tmp_path)
+    business = sessionmaker(bind=business_engine)()
+    uow = SqlAlchemyUnitOfWork(business)
+    append = log_files.append_log_event
+    attempts = []
+
+    def capture_append(row):
+        assert not business.in_transaction()
+        attempts.append(row)
+        return append(row)
+
+    monkeypatch.setattr(log_files, "append_log_event", capture_append)
+    try:
+        with deferred_exception_persistence() as pending:
+            for _ in range(5):
+                if finish == "release":
+                    business.execute(select(SystemSetting.key))
+                    for _ in range(20):
+                        capture_exception(FileNotFoundError("optional.opf"), level="debug")
+                    assert len(pending) == 20
+                    uow.release_before_io()
+                else:
+                    try:
+                        with uow.transaction():
+                            business.execute(select(SystemSetting.key))
+                            for _ in range(20):
+                                capture_exception(FileNotFoundError("optional.opf"), level="debug")
+                            assert len(pending) == 20
+                            if finish == "rollback":
+                                raise ValueError("batch failure")
+                    except ValueError:
+                        if finish != "rollback":
+                            raise
+                assert not pending
+                assert not business.in_transaction()
+        assert len(attempts) == (105 if finish == "rollback" else 100)
+    finally:
+        business.close()
+        business_engine.dispose()
+        recorder_engine.dispose()
+
+
+def test_failed_rollback_keeps_diagnostics_until_recovery_releases_transaction(tmp_path, monkeypatch):
+    from app.modules.system.infrastructure import log_files
+
+    business_engine, recorder_engine = _engines(tmp_path)
+    business = sessionmaker(bind=business_engine)()
+    uow = SqlAlchemyUnitOfWork(business)
+    rollback = business.rollback
+    attempts = []
+
+    def broken_rollback():
+        raise OSError("rollback unavailable")
+
+    def append(row):
+        assert not business.in_transaction()
+        attempts.append(row)
+        return True
+
+    monkeypatch.setattr(log_files, "append_log_event", append)
+    monkeypatch.setattr(business, "rollback", broken_rollback)
+    try:
+        with deferred_exception_persistence() as pending:
+            with pytest.raises(OSError, match="rollback unavailable") as failure, uow.transaction():
+                business.execute(select(SystemSetting.key))
+                raise ValueError("original failure")
+            assert isinstance(failure.value.__cause__, ValueError)
+            assert business.in_transaction()
+            assert len(pending) == 2
+            assert not attempts
+            monkeypatch.setattr(business, "rollback", rollback)
+            uow.recover_after_failure()
+            assert not pending
+            assert len(attempts) == 2
+    finally:
+        business.close()
         business_engine.dispose()
         recorder_engine.dispose()

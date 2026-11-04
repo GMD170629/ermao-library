@@ -214,6 +214,38 @@ def test_separate_deferred_scopes_do_not_share_identity_index():
     assert first is not second
 
 
+def test_safe_flush_releases_nested_queue_and_allows_filtered_error_upgrade(monkeypatch):
+    from app.modules.system.infrastructure import log_files
+
+    stored = []
+
+    def append(event):
+        if event["level"] == "error":
+            stored.append(event)
+            return True
+        return False
+
+    monkeypatch.setattr(log_files, "append_log_event", append)
+    error = FileNotFoundError(errno.ENOENT, "optional.opf")
+    with diagnostics.deferred_exception_persistence() as pending:
+        with diagnostics.deferred_exception_persistence() as nested:
+            diagnostics.capture_exception(error, level="debug")
+            snapshot = pending[0]
+            diagnostics.flush_deferred_exception_diagnostics(LOGGER)
+            assert nested is pending
+            assert not pending
+            assert not diagnostics._pending.get().identities
+            assert not stored
+            diagnostics.record_exception(LOGGER, "required-file", error)
+            assert pending == [snapshot]
+            diagnostics.flush_deferred_exception_diagnostics(LOGGER)
+            assert not pending
+            diagnostics.persist_exception_diagnostic(LOGGER, snapshot)
+        diagnostics.flush_deferred_exception_diagnostics(LOGGER)
+    assert len(stored) == 1
+    assert stored[0]["metadata"]["diagnostics"]["rootCause"]["errno"] == errno.ENOENT
+
+
 def test_file_write_failure_retains_original_and_outlet_error(monkeypatch, capsys):
     from app.modules.system.infrastructure import log_files
     def broken_lock():

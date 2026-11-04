@@ -98,6 +98,22 @@ def _enqueue(snapshot: DiagnosticSnapshot) -> None:
         pending.items.append(snapshot)
 
 
+def flush_deferred_exception_diagnostics(logger: logging.Logger) -> None:
+    """Drain at an owner's explicit safe point, after releasing its transaction.
+
+    Keep the shared list object for nested scopes and existing boundary callers.
+    Severity filtering and outlet failures remain owned by normal persistence.
+    """
+    pending = _pending.get()
+    if pending is None or _persisting.get() is not None:
+        return
+    snapshots = pending.items[:]
+    pending.items.clear()
+    pending.identities.clear()
+    for snapshot in snapshots:
+        persist_exception_diagnostic(logger, snapshot, force=True)
+
+
 @dataclass
 class DiagnosticSnapshot:
     """Raw, prepared diagnostic ready for logging and persistence."""
@@ -864,6 +880,7 @@ __all__ = [
     "emergency_diagnostic",
     "exception_diagnostic_boundary",
     "exception_message",
+    "flush_deferred_exception_diagnostics",
     "format_exception_diagnostics",
     "install_exception_hooks",
     "install_loop_exception_handler",
