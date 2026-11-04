@@ -12,7 +12,6 @@ from sqlalchemy import (
     Select,
     String,
     column,
-    exists,
     func,
     select,
     update,
@@ -20,8 +19,10 @@ from sqlalchemy import (
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import values as sql_values
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import visitors
 from sqlalchemy.sql.elements import ClauseElement
 from sqlalchemy.sql.selectable import CTE, ScalarSelect, SelectBase
+from sqlalchemy.sql.util import ClauseAdapter
 
 from app.models import (
     LibraryBook,
@@ -39,6 +40,14 @@ from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQu
 STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 
 
+def _needs_outer_metadata(expression: ClauseElement) -> bool:
+    if isinstance(expression, (SelectBase, ScalarSelect)):
+        return False
+    if getattr(expression, "table", None) is LibraryBookMetadata.__table__:
+        return True
+    return any(_needs_outer_metadata(child) for child in expression.get_children())
+
+
 def book_ids_statement(
     predicates: Collection[ColumnElement[bool]],
     order: Collection[ColumnElement[Any]] = (),
@@ -54,15 +63,9 @@ def book_ids_statement(
             LibraryBook, LibraryBook.id == selected.c.id
         )
 
-    def needs_outer_metadata(expression: ClauseElement) -> bool:
-        if isinstance(expression, (SelectBase, ScalarSelect)):
-            return False
-        if getattr(expression, "table", None) is LibraryBookMetadata.__table__:
-            return True
-        return any(needs_outer_metadata(child) for child in expression.get_children())
 
     needs_metadata = any(
-        needs_outer_metadata(expression) for expression in (
+        _needs_outer_metadata(expression) for expression in (
             (*predicates, *order) if candidates is None else order
         )
     )
@@ -85,11 +88,26 @@ def selected_book_ids_statement(
         selected = sql_values(column("id", String())).data(
             [(book_id,) for book_id in dict.fromkeys(book_ids)]
         ).cte("selected_book_ids")
-    authorized = select(selected.c.id).where(exists(
-        book_ids_statement(predicates)
-        .where(LibraryBook.id == selected.c.id)
-        .correlate(selected)
-    )).cte("authorized_selected_books")
+    # Materialize only referenced identity fields before applying scope filters.
+    # SQLite 3.40 otherwise prefers the unique primary-key index (heap fetches)
+    # or a library/date scan despite the available covering identity index.
+    table = LibraryBook.__table__
+    fields = {"id": table.c.id}
+    for predicate in predicates:
+        for expression in visitors.iterate(predicate):
+            if getattr(expression, "table", None) is table:
+                key = getattr(expression, "key", None)
+                if isinstance(key, str) and key in table.c:
+                    fields[key] = table.c[key]
+    scoped = select(*fields.values()).select_from(selected).join(
+        LibraryBook, LibraryBook.id.between(selected.c.id, selected.c.id),
+    ).cte("selected_book_scope").prefix_with("MATERIALIZED")
+    adapter = ClauseAdapter(scoped)
+    query = select(scoped.c.id)
+    if any(_needs_outer_metadata(predicate) for predicate in predicates):
+        query = query.outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == scoped.c.id)
+    authorized = query.where(*(adapter.traverse(predicate) for predicate in predicates)).cte("authorized_selected_books")
+
     return authorized.prefix_with("MATERIALIZED") if dynamic else authorized
 
 
