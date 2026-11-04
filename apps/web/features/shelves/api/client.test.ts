@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchShelf, writeShelf } from './client';
+import { fetchShelf, fetchShelfNavigation, writeShelf } from './client';
 
 test('shelf browsing and writes request a page without the complete membership', async () => {
   const original = globalThis.fetch;
@@ -26,5 +26,23 @@ test('shelf browsing and writes request a page without the complete membership',
     // Membership editors retain the explicit complete-selection request.
     await fetchShelf('static', { page: 1, pageSize: 24, includeIds: true });
     assert.equal(requests[3].url, '/api/shelves/static?page=1&pageSize=24&includeBookIds=true');
+  } finally { globalThis.fetch = original; }
+});
+
+
+test('sidebar shelf navigation does not request book counts, previews, or rules', async () => {
+  const original = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return Response.json({ ok: true, data: { shelves: [{
+      id: 'smart', name: 'EPUB', kind: 'SMART', collectionIds: ['collection']
+    }] } });
+  };
+  try {
+    assert.deepEqual(await fetchShelfNavigation(), [{
+      id: 'smart', name: 'EPUB', kind: 'SMART', collectionIds: ['collection']
+    }]);
+    assert.deepEqual(requests, ['/api/shelves/navigation']);
   } finally { globalThis.fetch = original; }
 });

@@ -37,3 +37,6 @@ export type ShelfWriteInput = {
   collectionIds?: string[];
   memberShelfIds?: string[];
 };
+
+
+export type ShelfNavigationItem = Pick<ShelfView, 'id' | 'name' | 'kind' | 'collectionIds'>;

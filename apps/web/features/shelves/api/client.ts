@@ -1,8 +1,9 @@
-import type { ShelfView, ShelfWriteInput } from '../model/types';
+import type { ShelfNavigationItem, ShelfView, ShelfWriteInput } from '../model/types';
 import {
   parseDeletedShelfPayload,
   parseShelfEnvelope,
   parseShelfListPayload,
+  parseShelfNavigationPayload,
   parseShelfPayload
 } from './schemas';
 
@@ -42,6 +43,13 @@ export async function fetchShelves(signal?: AbortSignal): Promise<ShelfView[]> {
     await fetch('/api/shelves', { signal }),
     '读取书架失败',
     parseShelfListPayload
+  );
+  return data.shelves;
+}
+
+export async function fetchShelfNavigation(signal?: AbortSignal): Promise<ShelfNavigationItem[]> {
+  const data = await readEnvelope(
+    await fetch('/api/shelves/navigation', { signal }), '读取书架失败', parseShelfNavigationPayload
   );
   return data.shelves;
 }

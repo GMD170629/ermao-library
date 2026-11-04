@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -154,3 +156,39 @@ def test_collection_rejects_book_nesting_and_nonempty_deletion(
     deleted = client.delete(f"/api/shelves/{collection['id']}")
     assert deleted.status_code == 200
     assert deleted.json()["data"]["deleted"] is True
+
+
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_shelf_navigation_only_reads_owned_names_and_collection_links(client, db_session, role):
+    from app.models.shelf import Shelf
+    user = _login(client, db_session)
+    user.role = role
+    db_session.commit()
+    first = _create_shelf(client, name="Ordinary")
+    smart = _create_shelf(client, name="Smart", kind="SMART")
+    collection = _create_shelf(client, name="Collection", kind="COLLECTION", member_shelf_ids=[str(first["id"]), str(smart["id"])])
+    other = User(id="navigation-other", email="navigation-other@example.test", name="Other", password_hash="unused", role="member")
+    db_session.add(other)
+    db_session.flush()
+    db_session.add(Shelf(id="foreign-navigation", owner_user_id=other.id, name="Foreign", kind="SMART", rules_json="{}", pinned=True))
+    db_session.commit()
+    statements = []
+    def before(_c, _cursor, sql, _parameters, _context, _many):
+        statements.append(sql)
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        response = client.get("/api/shelves/navigation")
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert response.status_code == 200, response.text
+    items = {item["id"]: item for item in response.json()["data"]["shelves"]}
+    assert set(items) == {first["id"], smart["id"], collection["id"]}
+    assert items[first["id"]]["collectionIds"] == items[smart["id"]]["collectionIds"] == [collection["id"]]
+    assert items[collection["id"]]["collectionIds"] == []
+    assert all(set(item) == {"id", "name", "kind", "collectionIds"} for item in items.values())
+    assert not any("LibraryBook" in sql or "LibraryReadableResource" in sql or "ShelfBook" in sql or "rulesJson" in sql or "description" in sql for sql in statements)
+
+
+def test_shelf_navigation_requires_login(client):
+    assert client.get("/api/shelves/navigation").status_code == 401

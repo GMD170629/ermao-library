@@ -46,8 +46,8 @@ async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
       await route.fulfill({ json: { ok: true, data: { books: [], total: 0 } } });
       return;
     }
-    if (pathname.endsWith('/api/shelves')) {
-      await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读' }] } } });
+    if (pathname.endsWith('/api/shelves') || pathname.endsWith('/api/shelves/navigation')) {
+      await route.fulfill({ json: { ok: true, data: { shelves: [{ id: 'to-read', name: '待读', kind: 'STATIC', pinned: true, collectionIds: [] }] } } });
       return;
     }
     if (pathname.endsWith('/api/library/navigation-sources')) {
@@ -765,15 +765,15 @@ test('desktop sidebar search results match the search field width', async ({ pag
 });
 
 test('shelf collections and unassigned shelves are the only top-level sidebar entries', async ({ page }) => {
-  await page.route('**/api/shelves', async (route) => {
+  await page.route('**/api/shelves/navigation', async (route) => {
     await route.fulfill({
       json: {
         ok: true,
         data: {
           shelves: [
-            { id: 'loose', name: '独立书架', kind: 'STATIC', collectionIds: [] },
-            { id: 'assigned', name: '合集成员', kind: 'SMART', collectionIds: ['collection-a'] },
-            { id: 'collection-a', name: '旅行合集', kind: 'COLLECTION', shelfCount: 1 }
+            { id: 'loose', name: '独立书架', kind: 'STATIC', pinned: false, collectionIds: [] },
+            { id: 'assigned', name: '合集成员', kind: 'SMART', pinned: false, collectionIds: ['collection-a'] },
+            { id: 'collection-a', name: '旅行合集', kind: 'COLLECTION', pinned: false, collectionIds: [] }
           ]
         }
       }
@@ -826,7 +826,7 @@ test('collection creation can select standard and smart shelf members', async ({
   await page.route('**/api/shelves**', async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
-    if (method === 'POST' && url.pathname.endsWith('/api/shelves')) {
+    if (method === 'POST' && (url.pathname.endsWith('/api/shelves') || url.pathname.endsWith('/api/shelves/navigation'))) {
       const body = route.request().postDataJSON() as { name: string; description: string; memberShelfIds: string[] };
       collection = {
         id: 'collection-new',
@@ -853,7 +853,7 @@ test('collection creation can select standard and smart shelf members', async ({
     await route.fulfill({
       json: {
         ok: true,
-        data: { shelves: collection ? [...members, collection] : members }
+        data: { shelves: (collection ? [...members, collection] : members).map((shelf) => ({ ...shelf, pinned: false })) }
       }
     });
   });

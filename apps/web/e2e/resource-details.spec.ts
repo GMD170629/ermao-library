@@ -33,7 +33,7 @@ async function mockBookDetailApi(page: Page, resources = [epubResource], directo
       await route.fulfill({ json: { ok: true, data: { user: { id: 'detail-user', email: 'detail@example.com', name: 'Detail user', role: 'admin' }, authorization: { isAdmin: true, canManageSystem: true, allLibraryScopes: true, libraryIds: [], canViewManualImports: true, authzVersion: 1 } } } });
       return;
     }
-    if (url.pathname.endsWith('/api/shelves')) {
+    if (url.pathname.endsWith('/api/shelves') || url.pathname.endsWith('/api/shelves/navigation')) {
       await route.fulfill({ json: { ok: true, data: { shelves: [] } } });
       return;
     }

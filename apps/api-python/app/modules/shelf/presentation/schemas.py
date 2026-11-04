@@ -130,3 +130,17 @@ class DeletedShelfPayload(HttpContractModel):
 ShelvesResponse = SuccessEnvelope[ShelvesPayload]
 ShelfResponse = SuccessEnvelope[ShelfPayload]
 DeletedShelfResponse = SuccessEnvelope[DeletedShelfPayload]
+
+
+class ShelfNavigationView(HttpContractModel):
+    id: str
+    name: str
+    kind: Literal["STATIC", "SMART", "COLLECTION"]
+    collection_ids: list[str] = Field(alias="collectionIds")
+
+
+class ShelfNavigationPayload(HttpContractModel):
+    shelves: list[ShelfNavigationView]
+
+
+ShelfNavigationResponse = SuccessEnvelope[ShelfNavigationPayload]

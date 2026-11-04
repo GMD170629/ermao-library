@@ -34,7 +34,7 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       });
       return;
     }
-    if (pathname.endsWith('/api/shelves')) {
+    if (pathname.endsWith('/api/shelves') || pathname.endsWith('/api/shelves/navigation')) {
       await route.fulfill({ json: { ok: true, data: { shelves: [] } } });
       return;
     }
@@ -255,11 +255,11 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   await page.goto('/settings/organize?tab=queue');
   await expect.poll(() => requestCount(counts, '/api/organize/jobs')).toBeGreaterThan(0);
   await expect.poll(() => requestCount(counts, '/api/auth/me')).toBeGreaterThan(0);
-  await expect.poll(() => requestCount(counts, '/api/shelves')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/shelves/navigation')).toBeGreaterThan(0);
   await page.waitForTimeout(750);
   const initialJobsRequests = requestCount(counts, '/api/organize/jobs');
   const initialAuthRequests = requestCount(counts, '/api/auth/me');
-  const initialShelfRequests = requestCount(counts, '/api/shelves');
+  const initialShelfRequests = requestCount(counts, '/api/shelves/navigation');
   expect(requestCount(counts, '/api/metadata/providers')).toBe(0);
   expect(requestCount(counts, '/api/library/facets')).toBe(0);
   expect(requestCount(counts, '/api/organize/policy')).toBe(0);
@@ -289,7 +289,7 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   await expect.poll(() => requestCount(counts, '/api/kindle-send-tasks')).toBeGreaterThan(0);
 
   expect(requestCount(counts, '/api/auth/me')).toBe(initialAuthRequests);
-  expect(requestCount(counts, '/api/shelves')).toBe(initialShelfRequests);
+  expect(requestCount(counts, '/api/shelves/navigation')).toBe(initialShelfRequests);
 
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent('shuku:account-changed', {
@@ -308,7 +308,7 @@ test('settings navigation keeps session and shelves stable while tabs load on de
       page.locator('aside').first().getByText('Updated settings user', { exact: true })
     ).toBeVisible();
   }
-  await expect.poll(() => requestCount(counts, '/api/shelves')).toBe(initialShelfRequests + 1);
+  await expect.poll(() => requestCount(counts, '/api/shelves/navigation')).toBe(initialShelfRequests + 1);
   expect(requestCount(counts, '/api/auth/me')).toBe(initialAuthRequests);
 });
 

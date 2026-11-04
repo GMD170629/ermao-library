@@ -7,7 +7,7 @@ import logging
 from collections.abc import Callable
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
 from app.core.exception_diagnostics import capture_exception, record_exception
@@ -17,7 +17,9 @@ from app.modules.shelf.application.catalog import (
     CatalogShelf,
     CatalogShelfBookPage,
     CatalogShelfPage,
+    ShelfNavigationItem,
 )
+from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
 class SqlAlchemyCatalogShelfQueries:
@@ -30,6 +32,26 @@ class SqlAlchemyCatalogShelfQueries:
     ) -> None:
         self._db = db
         self._smart_book_ids = smart_book_ids
+
+    def list_navigation(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]:
+        rows = self._db.execute(select(Shelf.id, Shelf.name, Shelf.kind).where(
+            Shelf.owner_user_id == context.user_id,
+        ).order_by(func.coalesce(Shelf.pinned, False).desc(), Shelf.updated_at.desc(), Shelf.id.asc())).all()
+        if not rows:
+            return ()
+        collection = aliased(Shelf)
+        memberships: dict[str, list[str]] = {}
+        for shelf_id, collection_id in self._db.execute(select(
+            ShelfCollectionMembership.shelf_id, ShelfCollectionMembership.collection_id,
+        ).join(collection, collection.id == ShelfCollectionMembership.collection_id).where(
+            ShelfCollectionMembership.shelf_id.in_([row.id for row in rows]),
+            collection.owner_user_id == context.user_id,
+        ).order_by(ShelfCollectionMembership.created_at, ShelfCollectionMembership.collection_id)):
+            memberships.setdefault(shelf_id, []).append(collection_id)
+        return tuple(ShelfNavigationItem(
+            id=row.id, name=row.name, kind=str(row.kind or "STATIC").upper(),
+            collection_ids=tuple(memberships.get(row.id, ())),
+        ) for row in rows)
 
     def list_shelves(
         self,

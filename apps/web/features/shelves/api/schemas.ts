@@ -1,6 +1,6 @@
 import type { BookshelfItem } from '../../../components/book/bookshelf';
 import type { SmartShelfCondition, SmartShelfRules } from '../smart-shelf-rules';
-import type { ShelfKind, ShelfView } from '../model/types';
+import type { ShelfKind, ShelfNavigationItem, ShelfView } from '../model/types';
 
 type JsonObject = Record<string, unknown>;
 
@@ -167,4 +167,16 @@ export function parseShelfEnvelope(
       }
     : undefined;
   return { ok: value.ok, data: value.data, error };
+}
+
+
+export function parseShelfNavigationPayload(value: unknown): { shelves: ShelfNavigationItem[] } {
+  if (!isObject(value) || !Array.isArray(value.shelves)) throw new Error('Invalid shelf navigation');
+  return { shelves: value.shelves.map((shelf) => {
+    if (!isObject(shelf)) throw new Error('Invalid shelf navigation item');
+    return {
+      id: requiredString(shelf.id, 'id'), name: requiredString(shelf.name, 'name'),
+      kind: shelfKind(shelf.kind), collectionIds: stringList(shelf.collectionIds)
+    };
+  }) };
 }

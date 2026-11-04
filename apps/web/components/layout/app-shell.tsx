@@ -55,9 +55,9 @@ import {
   type LibraryNavigationSource
 } from '../../features/library/public';
 import {
-  fetchShelves,
+  fetchShelfNavigation,
   topLevelShelves,
-  type ShelfView
+  type ShelfNavigationItem
 } from '../../features/shelves/public';
 import { isSettingsItemActive, settingsGroups, settingsItemAllowed } from '../../features/settings/center/settings-secondary-nav';
 import { visualTokens } from '../../generated/visual-tokens';
@@ -148,7 +148,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppSessionUser | null>(null);
   const [authorization, setAuthorization] = useState<AppSessionAuthorization | null>(null);
   const [pendingSettingsHref, setPendingSettingsHref] = useState<string | null>(null);
-  const [shelves, setShelves] = useState<ShelfView[]>([]);
+  const [shelves, setShelves] = useState<ShelfNavigationItem[]>([]);
   const visibleShelves = useMemo(() => topLevelShelves(shelves), [shelves]);
   const [librarySources, setLibrarySources] = useState<LibraryNavigationSource[]>([]);
   const visibleLibraryNavItems = useMemo(() => [
@@ -449,7 +449,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     let librarySourcesRequest = 0;
     const controller = new AbortController();
     const refreshShelves = () => {
-      fetchShelves()
+      fetchShelfNavigation(controller.signal)
         .then((nextShelves) => {
           if (active) setShelves(nextShelves);
         })
@@ -463,7 +463,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         })
         .catch(() => undefined);
     };
-    fetchShelves().catch(() => null).then((nextShelves) => {
+    fetchShelfNavigation(controller.signal).catch(() => null).then((nextShelves) => {
       if (!active) return;
       setShelves(nextShelves ?? []);
     });

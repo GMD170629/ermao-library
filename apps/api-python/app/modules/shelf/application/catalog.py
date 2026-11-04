@@ -96,3 +96,23 @@ class ListCatalogShelfBookIds:
             page=max(1, page),
             page_size=min(100, max(1, page_size)),
         )
+
+
+@dataclass(frozen=True)
+class ShelfNavigationItem:
+    id: str
+    name: str
+    kind: str
+    collection_ids: tuple[str, ...]
+
+
+class ShelfNavigationQueryPort(Protocol):
+    def list_navigation(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]: ...
+
+
+@dataclass(frozen=True)
+class ListShelfNavigation:
+    query: ShelfNavigationQueryPort
+
+    def execute(self, *, context: AuthorizationContext) -> tuple[ShelfNavigationItem, ...]:
+        return self.query.list_navigation(context=context)

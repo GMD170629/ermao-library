@@ -7,6 +7,9 @@ from app.modules.shelf.application.catalog import (
     CatalogShelfQueryPort,
     ListCatalogShelfBookIds,
     ListCatalogShelves,
+    ListShelfNavigation,
+    ShelfNavigationItem,
+    ShelfNavigationQueryPort,
 )
 from app.modules.shelf.application.commands import (
     CreateShelf,
@@ -30,8 +33,11 @@ __all__ = [
     "DeleteShelfCommand",
     "ListCatalogShelfBookIds",
     "ListCatalogShelves",
+    "ListShelfNavigation",
     "ShelfBookMembershipPort",
     "ShelfKind",
+    "ShelfNavigationItem",
+    "ShelfNavigationQueryPort",
     "UpdateShelf",
     "UpdateShelfCommand",
 ]

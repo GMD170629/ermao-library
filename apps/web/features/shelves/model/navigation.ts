@@ -1,6 +1,6 @@
-import type { ShelfView } from './types';
+import type { ShelfNavigationItem } from './types';
 
-export function topLevelShelves(shelves: readonly ShelfView[]): ShelfView[] {
+export function topLevelShelves<T extends ShelfNavigationItem>(shelves: readonly T[]): T[] {
   return shelves.filter(
     (shelf) => shelf.kind === 'COLLECTION' || (shelf.collectionIds?.length ?? 0) === 0
   );

@@ -29,7 +29,7 @@ async function mockApi(page: Page, { admin = true, locale = 'zh-CN', enabled = t
     const method = route.request().method();
     let data: object = {};
     if (path === '/api/auth/me') data = { user: { id: 'user', name: 'User', email: 'user@example.invalid', role: admin ? 'admin' : 'member', locale }, authorization: { isAdmin: admin, canManageSystem: admin, authzVersion: 1 } };
-    if (path === '/api/shelves') data = { shelves: [] };
+    if ((path === '/api/shelves' || path === '/api/shelves/navigation')) data = { shelves: [] };
     if (path === '/api/system-settings') data = { settings: {} };
     if (path === '/api/libraries') data = { libraries: [{ id: 'library', name: 'Test library' }] };
     if (path === '/api/automation/settings') data = { enabled, enabledScopes: scopes, publicBaseUrl: 'http://books.example:8080/books' };

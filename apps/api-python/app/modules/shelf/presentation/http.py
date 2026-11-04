@@ -17,7 +17,7 @@ from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import bookshelf_items as get_bookshelf_items
 from app.bootstrap.library import get_book, smart_shelf_book_ids, smart_shelf_book_page
-from app.bootstrap.shelf import shelf_store
+from app.bootstrap.shelf import shelf_navigation, shelf_store
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
@@ -42,6 +42,7 @@ from app.modules.shelf.domain import (
 )
 from app.modules.shelf.presentation.schemas import (
     DeletedShelfResponse,
+    ShelfNavigationResponse,
     ShelfResponse,
     ShelfWriteRequest,
     ShelvesResponse,
@@ -560,6 +561,18 @@ def _collection_policy_response(
         status_code=status_code,
         code=error.code,
     )
+
+
+@router.get("/shelves/navigation", response_model=ShelfNavigationResponse)
+def get_shelf_navigation(
+    request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+) -> ShelfNavigationResponse | Response:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    items = shelf_navigation(db).execute(context=authorization_context(db, user))
+    return ok({"shelves": [{"id": item.id, "name": item.name, "kind": item.kind,
+        "collectionIds": list(item.collection_ids)} for item in items]})
 
 
 @router.get("/shelves/{shelf_id}", response_model=ShelfResponse)
