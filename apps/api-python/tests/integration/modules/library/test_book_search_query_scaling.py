@@ -12,7 +12,10 @@ from app.models import LibraryBook, LibraryBookMetadata, LibrarySourceNode, User
 from app.modules.library.application.book_list import BookListQuery
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.infrastructure.book_list import list_books
-from app.modules.library.infrastructure.book_search import matching_search_book_ids
+from app.modules.library.infrastructure.book_search import (
+    book_matches_search,
+    matching_search_book_ids,
+)
 from app.modules.library.infrastructure.books import book_ids_statement
 from app.modules.reader.infrastructure.v5_library_queries import (
     SqlAlchemyReaderV5LibraryPresentationQueries,
@@ -60,6 +63,7 @@ def test_substring_index_preserves_like_unicode_null_and_wildcard_semantics(db_s
             )),
         ))))
         assert set(db.scalars(matching_search_book_ids(term))) == expected, term
+        assert set(db.scalars(sa.select(LibraryBook.id).where(book_matches_search(LibraryBook.id, term)))) == expected, term
     metadata = db.get(LibraryBookMetadata, "scale-book-000000")
     metadata.title = "replacement unique"
     db.flush()
@@ -221,7 +225,8 @@ def test_metadata_search_is_a_covering_scan_not_per_book_heap_lookups(db_session
         .all()
     )
     assert sum("LibraryBookSearch VIRTUAL TABLE INDEX" in r[3] and "L" in r[3] for r in plan) == 4, plan
-    assert not any("SEARCH LibraryBookMetadata" in r[3] for r in plan)
+    assert not any("SCAN LibraryBookMetadata" in r[3] for r in plan)
+    assert all("COVERING INDEX" in r[3] for r in plan if "SEARCH LibraryBookMetadata" in r[3])
     if match_count <= 10:
         hydration_plan = db.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + hydration_statement[0], hydration_statement[1]).all()
         assert "authorized_selected_books" in hydration_statement[0]

@@ -42,9 +42,17 @@ STATUS_RANK = {"UNREAD": 0, "READING": 1, "FINISHED": 2}
 def book_ids_statement(
     predicates: Collection[ColumnElement[bool]],
     order: Collection[ColumnElement[Any]] = (),
+    *,
+    candidates: Select[tuple[str]] | None = None,
 ) -> Select[tuple[str]]:
     """Filter/count/page identities without hydrating unrelated metadata rows."""
-    statement = select(LibraryBook.id).where(*predicates)
+    if candidates is None:
+        statement = select(LibraryBook.id).where(*predicates)
+    else:
+        selected = selected_book_ids_statement(candidates, predicates)
+        statement = select(LibraryBook.id).select_from(selected).join(
+            LibraryBook, LibraryBook.id == selected.c.id
+        )
 
     def needs_outer_metadata(expression: ClauseElement) -> bool:
         if isinstance(expression, (SelectBase, ScalarSelect)):
@@ -54,7 +62,9 @@ def book_ids_statement(
         return any(needs_outer_metadata(child) for child in expression.get_children())
 
     needs_metadata = any(
-        needs_outer_metadata(expression) for expression in (*predicates, *order)
+        needs_outer_metadata(expression) for expression in (
+            (*predicates, *order) if candidates is None else order
+        )
     )
     if needs_metadata:
         statement = statement.outerjoin(
@@ -64,17 +74,23 @@ def book_ids_statement(
 
 
 def selected_book_ids_statement(
-    book_ids: Collection[str], predicates: Collection[ColumnElement[bool]],
+    book_ids: Collection[str] | Select[tuple[str]], predicates: Collection[ColumnElement[bool]],
 ) -> CTE:
     """Recheck scope per supplied identity without scanning a library index."""
-    selected = sql_values(column("id", String())).data(
-        [(book_id,) for book_id in dict.fromkeys(book_ids)]
-    ).cte("selected_book_ids")
-    return select(selected.c.id).where(exists(
+    dynamic = isinstance(book_ids, Select)
+    if isinstance(book_ids, Select):
+        source = book_ids.subquery()
+        selected = select(source.c[0].label("id")).cte("selected_book_ids").prefix_with("MATERIALIZED")
+    else:
+        selected = sql_values(column("id", String())).data(
+            [(book_id,) for book_id in dict.fromkeys(book_ids)]
+        ).cte("selected_book_ids")
+    authorized = select(selected.c.id).where(exists(
         book_ids_statement(predicates)
         .where(LibraryBook.id == selected.c.id)
         .correlate(selected)
     )).cte("authorized_selected_books")
+    return authorized.prefix_with("MATERIALIZED") if dynamic else authorized
 
 
 @dataclass(frozen=True, slots=True)

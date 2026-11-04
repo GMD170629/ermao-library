@@ -42,7 +42,10 @@ from app.modules.library.infrastructure.book_covers import (
     effective_book_cover_exists,
     effective_book_cover_path,
 )
-from app.modules.library.infrastructure.book_search import matching_search_book_ids
+from app.modules.library.infrastructure.book_search import (
+    book_matches_search,
+    matching_search_book_ids,
+)
 from app.modules.library.infrastructure.books import (
     _book_record,
     book_ids_statement,
@@ -100,18 +103,6 @@ def _predicates(
             LibraryBook.visibility_state == "HIDDEN",
             book_visibility_predicate(context),
         ]
-    term = (query.search or query.keyword or "").strip().casefold()
-    # A pattern containing only '%' matches every row, including absent metadata
-    # through the existing COALESCE branches. Other patterns need real metadata.
-    if term and term.strip("%"):
-        matches = matching_search_book_ids(term).cte("search_matches").prefix_with("MATERIALIZED")
-        # An empty IN set may still make older SQLite planners traverse the
-        # library's covering index. The uncorrelated guard ends that scan before
-        # opening the catalog, sharing the same materialized candidate set.
-        predicates.append(
-            exists(select(matches.c[0]))
-        )
-        predicates.append(LibraryBook.id.in_(select(matches.c[0])))
     if query.status:
         predicates.append(
             reading_status_predicate(
@@ -426,7 +417,17 @@ def list_books(
 ) -> BookListResult:
     context = authorization_context(db, user)
     predicates = _predicates(db, context, user, query, reader_queries)
-    identities = book_ids_statement(predicates)
+    term = (query.search or query.keyword or "").strip().casefold()
+    # Preserve the ignored view and wildcard-only behavior, including Books
+    # without metadata. Other searches drive identity lookup from their index.
+    candidates = (
+        matching_search_book_ids(term)
+        if query.visibility != "ignored" and term and term.strip("%") else None
+    )
+    identities = book_ids_statement(predicates, candidates=candidates)
+    hydration_predicates = (
+        [*predicates, book_matches_search(LibraryBook.id, term)] if candidates is not None else predicates
+    )
     page = max(1, query.page)
     complete_match_ids: tuple[str, ...] = ()
     if query.sort == "title" or (
@@ -450,8 +451,10 @@ def list_books(
                 matches.c.id.desc() if descending else matches.c.id.asc(),
             )
         else:
-            titles = select(LibraryBookMetadata.book_id, LibraryBookMetadata.title).where(
-                exists(select(matches.c.id).where(matches.c.id == LibraryBookMetadata.book_id)),
+            title = select(LibraryBookMetadata.title).where(
+                LibraryBookMetadata.book_id.between(matches.c.id, matches.c.id),
+            ).correlate(matches).scalar_subquery()
+            titles = select(matches.c.id.label("book_id"), title.label("title")).where(
                 select(totals.c.total).scalar_subquery() > limit if limit is not None else false(),
             ).cte("matching_titles").prefix_with("MATERIALIZED")
             title_order = titles.c.title.desc() if (query.sort_direction or "").lower() == "desc" else titles.c.title.asc()
@@ -505,9 +508,9 @@ def list_books(
     )
     page_offset = total - offset - page_limit if reverse else offset
     selected_page = (
-        selected_book_ids_statement(complete_match_ids, predicates)
+        selected_book_ids_statement(complete_match_ids, hydration_predicates)
         if complete_match_ids else
-        book_ids_statement(predicates, page_order)
+        book_ids_statement(predicates, page_order, candidates=candidates)
         .limit(page_limit)
         .offset(page_offset)
         .subquery()

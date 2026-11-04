@@ -2,10 +2,30 @@
 
 import re
 
-from sqlalchemy import func, or_, select, union
+from sqlalchemy import ColumnElement, exists, func, or_, select, union
+from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.selectable import Select
 
 from app.models import LibraryBookMetadata, book_search_index
+
+
+def _metadata_search_condition(pattern: str) -> ColumnElement[bool]:
+    return or_(
+        func.lower(LibraryBookMetadata.title).like(pattern),
+        func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(pattern),
+        func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(pattern),
+        func.lower(func.coalesce(LibraryBookMetadata.description, "")).like(pattern),
+    )
+
+
+def book_matches_search(
+    book_id: ColumnElement[str] | InstrumentedAttribute[str], term: str
+) -> ColumnElement[bool]:
+    """Recheck a selected Book through its searchable covering-index range."""
+    return exists(select(LibraryBookMetadata.book_id).where(
+        LibraryBookMetadata.book_id.between(book_id, book_id),
+        _metadata_search_condition(f"%{term}%"),
+    ).correlate_except(LibraryBookMetadata))
 
 
 def matching_search_book_ids(term: str) -> Select[tuple[str]]:
@@ -23,15 +43,4 @@ def matching_search_book_ids(term: str) -> Select[tuple[str]]:
             )
         ).subquery()
         return select(matches.c.bookId)
-    return select(LibraryBookMetadata.book_id).where(
-        or_(
-            func.lower(LibraryBookMetadata.title).like(pattern),
-            func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(pattern),
-            func.lower(func.coalesce(LibraryBookMetadata.series_name, "")).like(
-                pattern
-            ),
-            func.lower(func.coalesce(LibraryBookMetadata.description, "")).like(
-                pattern
-            ),
-        )
-    )
+    return select(LibraryBookMetadata.book_id).where(_metadata_search_condition(pattern))
