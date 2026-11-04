@@ -853,6 +853,10 @@ def test_smart_shelf_page_and_writes_do_not_materialize_all_ids(client, db_sessi
             assert summary["bookCount"] == 65 and len(summary["books"]) == 3
         finally:
             event.remove(engine, "before_cursor_execute", before)
+    count_sql, count_parameters = next((sql, params) for sql, params in statements if "SELECT count" in sql and '"LibraryBook"' in sql)
+    plan = db_session.connection().exec_driver_sql("EXPLAIN QUERY PLAN " + count_sql, count_parameters).all()
+    assert any("MATERIALIZE smart_shelf_identities" in row[3] for row in plan), plan
+    assert any("SEARCH LibraryBookMetadata USING COVERING INDEX" in row[3] for row in plan), plan
     # Full IDs remain available when explicitly requested, including the old default.
     full = client.get(f"/api/shelves/{shelf['id']}").json()["data"]["shelf"]
     assert set(full["bookIds"]) == set(seen)

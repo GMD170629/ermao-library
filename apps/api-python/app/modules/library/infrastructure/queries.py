@@ -1,6 +1,19 @@
 from __future__ import annotations
 
-from sqlalchemy import Select, and_, case, exists, func, literal, or_, select, union_all
+from dataclasses import dataclass
+
+from sqlalchemy import (
+    Select,
+    and_,
+    case,
+    exists,
+    func,
+    literal,
+    or_,
+    select,
+    union,
+    union_all,
+)
 from sqlalchemy.orm import Session, aliased
 
 from app.core.authorization import (
@@ -16,11 +29,18 @@ from app.models import (
 from app.models.auth import User
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.application.queries import SmartShelfCriteria
+from app.modules.library.infrastructure.books import book_ids_statement
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
 from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
+
+
+@dataclass(frozen=True)
+class _SmartShelfStatements:
+    identities: Select[tuple[str]]
+    ordered: Select[tuple[str]]
 
 
 class SqlAlchemyLibraryQueries:
@@ -38,7 +58,7 @@ class SqlAlchemyLibraryQueries:
         criteria: SmartShelfCriteria,
         *,
         user_id: str | None,
-    ) -> Select[tuple[str]] | None:
+    ) -> _SmartShelfStatements | None:
         user = self._db.get(User, user_id) if user_id else None
         if user_id and user is None:
             return None
@@ -147,8 +167,17 @@ class SqlAlchemyLibraryQueries:
             .where(and_(*predicates))
             .order_by(LibraryBook.updated_at.desc(), LibraryBook.id.desc())
         )
+        # Count in identity order before metadata existence checks. Traversing
+        # the date index makes the same narrow metadata key lookup random for
+        # every match on a cold mechanical disk.
+        count_ids = book_ids_statement(predicates).order_by(LibraryBook.id).cte(
+            "smart_shelf_identities"
+        ).prefix_with("MATERIALIZED")
+        count_matches = select(count_ids.c.id).select_from(count_ids).join(
+            LibraryBookMetadata, LibraryBookMetadata.book_id.between(count_ids.c.id, count_ids.c.id),
+        )
         if not criteria.included_book_ids:
-            return matched
+            return _SmartShelfStatements(count_matches, matched)
         # Explicit inclusions follow rule matches, in their supplied order.
         matches = matched.order_by(None).cte("smart_shelf_matches").prefix_with("MATERIALIZED")
         combined = union_all(
@@ -165,15 +194,21 @@ class SqlAlchemyLibraryQueries:
                 ~LibraryBook.id.in_(select(matches.c.id)),
             ),
         ).subquery()
-        return select(combined.c.id).order_by(
+        included = select(LibraryBook.id).where(
+            LibraryBook.id.in_(criteria.included_book_ids),
+            LibraryBook.visibility_state == "VISIBLE", book_visibility_predicate(context),
+        )
+        all_ids = union(count_matches, included).subquery()
+        ordered = select(combined.c.id).order_by(
             combined.c.kind, combined.c.ordinal, combined.c.updated_at.desc(), combined.c.id.desc()
         )
+        return _SmartShelfStatements(select(all_ids.c.id), ordered)
 
     def matching_book_ids(
         self, criteria: SmartShelfCriteria, *, user_id: str | None,
     ) -> list[str]:
         statement = self._matching_statement(criteria, user_id=user_id)
-        return list(self._db.scalars(statement)) if statement is not None else []
+        return list(self._db.scalars(statement.ordered)) if statement is not None else []
 
     def matching_book_page(
         self, criteria: SmartShelfCriteria, *, user_id: str | None,
@@ -182,8 +217,8 @@ class SqlAlchemyLibraryQueries:
         statement = self._matching_statement(criteria, user_id=user_id)
         if statement is None:
             return [], 0
-        total = int(self._db.scalar(select(func.count()).select_from(statement.order_by(None).subquery())) or 0)
+        total = int(self._db.scalar(select(func.count()).select_from(statement.identities.order_by(None).subquery())) or 0)
         if not total:
             return [], 0
-        ids = list(self._db.scalars(statement.limit(page_size).offset((page - 1) * page_size)))
+        ids = list(self._db.scalars(statement.ordered.limit(page_size).offset((page - 1) * page_size)))
         return ids, total
