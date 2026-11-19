@@ -69,6 +69,16 @@ export type PrepareRequest = {
   version: string;
 };
 
+export type ReleaseFeed = {
+  schemaVersion?: 1;
+  repository?: "GMD170629/ermao-library";
+  releases: Array<ReleaseSummary>;
+};
+
+export type ReleaseNotes = {
+  markdown: string;
+};
+
 export type ReleaseReference = {
   version: string;
   format?: 2;
@@ -76,6 +86,14 @@ export type ReleaseReference = {
   filename: string;
   size?: number;
   sha256: string;
+};
+
+export type ReleaseSummary = {
+  version: string;
+  tag: string;
+  publishedAt: string;
+  notesPath: string;
+  releaseUrl: string;
 };
 
 export type RuntimeInfo = {

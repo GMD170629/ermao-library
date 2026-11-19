@@ -12,6 +12,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.bootstrap.outbound_http import outbound_opener
 from app.core.exception_diagnostics import capture_exception
 from app.db.session import release_read_transaction
 
@@ -71,7 +72,7 @@ def send_to_official_site(payload: dict[str, object], attachments: tuple[Attachm
         method="POST",
     )
     try:
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=35) as response:
+        with outbound_opener(NoRedirect()).open(request, timeout=35) as response:
             value: object = json.loads(response.read(2048))
         return FeedbackReceipt.model_validate(value)
     except (OSError, urllib.error.URLError, ValueError, ValidationError) as error:

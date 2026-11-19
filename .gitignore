@@ -37,6 +37,8 @@ __pycache__/
 .env
 .env.production
 storage
+!apps/web/app/settings/storage/
+!apps/web/app/settings/storage/page.tsx
 !apps/mobile/shared/src/commonMain/kotlin/com/ermao/library/shared/core/storage/
 !apps/mobile/shared/src/commonMain/kotlin/com/ermao/library/shared/core/storage/*.kt
 data

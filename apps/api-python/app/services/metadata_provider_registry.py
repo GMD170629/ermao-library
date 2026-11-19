@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from typing import Any, Protocol
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.bootstrap.system import write_prepared_system_events
 from app.contracts.metadata_identity import MetadataIdentity
 from app.core.exception_diagnostics import capture_exception, record_exception

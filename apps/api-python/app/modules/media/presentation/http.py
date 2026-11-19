@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.error import HTTPError
 from urllib.request import Request as UrlRequest
-from urllib.request import build_opener
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
@@ -25,6 +24,7 @@ from app.bootstrap.media import (
     media_streaming,
     resource_preview,
 )
+from app.bootstrap.outbound_http import outbound_opener as build_opener
 from app.contracts.http_errors import (
     BasicBadRequestError,
     BasicNotFoundError,

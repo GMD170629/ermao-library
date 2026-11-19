@@ -11,11 +11,11 @@ from time import time_ns
 from typing import Any, TypeVar, cast
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.contracts.bibliographic_identity import UNKNOWN_AUTHOR, normalize_identity_part
 from app.core.database_errors import is_database_busy_error
 from app.core.exception_diagnostics import capture_exception, record_exception

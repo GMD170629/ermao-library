@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import Response
 from pydantic import Field
 from sqlalchemy.orm import Session
@@ -26,7 +26,13 @@ from app.core.exception_diagnostics import capture_exception, record_exception
 from app.db.session import get_db, release_read_transaction
 from app.schemas.responses import fail, ok
 
-from ..application.models import PreparationState, UpdateCheck, UpdateError
+from ..application.models import (
+    PreparationState,
+    ReleaseFeed,
+    ReleaseNotes,
+    UpdateCheck,
+    UpdateError,
+)
 from ..application.preparation import UpdatePreparation
 
 router = APIRouter(tags=["updates"], route_class=TypedContractRoute)
@@ -68,6 +74,55 @@ def update_error(error: UpdateError) -> Response:
     )
 
     return response
+
+
+@router.get("/updates/releases", response_model=SuccessEnvelope[ReleaseFeed])
+def release_feed(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    SuccessEnvelope[ReleaseFeed] | Response,
+    ErrorResponses(BasicBadRequestError, BasicUnauthorizedError),
+]:
+    _, error = require_user(db, request, settings)
+    if error is not None:
+        return error
+    release_read_transaction(db)
+    try:
+        response.headers["Cache-Control"] = "no-store"
+        return SuccessEnvelope(data=request.app.state.update_runtime.releases.feed())
+    except UpdateError as rejected:
+        return update_error(rejected)
+
+
+@router.get(
+    "/updates/releases/{version}/notes", response_model=SuccessEnvelope[ReleaseNotes]
+)
+def release_notes(
+    version: Annotated[
+        str, Path(pattern=r"^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$")
+    ],
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    SuccessEnvelope[ReleaseNotes] | Response,
+    ErrorResponses(BasicBadRequestError, BasicUnauthorizedError),
+]:
+    _, error = require_user(db, request, settings)
+    if error is not None:
+        return error
+    release_read_transaction(db)
+    try:
+        response.headers["Cache-Control"] = "no-store"
+        return SuccessEnvelope(
+            data=request.app.state.update_runtime.releases.notes(version)
+        )
+    except UpdateError as rejected:
+        return update_error(rejected)
 
 
 @router.get("/updates/check", response_model=SuccessEnvelope[UpdateCheck])

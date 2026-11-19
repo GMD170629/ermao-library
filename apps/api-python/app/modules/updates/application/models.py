@@ -36,6 +36,24 @@ class UpdateModel(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
 
+class ReleaseSummary(UpdateModel):
+    version: str
+    tag: str
+    publishedAt: str
+    notesPath: str
+    releaseUrl: str
+
+
+class ReleaseFeed(UpdateModel):
+    schemaVersion: Literal[1] = 1
+    repository: Literal["GMD170629/ermao-library"] = REPOSITORY
+    releases: list[ReleaseSummary]
+
+
+class ReleaseNotes(UpdateModel):
+    markdown: str
+
+
 class Environment(UpdateModel):
     format: Literal[1] = 1
     platform: str = Field(pattern=r"^(linux|darwin)-(x86_64|aarch64)$")

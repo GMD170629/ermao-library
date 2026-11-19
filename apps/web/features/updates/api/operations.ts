@@ -63,7 +63,7 @@ export function parseCheck(value: unknown): UpdateCheck {
 export class UpdateRequestError extends Error {
   constructor(readonly code: string) { super(code); }
 }
-async function request(path: string, signal?: AbortSignal, payload?: unknown): Promise<unknown> {
+export async function requestUpdate(path: string, signal?: AbortSignal, payload?: unknown): Promise<unknown> {
   const response = await fetch(withBasePath(`/api/updates/${path}`), {
     credentials: 'same-origin', cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     ...(payload === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -75,8 +75,8 @@ async function request(path: string, signal?: AbortSignal, payload?: unknown): P
   }
   return envelope.data;
 }
-export const fetchRuntime = async (signal?: AbortSignal) => parseRuntime(await request('runtime', signal));
-export const fetchUpdateCheck = async (signal?: AbortSignal) => parseCheck(await request('check', signal));
-export const fetchUpdateState = async (signal?: AbortSignal) => parsePreparation(await request('status', signal));
-export const prepareUpdate = async (version: string) => parsePreparation(await request('prepare', undefined, { version }));
-export const installUpdate = async (identity: InstallRequest) => parsePreparation(await request('install', undefined, identity));
+export const fetchRuntime = async (signal?: AbortSignal) => parseRuntime(await requestUpdate('runtime', signal));
+export const fetchUpdateCheck = async (signal?: AbortSignal) => parseCheck(await requestUpdate('check', signal));
+export const fetchUpdateState = async (signal?: AbortSignal) => parsePreparation(await requestUpdate('status', signal));
+export const prepareUpdate = async (version: string) => parsePreparation(await requestUpdate('prepare', undefined, { version }));
+export const installUpdate = async (identity: InstallRequest) => parsePreparation(await requestUpdate('install', undefined, identity));

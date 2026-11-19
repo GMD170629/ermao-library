@@ -25,6 +25,7 @@ from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
 from app.bootstrap.automation import build_mcp_endpoint
 from app.bootstrap.opds import build_opds_router
+from app.bootstrap.outbound_http import use_outbound_sessions
 from app.bootstrap.prestart import verify_current_schema
 from app.bootstrap.publication_navigation import (
     build_publication_navigation_runtime,
@@ -315,6 +316,11 @@ def create_app(
         session_factory=background_runtime_factory,
         respond_with_json=True,
     )
+
+    @app.middleware("http")
+    async def bind_outbound_proxy_store(request, call_next):
+        with use_outbound_sessions(runtime_factory):
+            return await call_next(request)
 
     @app.middleware("http")
     async def enforce_system_manager_boundary(request, call_next):

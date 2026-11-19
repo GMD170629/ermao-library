@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 const [, , inputArg, outputArg, scope = 'reader'] = process.argv;
-if (!['reader', 'updates', 'automation', 'backup'].includes(scope)) throw new Error('Unknown contract scope');
+if (!['reader', 'updates', 'automation', 'backup', 'storage', 'network-proxy'].includes(scope)) throw new Error('Unknown contract scope');
 if (!inputArg || !outputArg) throw new Error('usage: generate-reader-api.mjs OPENAPI.json OUTPUT.ts');
 
 const input = path.resolve(inputArg);
@@ -11,7 +11,7 @@ const output = path.resolve(outputArg);
 const document = JSON.parse(await readFile(input, 'utf8'));
 const schemas = document.components?.schemas ?? {};
 const included = new Set(
-  Object.keys(schemas).filter((name) => (scope === 'backup' ? /^(Backup|BackupsPayload)/ : scope === 'automation' ? /^(CreateGrantRequest|CreatedGrantPayload|UpdateGrantRequest|UpdatedGrantPayload|GrantListPayload|GrantView|ServiceSettingsFields|RevealedTokenPayload|RevokedGrantPayload|OperationListPayload|OperationPayload)$/ : scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
+  Object.keys(schemas).filter((name) => (scope === 'storage' ? /^(UsagePayload|CategoryUsage)$/ : scope === 'network-proxy' ? /^(NetworkProxyView|ConnectionView|StoredProxy|StoredConnection|ProxyProbe)$/ : scope === 'backup' ? /^(Backup|BackupsPayload)/ : scope === 'automation' ? /^(CreateGrantRequest|CreatedGrantPayload|UpdateGrantRequest|UpdatedGrantPayload|GrantListPayload|GrantView|ServiceSettingsFields|RevealedTokenPayload|RevokedGrantPayload|OperationListPayload|OperationPayload)$/ : scope === 'updates' ? /^(RuntimeInfo|UpdateCheck|PreparationState|PrepareRequest|InstallRequest|ReleaseFeed|ReleaseNotes)$/ : /^(Appearance|Audio|Epub|Reflowable|Comic|Pdf|Reader)/).test(name))
 );
 let discoveredReference = true;
 while (discoveredReference) {

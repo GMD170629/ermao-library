@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -21,6 +20,7 @@ from app.bootstrap.download import (
     claim_download_task_command,
     finalize_download_task_command,
 )
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.core.exception_diagnostics import (

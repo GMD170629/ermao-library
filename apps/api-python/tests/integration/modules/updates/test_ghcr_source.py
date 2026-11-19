@@ -138,6 +138,10 @@ def test_stream_consumed_before_completion_and_limits(monkeypatch):
             )
 
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: Opener())
+    from app.bootstrap.outbound_http import outbound_opener
+    from app.modules.system.public import NetworkProxy
+
+    monkeypatch.setattr(ghcr, "outbound_opener", lambda *handlers: outbound_opener(*handlers, snapshot=NetworkProxy()))
     chunks = ghcr.registry_chunks(ghcr.blob_url("a" * 64), len(data), 30)
     assert len(next(chunks)) == 65536
     assert body.tell() == 65536

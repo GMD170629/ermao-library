@@ -10,6 +10,7 @@ from app.contracts.automation import AUTOMATION_SETTINGS_KEY
 from app.core.i18n import SUPPORTED_LOCALES, configured_locale, normalize_locale
 from app.core.time import to_timestamp_ms
 from app.modules.system.application.projections import serialize_system_event
+from app.modules.system.domain.network_proxy import PROXY_SETTING_KEY
 from app.modules.system.domain.settings_policy import (
     SENSITIVE_SYSTEM_SETTING_KEYS,
     public_system_settings,
@@ -66,6 +67,12 @@ def prepare_system_settings_update(
     normalize_import_setting_value: Any,
     import_preference_keys: frozenset[str] | set[str],
 ) -> tuple[dict[str, Any], set[str]] | SettingsUpdateError:
+    if PROXY_SETTING_KEY in values:
+        return SettingsUpdateError(
+            message="请通过网络与代理设置修改代理 / Use Network & Proxy settings to change the proxy",
+            status_code=400,
+            code="PROXY_SETTINGS_ENDPOINT_REQUIRED",
+        )
     if AUTOMATION_SETTINGS_KEY in values:
         return SettingsUpdateError(
             message="请通过自动化授权设置修改 MCP 服务",

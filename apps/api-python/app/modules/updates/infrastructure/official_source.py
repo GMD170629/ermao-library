@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -14,20 +15,25 @@ from typing import IO, Protocol
 
 from pydantic import ValidationError
 
+from app.bootstrap.outbound_http import outbound_opener
 from app.core.exception_diagnostics import capture_exception
 
 from ..application.models import (
     REPOSITORY,
     GHCRReleaseReference,
     Package,
+    ReleaseFeed,
+    ReleaseNotes,
     ReleaseReference,
+    ReleaseSummary,
     UpdateError,
     parse_target,
     version_parts,
 )
 from .ghcr_source import blob_url, registry_chunks
 
-FEED_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/release-feed/index.json"
+FEED_ROOT = f"https://raw.githubusercontent.com/{REPOSITORY}/release-feed/"
+FEED_URL = f"{FEED_ROOT}index.json"
 ASSET_ROOT = f"https://github.com/{REPOSITORY}/releases/download/"
 
 
@@ -70,13 +76,17 @@ class OfficialRedirects(urllib.request.HTTPRedirectHandler):
 
 class OfficialHTTP:
     def __init__(self, opener: urllib.request.OpenerDirector | None = None) -> None:
-        self.opener = opener or urllib.request.build_opener(OfficialRedirects())
+        self.opener = opener
 
     def chunks(self, url: str, limit: int, seconds: int) -> Iterator[bytes]:
         if url.startswith("https://ghcr.io/v2/gmd170629/ermao-library-updates/"):
             yield from registry_chunks(url, limit, seconds)
             return
-        if url != FEED_URL and not url.startswith(ASSET_ROOT):
+        if (
+            url != FEED_URL
+            and not url.startswith(ASSET_ROOT)
+            and not re.fullmatch(re.escape(FEED_ROOT) + r"v\d+\.\d+\.\d+\.md", url)
+        ):
             raise UpdateError("UNTRUSTED_SOURCE")
         deadline = time.monotonic() + seconds
         request = urllib.request.Request(
@@ -84,7 +94,8 @@ class OfficialHTTP:
             headers={"Accept-Encoding": "identity", "User-Agent": "Shuku-Updater/1"},
         )
         try:
-            with self.opener.open(request, timeout=10) as response:
+            opener = self.opener or outbound_opener(OfficialRedirects())
+            with opener.open(request, timeout=10) as response:
                 total = 0
                 while True:
                     if time.monotonic() >= deadline:
@@ -106,32 +117,55 @@ class OfficialReleases:
         self.transport = transport
         self.protocol = protocol
 
+    def _entries(self) -> Iterator[tuple[ReleaseSummary, dict]]:
+        feed = json.loads(b"".join(self.transport.chunks(FEED_URL, 1024 * 1024, 30)))
+        if feed["schemaVersion"] != 1 or feed["repository"] != REPOSITORY:
+            raise ValueError("feed identity")
+        releases = feed["releases"]
+        if not isinstance(releases, list) or not 0 < len(releases) <= 1000:
+            raise ValueError("release count")
+        previous = None
+        for release in releases:
+            summary = ReleaseSummary(
+                **{key: release[key] for key in ReleaseSummary.model_fields}
+            )
+            datetime.fromisoformat(summary.publishedAt)
+            parts = version_parts(summary.version)
+            if previous is not None and previous <= parts:
+                raise ValueError("release ordering")
+            previous = parts
+            if (
+                summary.tag != f"v{summary.version}"
+                or summary.notesPath != f"v{summary.version}.md"
+                or summary.releaseUrl
+                != f"https://github.com/{REPOSITORY}/releases/tag/v{summary.version}"
+            ):
+                raise ValueError("release identity")
+            yield summary, release
+
+    def feed(self) -> ReleaseFeed:
+        try:
+            return ReleaseFeed(releases=[summary for summary, _ in self._entries()])
+        except (ValueError, TypeError, KeyError, ValidationError) as error:
+            capture_exception(error, persist=False)
+            raise UpdateError("INVALID_MANIFEST") from error
+
+    def notes(self, version: str) -> ReleaseNotes:
+        version_parts(version)
+        try:
+            data = b"".join(
+                self.transport.chunks(f"{FEED_ROOT}v{version}.md", 1024 * 1024, 30)
+            )
+            return ReleaseNotes(markdown=data.decode("utf-8"))
+        except UnicodeDecodeError as error:
+            capture_exception(error, persist=False)
+            raise UpdateError("INVALID_MANIFEST") from error
+
     def releases(self) -> list[tuple[str, list[Package | ReleaseReference]]]:
         try:
-            feed = json.loads(
-                b"".join(self.transport.chunks(FEED_URL, 1024 * 1024, 30))
-            )
-            if feed["schemaVersion"] != 1 or feed["repository"] != REPOSITORY:
-                raise ValueError("feed identity")
-            releases = feed["releases"]
-            if not isinstance(releases, list) or not 0 < len(releases) <= 1000:
-                raise ValueError("release count")
             result = []
-            previous = None
-            for release in releases:
-                datetime.fromisoformat(release["publishedAt"])
-                version = release["version"]
-                parts = version_parts(version)
-                if previous is not None and previous <= parts:
-                    raise ValueError("release ordering")
-                previous = parts
-                if (
-                    release["tag"] != f"v{version}"
-                    or release["notesPath"] != f"v{version}.md"
-                    or release["releaseUrl"]
-                    != f"https://github.com/{REPOSITORY}/releases/tag/v{version}"
-                ):
-                    raise ValueError("release identity")
+            for summary, release in self._entries():
+                version = summary.version
                 packages = [
                     parse_target(p)
                     for p in release.get(
@@ -162,8 +196,6 @@ def package_url(package: Package | ReleaseReference) -> str:
 
 def artifact_url(version: str, filename: str) -> str:
     version_parts(version)
-    import re
-
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,240}", filename):
         raise UpdateError("UNTRUSTED_SOURCE")
     return f"{ASSET_ROOT}v{version}/{filename}"

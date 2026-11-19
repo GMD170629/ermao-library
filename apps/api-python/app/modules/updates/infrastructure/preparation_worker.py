@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
+from app.bootstrap.outbound_http import current_outbound_sessions, use_outbound_sessions
 from app.core.exception_diagnostics import capture_exception, record_exception
 from shuku_dependencies import canonical_digest
 
@@ -188,9 +189,14 @@ class PreparationWorker:
                         started_at=datetime.now(UTC).isoformat(),
                     )
                 )
+                proxy_sessions = current_outbound_sessions()
+
+                def run() -> None:
+                    with use_outbound_sessions(proxy_sessions):
+                        self._run(package, state, lock)
+
                 self.thread = threading.Thread(
-                    target=self._run,
-                    args=(package, state, lock),
+                    target=run,
                     name="application-update-preparation",
                     daemon=False,
                 )

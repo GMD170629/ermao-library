@@ -8,13 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request as UrlRequest
-from urllib.request import build_opener
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.bootstrap.outbound_http import outbound_opener as build_opener
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,

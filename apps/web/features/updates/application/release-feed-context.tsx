@@ -28,9 +28,9 @@ export function ReleaseFeedProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: 'loading' });
-    fetchRuntime(controller.signal).then(setRuntime).catch(() => undefined);
+    void refreshRuntime(controller.signal).catch(() => undefined);
     fetchReleaseFeed(controller.signal)
-      .then((feed) => setState({ status: 'ready', feed }))
+      .then((feed) => { if (!controller.signal.aborted) setState({ status: 'ready', feed }); })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
         setState({
@@ -39,7 +39,7 @@ export function ReleaseFeedProvider({ children }: { children: ReactNode }) {
         });
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, refreshRuntime]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   const value = useMemo(() => ({ state, retry, runtime, refreshRuntime }), [retry, state, runtime, refreshRuntime]);

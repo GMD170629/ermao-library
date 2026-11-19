@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.core.exception_diagnostics import capture_exception
 from app.modules.library.application.cover_publication import (
     PreparedCoverPublication,

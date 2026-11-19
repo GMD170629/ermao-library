@@ -21,13 +21,14 @@ class UpdateRuntime:
         transport = OfficialHTTP()
         environment = fixed_environment(settings.resolved_storage_root)
         protocol = fixed_protocol()
+        self.releases = OfficialReleases(transport, protocol)
         self.worker = PreparationWorker(
             settings.resolved_storage_root, transport, environment
         )
         self.use_cases = UpdatePreparation(
             settings.app_version,
             environment,
-            OfficialReleases(transport, protocol),
+            self.releases,
             self.worker,
             protocol,
             install_protocol=fixed_install_protocol(),

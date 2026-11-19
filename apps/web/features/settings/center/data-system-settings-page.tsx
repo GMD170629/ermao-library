@@ -1,11 +1,33 @@
+'use client';
+
 import { HardDrive } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { SettingsPage } from '../settings-page';
 import { SettingsCenterShell } from './settings-center-shell';
+import { SettingsTabs } from './settings-tabs';
+import { StorageSettingsPanel } from './storage-settings-page';
+import { NetworkProxySettingsPanel } from './network-proxy-settings-panel';
 import { I18nText } from '@/i18n/provider';
 
 export function DataSystemSettingsPage() {
+  const requested = useSearchParams().get('tab');
+  const active = requested === 'storage' || requested === 'proxy' ? requested : 'backup';
   return (
-    <SettingsCenterShell title="数据和系统" description="管理全系统统一的数据备份、恢复与界面结构设置。">
+    <SettingsCenterShell title="数据和系统" description="管理备份、存储空间和网络连接。">
+      <SettingsTabs active={active} tabs={[
+        { key: 'backup', label: '备份与恢复', href: '/settings/data' },
+        { key: 'storage', label: '空间管理', href: '/settings/data?tab=storage' },
+        { key: 'proxy', label: '网络与代理', href: '/settings/data?tab=proxy' }
+      ]} />
+      <div className="mt-6">
+        {active === 'storage' ? <StorageSettingsPanel /> : active === 'proxy' ? <NetworkProxySettingsPanel /> : <BackupSettingsPanel />}
+      </div>
+    </SettingsCenterShell>
+  );
+}
+
+function BackupSettingsPanel() {
+  return <>
       <SettingsPage embedded initialSection="备份与恢复" />
       <section className="mt-8 border-t border-[#DEDAD4] pt-7" aria-labelledby="backup-location-title">
         <h3 id="backup-location-title" className="text-lg font-semibold text-[#2A2825]"><I18nText>存储位置</I18nText></h3>
@@ -17,6 +39,5 @@ export function DataSystemSettingsPage() {
           </div>
         </div>
       </section>
-    </SettingsCenterShell>
-  );
+  </>;
 }

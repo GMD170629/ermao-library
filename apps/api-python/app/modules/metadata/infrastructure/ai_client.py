@@ -4,10 +4,11 @@ import json
 from collections.abc import Mapping
 from typing import Annotated
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.contracts.metadata_identity import MetadataIdentity
 
 

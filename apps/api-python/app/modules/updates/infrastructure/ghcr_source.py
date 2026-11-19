@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Iterator
 from typing import IO
 
+from app.bootstrap.outbound_http import outbound_opener
 from app.core.exception_diagnostics import capture_exception
 
 from ..application.models import UpdateError
@@ -59,7 +60,7 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
         re.escape(REGISTRY) + r"/(blobs|manifests)/sha256:[a-f0-9]{64}", url
     ):
         raise UpdateError("UNTRUSTED_SOURCE")
-    opener = urllib.request.build_opener(RegistryRedirects())
+    opener = outbound_opener(RegistryRedirects())
     deadline = time.monotonic() + seconds
     try:
         # Fixed anonymous pull scope; never follow an untrusted auth challenge URL.

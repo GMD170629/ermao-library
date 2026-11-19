@@ -57,7 +57,7 @@ function SettingsCenterContent({
         <main className="mt-8 min-w-0 lg:mt-0">
           <header className="border-b border-[#DEDAD4] pb-5">
             <h2 className="text-2xl font-semibold tracking-[-0.025em] text-[#20201F] lg:text-[30px]"><I18nText>{title}</I18nText></h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>{description}</I18nText></p>
+            {description ? <p className="mt-2 max-w-3xl text-sm leading-6 text-[#77716A]"><I18nText>{description}</I18nText></p> : null}
           </header>
           <div className="mt-6">{children}</div>
         </main>

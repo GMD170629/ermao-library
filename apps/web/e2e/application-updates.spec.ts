@@ -6,15 +6,11 @@ async function fixture(page: Page, options: { admin?: boolean; supported?: boole
   const data = { state: { phase: 'idle', downloaded: 0 } as PreparationState, current: '1.0.4', latest: '1.0.5', prepare: 0, install: 0, disconnect: false, submitted: null as unknown };
   const supported = options.supported ?? true;
   await page.context().addCookies([{ name: 'shuku_locale', value: options.locale ?? 'zh-CN', domain: '127.0.0.1', path: '/' }, { name: 'shuku_session', value: 'update-fixture', domain: '127.0.0.1', path: '/' }]);
-  await page.route('https://raw.githubusercontent.com/**', route => {
-    if (new URL(route.request().url()).pathname.endsWith('.md')) return route.fulfill({ contentType: 'text/plain', body: '<!-- shuku:locale=zh-CN:start -->\n更新说明\n<!-- shuku:locale=zh-CN:end -->\n<!-- shuku:locale=en-US:start -->\nRelease notes\n<!-- shuku:locale=en-US:end -->' });
-    return route.fulfill({ json: {
-    schemaVersion: 1, repository: 'GMD170629/ermao-library', releases: [{ version: data.latest, tag: `v${data.latest}`, notesPath: `v${data.latest}.md`, publishedAt: '2026-09-15T00:00:00Z', releaseUrl: `https://github.com/GMD170629/ermao-library/releases/tag/v${data.latest}` }]
-  } });
-  });
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const ok = (value: unknown, status = 200) => route.fulfill({ status, json: { ok: true, data: value } });
+    if (path.endsWith('/updates/releases')) return ok({ schemaVersion: 1, repository: 'GMD170629/ermao-library', releases: [{ version: data.latest, tag: `v${data.latest}`, notesPath: `v${data.latest}.md`, publishedAt: '2026-09-15T00:00:00Z', releaseUrl: `https://github.com/GMD170629/ermao-library/releases/tag/v${data.latest}` }] });
+    if (/\/updates\/releases\/[^/]+\/notes$/.test(path)) return ok({ markdown: '<!-- shuku:locale=zh-CN:start -->\n更新说明\n<!-- shuku:locale=zh-CN:end -->\n<!-- shuku:locale=en-US:start -->\nRelease notes\n<!-- shuku:locale=en-US:end -->' });
     if (path.endsWith('/auth/me')) return ok({ user: { id: 'update-user', email: 'fixture@example.com', name: 'Fixture', role: options.admin === false ? 'member' : 'admin', locale: options.locale ?? 'zh-CN' }, authorization: { isAdmin: options.admin !== false, canManageSystem: options.admin !== false } });
     if (path.endsWith('/config')) return ok({ language: options.locale ?? 'zh-CN' });
     if (path.endsWith('/updates/runtime')) return ok({ current_version: data.current, supported, install_protocol: options.protocol ?? 1 });
@@ -113,8 +109,8 @@ test('ambiguous installation times out without offering a blind second submissio
   await page.getByRole('button', { name: '确认更新', exact: true }).click();
   await expect(page.getByText('正在确认更新状态，请勿重复提交。', { exact: true })).toBeVisible();
   await page.clock.fastForward(21 * 60_000);
-  await expect(page.getByText('确认更新状态超时，请检查容器日志和 STORAGE_ROOT/update-tmp/installation.log。', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '立即更新', exact: true })).toBeDisabled();
+  await expect(page.getByText('确认更新状态超时；程序会继续运行，可刷新页面重新确认。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '立即更新', exact: true })).toHaveCount(0);
   expect(f.install).toBe(1);
 });
 

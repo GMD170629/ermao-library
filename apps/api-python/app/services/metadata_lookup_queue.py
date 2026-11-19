@@ -11,7 +11,6 @@ from pathlib import Path
 from time import monotonic, time
 from typing import Any, cast
 from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 from uuid import uuid4
 
 from sqlalchemy.exc import OperationalError
@@ -25,6 +24,7 @@ from app.bootstrap.library import (
     prepare_book_facet_write,
 )
 from app.bootstrap.media import versioned_cover_url
+from app.bootstrap.outbound_http import open_outbound as urlopen
 from app.core.config import Settings
 from app.core.database_errors import (
     is_database_busy_error,
