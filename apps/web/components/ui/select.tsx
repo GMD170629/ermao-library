@@ -258,7 +258,7 @@ export function Select<TValue extends string>({
                   role="option"
                   aria-selected={isSelected}
                   disabled={option.disabled}
-                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseMove={() => setActiveIndex(index)}
                   onClick={() => commit(option.value)}
                   className={cn(
                     'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-40',
