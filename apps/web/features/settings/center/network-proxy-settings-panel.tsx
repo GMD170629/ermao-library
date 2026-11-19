@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import type { NetworkProxyView, ProxyProbe, StoredProxy } from '@/generated/network-proxy';
 import { useI18n } from '@/i18n/provider';
 import { useReleaseFeed } from '../../updates/public';
 import { fetchNetworkProxy, saveNetworkProxy, testNetworkProxy } from '../api/network-proxy-client';
 
 const presets = ['updates', 'github', 'bangumi'] as const;
+const protocols = [{ value: 'http', label: 'HTTP' }, { value: 'socks5', label: 'SOCKS5' }];
 type Preset = typeof presets[number];
 const input = 'mt-1.5 w-full rounded-xl border border-[#DEDAD4] bg-white px-3 py-2 text-[#272522] focus-visible:outline-2 focus-visible:outline-[#EF4D2F]';
 
@@ -104,9 +106,11 @@ export function NetworkProxySettingsPanel() {
     <fieldset disabled={busy !== null} className="space-y-4">
       <legend className="mb-4 text-lg font-semibold">{t('代理连接')}</legend>
       <div className="grid gap-4 sm:grid-cols-[1fr_2fr_1fr]">
-        <label>{t('协议')}<select className={input} value={protocol} onChange={event => setProtocol(event.target.value === 'socks5' ? 'socks5' : 'http')}>
-          <option value="http">HTTP</option><option value="socks5">SOCKS5</option>
-        </select></label>
+        <div className="min-w-0">
+          <span>{t('协议')}</span>
+          <Select ariaLabel="协议" className="mt-1.5 w-full !min-w-0" value={protocol} options={protocols} disabled={busy !== null}
+            onChange={value => { setProtocol(value); setResults(undefined); }} />
+        </div>
         <label>{t('服务器地址')}<input className={input} value={host} placeholder="proxy.example.com" onChange={event => setHost(event.target.value)} /></label>
         <label>{t('端口')}<input className={input} type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} /></label>
       </div>

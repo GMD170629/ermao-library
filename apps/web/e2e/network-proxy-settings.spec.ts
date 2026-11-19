@@ -27,7 +27,13 @@ test('data and system tabs and unsaved proxy test use the same draft', async ({ 
   await expect(content.getByRole('link', { name: '备份与恢复' })).toHaveAttribute('aria-current', 'page');
   await content.getByRole('link', { name: '网络与代理' }).click();
   await expect(page).toHaveURL(/tab=proxy$/);
-  await content.getByLabel('协议').selectOption('socks5');
+  const protocol = content.getByRole('button', { name: '协议' });
+  await protocol.click();
+  await page.getByRole('option', { name: 'HTTP', exact: true }).click();
+  await protocol.press('Enter');
+  await protocol.press('ArrowDown');
+  await protocol.press('Enter');
+  await expect(protocol).toHaveText('SOCKS5');
   await content.getByLabel('服务器地址').fill('proxy.example.com');
   await content.getByLabel('端口').fill('1080');
   await content.getByLabel('密码（可选）').fill('proxy-test-password');
