@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import IO, TypedDict
+from typing import IO, NotRequired, TypedDict
 
 from container_install import (
     REQUIRED_RUNTIME_FILES,
@@ -24,12 +24,10 @@ class ImageIdentity(TypedDict):
     version: str
     protocol: int
     environment: dict[str, str | int]
+    content_sha256: NotRequired[str]
 
 
-def image_identity(path: Path) -> ImageIdentity:
-    value = read_json(path)
-    if not isinstance(value, dict):
-        raise InstallError("INVALID_IMAGE_IDENTITY")
+def image_identity(value: dict) -> ImageIdentity:
     environment = value.get("environment")
     version = value.get("version")
     protocol = value.get("protocol", 1)
@@ -48,7 +46,17 @@ def image_identity(path: Path) -> ImageIdentity:
         )
     ):
         raise InstallError("INVALID_IMAGE_IDENTITY")
-    return {"version": version, "protocol": protocol, "environment": environment}
+    identity: ImageIdentity = {
+        "version": version,
+        "protocol": protocol,
+        "environment": environment,
+    }
+    if "content_sha256" in value:
+        content = value["content_sha256"]
+        if not isinstance(content, str) or not re.fullmatch(r"[a-f0-9]{64}", content):
+            raise InstallError("INVALID_IMAGE_IDENTITY")
+        identity["content_sha256"] = content
+    return identity
 
 
 class ImageSynchronization:
@@ -59,13 +67,19 @@ class ImageSynchronization:
         self.runtime = storage / "runtime"
         self.state = storage / "update-tmp"
         self.record = self.state / "image.json"
-        self.target = image_identity(seed / "application.json")
+        application = read_json(seed / "application.json")
+        content_record = seed / ".image-content.json"
+        if content_record.exists() or content_record.is_symlink():
+            application["content_sha256"] = read_json(content_record).get(
+                "content_sha256"
+            )
+        self.target = image_identity(application)
         self.lock: IO[str] | None = None
         self.dependencies_recorded = False
 
     def prepare(self) -> bool:
         try:
-            same_image = image_identity(self.record) == self.target
+            same_image = image_identity(read_json(self.record)) == self.target
         except FileNotFoundError:
             # diagnostics-control-flow: the first image startup has no installed-image identity.
             same_image = False

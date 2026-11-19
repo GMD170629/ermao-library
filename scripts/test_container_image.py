@@ -168,6 +168,33 @@ class ImageSynchronizationTests(unittest.TestCase):
             json.loads((self.runtime / "application.json").read_text()), self.target
         )
 
+    def test_same_version_changed_program_synchronizes_then_preserves_runtime(self):
+        old_identity = {**self.target, "content_sha256": "a" * 64}
+        new_content = {"content_sha256": "b" * 64}
+        write_json(self.state / "image.json", old_identity)
+        write_json(self.seed / ".image-content.json", new_content)
+        self.installer = ImageSynchronization(self.storage, self.seed, self.dependencies)
+        self.addCleanup(self.installer.close)
+        self.assertTrue(self.prepare())
+        self.installer.success()
+        self.installer.close()
+        self.assertEqual(
+            json.loads((self.state / "image.json").read_text()),
+            {**self.target, **new_content},
+        )
+        write_json(self.runtime / "application.json", {**self.target, "version": "9.0.0"})
+        with patch.object(container_image, "initialize_dependencies") as install:
+            self.assertFalse(self.installer.prepare())
+            install.assert_not_called()
+
+    def test_same_version_legacy_identity_synchronizes_once(self):
+        write_json(self.state / "image.json", self.target)
+        write_json(self.seed / ".image-content.json", {"content_sha256": "b" * 64})
+        self.installer = ImageSynchronization(self.storage, self.seed, self.dependencies)
+        self.addCleanup(self.installer.close)
+        self.assertTrue(self.prepare())
+        self.assertFalse((self.runtime / "obsolete").exists())
+
     def test_same_version_changed_environment_synchronizes(self):
         write_json(
             self.state / "image.json",

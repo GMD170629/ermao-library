@@ -198,6 +198,29 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(before["inventory"]["launcher_protocol"], 2)
 
+    def test_image_identity_tracks_program_and_dependency_content(self):
+        spec = importlib.util.spec_from_file_location(
+            "base_environment", Path(__file__).with_name("build-runtime-environment.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        program = self.root / "program"
+        program.mkdir()
+        source = program / "app.py"
+        source.write_text("first build")
+        manifest = self.root / "manifest.json"
+        manifest.write_text("first dependencies")
+        first = module.image_content_digest(program, manifest)
+        (program / ".image-content.json").write_text(first)
+        self.assertEqual(module.image_content_digest(program, manifest), first)
+
+        source.write_text("second build")
+        second = module.image_content_digest(program, manifest)
+        self.assertNotEqual(second, first)
+
+        manifest.write_text("second dependencies")
+        self.assertNotEqual(module.image_content_digest(program, manifest), second)
+
     def test_installed_record_checks_hashes_and_rejects_escape(self):
         environment = self.root / "business"
         venv.EnvBuilder(with_pip=False).create(environment)

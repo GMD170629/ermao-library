@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -16,6 +18,28 @@ from pathlib import Path
 def digest(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def image_content_digest(program: Path, dependency_manifest: Path) -> str:
+    """Identify the deployable files separately from the runtime ABI."""
+    content = hashlib.sha256()
+    content.update(digest(dependency_manifest).encode("ascii"))
+    for path in sorted(program.rglob("*")):
+        relative = path.relative_to(program).as_posix()
+        if relative == ".image-content.json":
+            continue
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            value = os.readlink(path)
+        elif stat.S_ISREG(mode):
+            value = digest(path)
+        elif stat.S_ISDIR(mode):
+            value = None
+        else:
+            raise ValueError(f"Unsupported image program file: {path}")
+        entry = (relative, mode, value)
+        content.update(json.dumps(entry, separators=(",", ":")).encode("ascii"))
+    return content.hexdigest()
 
 
 def snapshot(native_libraries: list[Path], base_path: str = "") -> dict[str, object]:
@@ -65,6 +89,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--program-root", type=Path, required=True)
+    parser.add_argument("--dependency-manifest", type=Path)
     parser.add_argument("--native", type=Path, action="append", default=[])
     args = parser.parse_args()
     if sys.platform == "linux" and {p.name for p in args.native} != {
@@ -88,6 +113,11 @@ def main() -> None:
         )
         + "\n"
     )
+    if args.dependency_manifest is not None:
+        identity = image_content_digest(args.program_root, args.dependency_manifest)
+        (args.program_root / ".image-content.json").write_text(
+            json.dumps({"content_sha256": identity}) + "\n", encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

@@ -93,6 +93,7 @@ RUN python /opt/shuku-launcher/dependency_packages.py --program-root /opt/shuku-
 
 RUN python /opt/shuku-launcher/build-runtime-environment.py \
   --output /opt/shuku-launcher/environment.json --program-root /opt/shuku-image \
+  --dependency-manifest /opt/shuku-dependency-seed/manifest.json \
   --native /usr/local/lib/libermao_mobi_core.so --native /usr/local/lib/libermao_chapters.so
 
 EXPOSE 3000
