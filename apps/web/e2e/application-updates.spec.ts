@@ -73,7 +73,7 @@ test('direct download and explicit install confirmation; ready persists across r
   await expect(page.getByTestId('update-status').getByRole('alert')).toHaveCount(0);
   expect([f.prepare, f.install]).toEqual([1, 1]);
   f.latest = '1.0.6';
-  await page.getByRole('button', { name: '刷新更新状态', exact: true }).click();
+  await page.getByRole('button', { name: '检查更新', exact: true }).click();
   await expect(page.getByRole('button', { name: '下载更新', exact: true })).toBeEnabled();
 });
 
@@ -147,6 +147,43 @@ test('GHCR protocol 2 sends captured plan and shows real dependency totals', asy
 });
 
 for (const locale of ['zh-CN', 'en-US']) {
+  test(`update network preflight gates the check button (${locale})`, async ({ page }) => {
+    const f = await fixture(page, { locale });
+    f.latest = f.current;
+    const en = locale === 'en-US';
+    let preflight = Promise.withResolvers<boolean>();
+    await page.route('**/api/updates/releases', async route => {
+      if (await preflight.promise) return route.fallback();
+      return route.fulfill({ status: 400, json: { ok: false, error: { code: 'DOWNLOAD_FAILED' } } });
+    });
+    await page.goto('/settings/about');
+    const bar = page.getByTestId('update-status');
+    const check = bar.getByRole('button', { name: en ? 'Check for updates' : '检查更新', exact: true });
+    await expect(check).toBeDisabled();
+    await expect(check).toHaveAttribute('aria-busy', 'true');
+    preflight.resolve(false);
+    const warning = bar.getByRole('alert').getByText(en ? 'Configure a proxy or check your network connection' : '请设置代理或者检查网络连接', { exact: true });
+    await expect(warning).toBeVisible();
+    await expect(bar).toHaveClass(/bg-\[#FFF4F1\]/);
+    await expect(check).toBeDisabled();
+    await expect(check).not.toHaveAttribute('aria-busy', 'true');
+
+    preflight = Promise.withResolvers<boolean>();
+    await page.reload();
+    await expect(check).toBeDisabled();
+    await expect(check).toHaveAttribute('aria-busy', 'true');
+    preflight.resolve(true);
+    await expect(check).toBeEnabled();
+    await expect(warning).toHaveCount(0);
+
+    preflight = Promise.withResolvers<boolean>();
+    await check.click();
+    await expect(check).toBeDisabled();
+    await expect(check).toHaveAttribute('aria-busy', 'true');
+    preflight.resolve(true);
+    await expect(check).toBeEnabled();
+  });
+
   test(`single status bar and keyboard confirmation (${locale})`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -163,7 +200,7 @@ for (const locale of ['zh-CN', 'en-US']) {
     await expect(bar.locator('details')).not.toHaveAttribute('open', '');
     await expect(bar.getByRole('button', { name: locale === 'zh-CN' ? '下载更新' : 'Download update', exact: true })).toHaveCount(0);
     f.latest = '1.0.5';
-    await bar.getByRole('button', { name: locale === 'zh-CN' ? '刷新更新状态' : 'Refresh update status' }).click();
+    await bar.getByRole('button', { name: locale === 'zh-CN' ? '检查更新' : 'Check for updates' }).click();
     await expect(bar).toContainText(locale === 'zh-CN' ? '检查到新版本 v1.0.5' : 'New version detected: v1.0.5');
     await expect(bar).toHaveClass(/bg-orange-50/);
     await bar.scrollIntoViewIfNeeded();
@@ -186,14 +223,19 @@ for (const locale of ['zh-CN', 'en-US']) {
   });
 }
 
-test('failed download stays in the status bar and can be retried', async ({ page }) => {
-  const f = await fixture(page);
-  f.state = { phase: 'failed', failed_phase: 'downloading', error: 'DOWNLOAD_FAILED', target, downloaded: 0 };
-  await page.goto('/settings/about');
-  const bar = page.getByTestId('update-status');
-  await expect(bar).toHaveClass(/bg-\[#FFF4F1\]/);
-  await expect(bar.getByRole('alert')).toContainText('下载失败');
-  await bar.getByRole('button', { name: '下载更新', exact: true }).click();
-  await expect(bar).toContainText('正在下载更新包');
-  expect([f.prepare, f.install]).toEqual([1, 0]);
-});
+for (const [error, message] of [
+  ['DOWNLOAD_FAILED', '下载失败，请检查网络后手动重试。'],
+  ['DOWNLOAD_INTERRUPTED', '下载连接中断，请检查网络后手动重试。']
+]) {
+  test(`download error stays in the status bar and can be retried (${error})`, async ({ page }) => {
+    const f = await fixture(page);
+    f.state = { phase: 'failed', failed_phase: 'downloading', error, target, downloaded: 0 };
+    await page.goto('/settings/about');
+    const bar = page.getByTestId('update-status');
+    await expect(bar).toHaveClass(/bg-\[#FFF4F1\]/);
+    await expect(bar.getByRole('alert')).toContainText(message);
+    await bar.getByRole('button', { name: '下载更新', exact: true }).click();
+    await expect(bar).toContainText('正在下载更新包');
+    expect([f.prepare, f.install]).toEqual([1, 0]);
+  });
+}

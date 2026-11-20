@@ -55,7 +55,7 @@ export function NetworkProxySettingsPanel() {
   const presetLabels = { updates: t('版本更新'), github: 'GitHub', bangumi: 'Bangumi' };
   const resultLabels = {
     connected: t('连接成功'), timeout: t('连接超时'), authentication: t('代理认证失败'),
-    failed: t('连接失败'), not_configured: t('尚未配置代理')
+    failed: t('连接失败')
   };
 
   async function submit(action: 'test' | 'save') {
@@ -140,7 +140,10 @@ export function NetworkProxySettingsPanel() {
         <textarea className={input} rows={3} value={domains} placeholder="api.example.com" onChange={event => setDomains(event.target.value)} />
       </label>
     </fieldset>
-    <div className="flex flex-wrap justify-end gap-3 border-t border-[#DEDAD4] pt-4">
+    <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[#DEDAD4] pt-4">
+      {!host.trim() && !port ? <p className="mr-auto text-[#77716A]">{selected.length || domains.trim()
+        ? t('使用服务器当前的网络设置测试。')
+        : t('使用服务器当前的网络设置测试版本更新、GitHub 和 Bangumi。')}</p> : null}
       <Button variant="secondary" type="button" loading={busy === 'test'} disabled={busy !== null} onClick={() => void submit('test')}>{t('测试连接')}</Button>
       <Button type="submit" loading={busy === 'save'} disabled={busy !== null}>{t('保存设置')}</Button>
     </div>

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { StoredProxy } from '../generated/network-proxy';
 
 test('data and system tabs and unsaved proxy test use the same draft', async ({ page }) => {
   const initial = { connection: null, presets: [], domains: [], presetDomains: { updates: ['ghcr.io'], github: ['github.com'], bangumi: ['bgm.tv'] } };
@@ -11,8 +12,11 @@ test('data and system tabs and unsaved proxy test use the same draft', async ({ 
     const ok = (data: unknown) => route.fulfill({ json: { ok: true, data } });
     if (path === '/api/auth/me') return ok({ user: { id: 'proxy-admin', email: 'proxy@example.com', name: 'Admin', role: 'admin', locale: 'zh-CN' }, authorization: { isAdmin: true, canManageSystem: true, authzVersion: 1 } });
     if (path.endsWith('/network-proxy/test')) {
-      tested = request.postDataJSON();
-      return ok([{ host: 'ghcr.io', rules: ['updates'], result: 'timeout' }]);
+      const draft: StoredProxy = request.postDataJSON();
+      tested = draft;
+      return ok(draft.connection
+        ? [{ host: 'ghcr.io', rules: ['updates'], result: 'timeout', status: null }]
+        : [{ host: 'ghcr.io', rules: [], result: 'connected', status: 401 }]);
     }
     if (path.endsWith('/network-proxy') && request.method() === 'PUT') {
       const payload = request.postDataJSON();
@@ -27,6 +31,12 @@ test('data and system tabs and unsaved proxy test use the same draft', async ({ 
   await expect(content.getByRole('link', { name: '备份与恢复' })).toHaveAttribute('aria-current', 'page');
   await content.getByRole('link', { name: '网络与代理' }).click();
   await expect(page).toHaveURL(/tab=proxy$/);
+  await expect(content.getByText('使用服务器当前的网络设置测试版本更新、GitHub 和 Bangumi。')).toBeVisible();
+  const testConnection = content.getByRole('button', { name: '测试连接' });
+  await testConnection.click();
+  await expect(content.getByText('连接成功', { exact: true })).toBeVisible();
+  expect(tested).toEqual({ connection: null, presets: [], domains: [] });
+  expect(saved).toBeUndefined();
   const protocol = content.getByRole('button', { name: '协议' });
   await protocol.click();
   await page.getByRole('option', { name: 'HTTP', exact: true }).click();
@@ -41,7 +51,7 @@ test('data and system tabs and unsaved proxy test use the same draft', async ({ 
   await content.getByLabel('自定义域名', { exact: false }).fill('metadata.home.arpa');
   await content.getByText('查看域名', { exact: true }).click();
   await expect(content.getByText('ghcr.io', { exact: true })).toBeVisible();
-  await content.getByRole('button', { name: '测试连接' }).click();
+  await testConnection.click();
   await expect(content.getByText('连接超时')).toBeVisible();
   expect(saved).toBeUndefined();
   expect(tested).toMatchObject({ connection: { protocol: 'socks5', host: 'proxy.example.com', port: 1080, password: 'proxy-test-password' }, presets: ['updates'], domains: ['metadata.home.arpa'] });

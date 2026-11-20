@@ -22,7 +22,7 @@ export type NetworkProxyView = {
 export type ProxyProbe = {
   host: string;
   rules: Array<string>;
-  result: "connected" | "timeout" | "authentication" | "failed" | "not_configured";
+  result: "connected" | "timeout" | "authentication" | "failed";
   status?: number | null;
 };
 

@@ -30,7 +30,10 @@ _PRESET_PROBES: dict[ProxyPreset, tuple[str, ...]] = {
 
 
 def _targets(snapshot: NetworkProxy) -> list[str]:
-    candidates = [url for preset in snapshot.presets for url in _PRESET_PROBES[preset]]
+    presets = snapshot.presets
+    if snapshot.connection is None and not (presets or snapshot.domains):
+        presets = tuple(_PRESET_PROBES)
+    candidates = [url for preset in presets for url in _PRESET_PROBES[preset]]
     candidates.extend(
         str(httpx.URL(scheme="https", host=domain, path="/"))
         for domain in snapshot.domains
@@ -46,8 +49,6 @@ def _probe(
 ) -> ProxyProbeResult:
     host = urlsplit(url).hostname or ""
     rules = snapshot.rules_for(host)
-    if snapshot.connection is None:
-        return ProxyProbeResult(host=host, rules=rules, result="not_configured")
     try:
         with opener().open(Request(url, method="HEAD"), timeout=5) as response:
             return ProxyProbeResult(
@@ -66,7 +67,10 @@ def _probe(
     except (URLError, OSError) as error:
         capture_exception(error, persist=False)
         cause = error.__cause__
-        if isinstance(cause, httpx.TimeoutException) or isinstance(error, TimeoutError):
+        reason = error.reason if isinstance(error, URLError) else error
+        if isinstance(cause, httpx.TimeoutException) or isinstance(
+            reason, TimeoutError
+        ):
             return ProxyProbeResult(host=host, rules=rules, result="timeout")
         if isinstance(cause, httpx.ProxyError) and any(
             word in str(cause).lower() for word in ("407", "auth")

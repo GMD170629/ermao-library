@@ -1,13 +1,22 @@
 """OCI source identity, bounded streaming and persisted target coverage."""
 
 import hashlib
+import http.client
 import io
 import json
 import urllib.request
 from email.message import Message
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Event, Thread
+from urllib.error import URLError
+from urllib.parse import urlsplit
 
+import httpx
 import pytest
 
+from app.bootstrap.outbound_http import outbound_opener
+from app.infrastructure.outbound_http import ProxyHTTPHandler, build_outbound_opener
+from app.modules.system.public import NetworkProxy
 from app.modules.updates.application.models import (
     GHCRReleaseReference,
     PreparationState,
@@ -138,10 +147,11 @@ def test_stream_consumed_before_completion_and_limits(monkeypatch):
             )
 
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: Opener())
-    from app.bootstrap.outbound_http import outbound_opener
-    from app.modules.system.public import NetworkProxy
-
-    monkeypatch.setattr(ghcr, "outbound_opener", lambda *handlers: outbound_opener(*handlers, snapshot=NetworkProxy()))
+    monkeypatch.setattr(
+        ghcr,
+        "outbound_opener",
+        lambda *handlers: outbound_opener(*handlers, snapshot=NetworkProxy()),
+    )
     chunks = ghcr.registry_chunks(ghcr.blob_url("a" * 64), len(data), 30)
     assert len(next(chunks)) == 65536
     assert body.tell() == 65536
@@ -153,6 +163,94 @@ def test_stream_consumed_before_completion_and_limits(monkeypatch):
         list(ghcr.registry_chunks(ghcr.blob_url("a" * 64), 10, 30))
     with pytest.raises(UpdateError, match="UNTRUSTED_SOURCE"):
         list(ghcr.registry_chunks(ghcr.REGISTRY + "/manifests/latest", 10, 30))
+
+
+@pytest.mark.parametrize("proxied", [False, True])
+def test_registry_reports_early_disconnect_after_streaming_bytes(monkeypatch, proxied):
+    prefix = b"x" * 65536
+    release = Event()
+    closing = Event()
+
+    class Registry(BaseHTTPRequestHandler):
+        def do_GET(self):
+            is_token = urlsplit(self.path).path == "/token"
+            content = b'{"token":"fixture"}' if is_token else prefix
+            self.send_response(200)
+            self.send_header(
+                "Content-Length", str(len(content) + (0 if is_token else 4096))
+            )
+            self.end_headers()
+            self.wfile.write(content)
+            self.wfile.flush()
+            if not is_token:
+                release.wait(5)
+                self.close_connection = True
+                closing.set()
+
+        def log_message(self, *args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Registry) as server:
+        worker = Thread(target=server.serve_forever)
+        worker.start()
+        try:
+            if proxied:
+                # Use HTTP to exercise the real proxy transport against a local fixture.
+                monkeypatch.setattr(
+                    ghcr, "REGISTRY", "http://registry.example.test/v2/updates"
+                )
+                monkeypatch.setattr(
+                    ghcr, "TOKEN_URL", "http://registry.example.test/token"
+                )
+                proxy = ProxyHTTPHandler(
+                    httpx.Proxy(f"http://127.0.0.1:{server.server_port}"),
+                    lambda host: (host,) if host == "registry.example.test" else (),
+                )
+                monkeypatch.setattr(
+                    ghcr,
+                    "outbound_opener",
+                    lambda *handlers: build_outbound_opener(
+                        *handlers, proxy_handler=proxy
+                    ),
+                )
+            else:
+
+                class LocalHTTPS(urllib.request.HTTPSHandler):
+                    def https_open(self, request):
+                        return self.do_open(
+                            lambda host, **kwargs: http.client.HTTPConnection(
+                                "127.0.0.1", server.server_port, **kwargs
+                            ),
+                            request,
+                        )
+
+                monkeypatch.setattr(
+                    ghcr,
+                    "outbound_opener",
+                    lambda *handlers: urllib.request.build_opener(
+                        urllib.request.ProxyHandler({}), *handlers, LocalHTTPS()
+                    ),
+                )
+
+            chunks = ghcr.registry_chunks(
+                ghcr.blob_url("a" * 64), len(prefix) + 4096, 10
+            )
+            assert prefix.startswith(next(chunks))
+            assert not closing.is_set()
+            release.set()
+            with pytest.raises(UpdateError, match="DOWNLOAD_INTERRUPTED") as failed:
+                list(chunks)
+            cause = failed.value.__cause__
+            if proxied:
+                assert isinstance(cause, URLError)
+                assert isinstance(cause.__cause__, httpx.RemoteProtocolError)
+            else:
+                assert isinstance(cause, http.client.IncompleteRead)
+                assert cause.expected == 4096
+        finally:
+            release.set()
+            server.shutdown()
+            worker.join()
 
 
 @pytest.mark.parametrize("registry", [False, True])

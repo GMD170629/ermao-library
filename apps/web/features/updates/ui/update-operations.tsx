@@ -29,6 +29,7 @@ const reasonLabels: Record<string, string> = {
   INSTALLATION_NOT_SUPPORTED: '更新已准备，当前版本尚不支持安装此协议。',
   INVALID_DEPENDENCY_ARTIFACT: '依赖包或文件归属信息无效，请查看安装日志。',
   DOWNLOAD_FAILED: '下载失败，请检查网络后手动重试。', DOWNLOAD_TIMEOUT: '下载超时，请检查网络后手动重试。',
+  DOWNLOAD_INTERRUPTED: '下载连接中断，请检查网络后手动重试。',
   DIGEST_MISMATCH: '更新包 SHA-256 与预期值不一致，操作已停止。', INSUFFICIENT_SPACE: '存储空间不足，请释放空间后重试。',
   RUNTIME_NOT_WRITABLE: '更新操作被拒绝：文件或目录访问权限不足。',
   UNSAFE_ARCHIVE: '更新包包含不支持或不安全的文件条目，已拒绝。',
@@ -74,9 +75,11 @@ export function UpdateOperations() {
     : releaseStatus?.kind === 'update-available' ? releaseStatus.latest.version : null;
   const active = phase !== 'idle' && !success;
   const failed = !!operations.error || !!state?.error || phase === 'failed';
-  const feedError = feed.state.status === 'error' ? feed.state.message : null;
-  const checking = !runtime || (!releaseStatus && !check) || (allowed && !state);
-  const tone = operations.notice ? 'neutral' : failed || (!active && feedError && !check) ? 'error'
+  const preflightPending = feed.state.status === 'loading';
+  const networkWarning = feed.state.status === 'error' ? t('请设置代理或者检查网络连接') : null;
+  const warningAsStatus = networkWarning !== null && !operations.notice && !active && !failed;
+  const checking = preflightPending || !runtime || (!releaseStatus && !check) || (allowed && !state);
+  const tone = networkWarning ? 'error' : operations.notice ? 'neutral' : failed ? 'error'
     : active || newVersion ? 'update' : checking ? 'neutral' : 'current';
   const colors = {
     error: 'border-[#E8C8C1] bg-[#FFF4F1] text-[#8D3828]',
@@ -88,9 +91,9 @@ export function UpdateOperations() {
   const message = operations.notice ? t(operations.notice) : active
     ? t(ready && !installReady ? (preparationOnly ? '更新已准备，当前版本尚不支持安装此协议。' : '准备包已变化或失效，请重新查看并确认。') : phaseLabels[phase])
     : failed ? t('更新操作失败')
+    : networkWarning !== null ? networkWarning
     : newVersion ? t('检查到新版本 v{version}', { version: newVersion })
     : success && runtime ? t('更新成功，实际运行版本 v{version}。', { version: runtime.current_version })
-    : feedError && !check ? t(feedError)
     : checking ? t('正在检查更新…')
     : releaseStatus?.kind === 'development' ? t('当前运行的是高于最新正式版的开发版本。')
     : t('当前已是最新正式版本。');
@@ -122,18 +125,21 @@ export function UpdateOperations() {
     <div className="flex flex-wrap items-center gap-3">
       <Icon size={20} className="shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1 basis-48">
-        <p className="font-medium">{message}</p>
+        <p className="font-medium" role={warningAsStatus ? 'alert' : undefined}>{message}</p>
         {active && state?.target ? <p className="mt-1">{t('本次更新包：v{version}', { version: state.target.version })}</p> : null}
         {phase === 'downloading' && progress !== null ? <p className="mt-1">{formatPercent(progress)}</p> : null}
       </div>
       {allowed && installReady ? <button type="button" disabled={busy} onClick={() => void act(true)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:opacity-50">{t('立即更新')}</button>
         : allowed && (!ready || (!preparationOnly && !installReady)) && latest?.installable && newVersion && !installing ? <button type="button" disabled={busy} onClick={() => void act(false)} className="min-h-10 rounded-xl bg-[#ED4D2D] px-4 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:opacity-50">{t('下载更新')}</button> : null}
-      {!busy ? <button type="button" onClick={refresh} className="inline-flex min-h-10 items-center gap-2 rounded-xl px-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"><RefreshCw size={16} aria-hidden="true" />{t('刷新更新状态')}</button> : null}
+      {!busy ? <button type="button" onClick={refresh} disabled={preflightPending || networkWarning !== null} aria-busy={preflightPending || undefined}
+        className="inline-flex min-h-10 items-center gap-2 rounded-xl px-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:cursor-not-allowed disabled:text-[#938D86]">
+        <RefreshCw size={16} aria-hidden="true" className={preflightPending ? 'motion-safe:animate-spin' : undefined} />{t('检查更新')}
+      </button> : null}
     </div>
     {operations.observing && !preparationPhases.has(phase) ? <p>{t('正在确认更新状态，安装期间服务可能暂时不可用。')}</p> : null}
     {operations.error ? <p role="alert">{t(reasonLabels[operations.error] ?? operations.error)}</p> : null}
     {state?.error ? <p role="alert">{t('操作失败：{reason}', { reason: t(reasonLabels[state.error] ?? '请根据错误码检查日志：{code}', { code: state.error }) })}</p> : null}
-    {feedError && (active || check) ? <p role="alert">{t(feedError)}</p> : null}
+    {networkWarning !== null && !warningAsStatus ? <p role="alert">{networkWarning}</p> : null}
     {runtime && !runtime.supported ? <p>{t('当前部署不支持应用内更新。')}</p>
       : runtime && !admin ? <p>{t('仅系统管理员可下载或安装更新。')}</p>
       : !ready && newVersion && latest && !latest.installable ? <p>{t(reasonLabels[latest.reason ?? ''] ?? '此版本未提供应用更新包。')}</p> : null}

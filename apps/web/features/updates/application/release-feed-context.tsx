@@ -23,26 +23,24 @@ export function ReleaseFeedProvider({ children }: { children: ReactNode }) {
     if (!signal?.aborted) setRuntime(info);
     return info;
   }, []);
-  const [state, setState] = useState<ReleaseFeedState>({ status: 'loading' });
+  const [result, setResult] = useState<{ attempt: number; state: ReleaseFeedState }>();
 
   useEffect(() => {
     const controller = new AbortController();
-    setState({ status: 'loading' });
     void refreshRuntime(controller.signal).catch(() => undefined);
     fetchReleaseFeed(controller.signal)
-      .then((feed) => { if (!controller.signal.aborted) setState({ status: 'ready', feed }); })
-      .catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({
-          status: 'error',
-          message: reason instanceof Error ? reason.message : '暂时无法检查更新'
-        });
+      .then((feed) => { if (!controller.signal.aborted) setResult({ attempt, state: { status: 'ready', feed } }); })
+      .catch(() => {
+        if (!controller.signal.aborted) setResult({ attempt, state: { status: 'error' } });
       });
     return () => controller.abort();
   }, [attempt, refreshRuntime]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
-  const value = useMemo(() => ({ state, retry, runtime, refreshRuntime }), [retry, state, runtime, refreshRuntime]);
+  const value = useMemo<ReleaseFeedContextValue>(() => ({
+    state: result?.attempt === attempt ? result.state : { status: 'loading' },
+    retry, runtime, refreshRuntime
+  }), [attempt, result, retry, runtime, refreshRuntime]);
   return <ReleaseFeedContext.Provider value={value}>{children}</ReleaseFeedContext.Provider>;
 }
 

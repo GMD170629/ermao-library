@@ -19,7 +19,7 @@ export type ReleaseFeed = {
 export type ReleaseFeedState =
   | { status: 'loading' }
   | { status: 'ready'; feed: ReleaseFeed }
-  | { status: 'error'; message: string };
+  | { status: 'error' };
 
 export type UpdateStatus =
   | { kind: 'update-available'; latest: ReleaseSummary }

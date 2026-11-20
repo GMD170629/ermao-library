@@ -15,6 +15,7 @@ from app.bootstrap.outbound_http import outbound_opener, use_outbound_sessions
 from app.core.auth import hash_password
 from app.models.auth import User
 from app.modules.system.domain.network_proxy import NetworkProxy, ProxyConnection
+from app.modules.system.infrastructure import network_proxy_probe
 
 
 @contextmanager
@@ -138,9 +139,21 @@ def test_new_requests_observe_saved_proxy_and_draft_does_not_publish(
     credentials["email"] = "admin@example.com"
     assert client.post("/api/auth/login", json=credentials).is_success
 
+    probed = []
+
     class Proxy(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
+
+        def do_HEAD(self):
+            probed.append(self.path)
+            self.send_response(401 if self.path == "/updates" else 204)
+            self.end_headers()
+
+        def do_CONNECT(self):
+            probed.append(self.path)
+            self.send_response(502)
+            self.end_headers()
 
         def do_GET(self):
             self.send_response(200)
@@ -148,6 +161,37 @@ def test_new_requests_observe_saved_proxy_and_draft_does_not_publish(
             self.wfile.write(b"routed")
 
     with serving(ThreadingHTTPServer(("127.0.0.1", 0), Proxy)) as port:
+        with monkeypatch.context() as local:
+            local.setenv("no_proxy", "*")
+            local.setattr(
+                network_proxy_probe,
+                "_PRESET_PROBES",
+                {
+                    "updates": (f"http://127.0.0.1:{port}/updates",),
+                    "github": (f"http://127.0.0.1:{port}/github",),
+                    "bangumi": (f"http://localhost:{port}/bangumi",),
+                },
+            )
+            baseline = client.get(endpoint).json()
+            probe = client.post(endpoint + "/test", json={})
+            assert probe.status_code == 200
+            assert probe.json()["data"] == [
+                {
+                    "host": "127.0.0.1",
+                    "rules": [],
+                    "result": "connected",
+                    "status": 401,
+                },
+                {
+                    "host": "localhost",
+                    "rules": [],
+                    "result": "connected",
+                    "status": 204,
+                },
+            ]
+            assert sorted(probed) == ["/bangumi", "/updates"]
+            assert client.get(endpoint).json() == baseline
+
         payload = {
             "connection": {
                 "protocol": "http",
@@ -183,8 +227,21 @@ def test_new_requests_observe_saved_proxy_and_draft_does_not_publish(
                 "presets": [],
                 "domains": ["draft.example.test"],
             }
-            probe = client.post(endpoint + "/test", json=draft)
-            assert probe.json()["data"][0]["result"] == "not_configured"
+            probed.clear()
+            with monkeypatch.context() as local:
+                local.setenv("https_proxy", f"http://127.0.0.1:{port}")
+                local.setenv("no_proxy", "")
+                probe = client.post(endpoint + "/test", json=draft)
+            assert probe.status_code == 200
+            assert probe.json()["data"] == [
+                {
+                    "host": "draft.example.test",
+                    "rules": ["draft.example.test"],
+                    "result": "failed",
+                    "status": None,
+                },
+            ]
+            assert probed == ["draft.example.test:443"]
             assert client.get(endpoint).json() == saved.json()
             del payload["connection"]["password"]
             assert (

@@ -97,6 +97,7 @@ class DownloadFixture:
         self.hold.set()
         self.entered = threading.Event()
         self.fail = False
+        self.disconnect = False
         self.packages = [package]
 
     def feed(self):
@@ -137,6 +138,9 @@ def source(program_package):
             self.send_response(200)
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
+            if fixture.disconnect and not self.path.endswith("/index.json"):
+                content = content[: len(content) // 2]
+                self.close_connection = True
             try:
                 self.wfile.write(content)
             except (BrokenPipeError, ConnectionResetError):
@@ -259,9 +263,7 @@ def test_preparation_logs_original_error_before_failure_state_io(
         if "No space left on device" in value
     )
     read = next(
-        index
-        for index, value in enumerate(messages)
-        if "Input/output error" in value
+        index for index, value in enumerate(messages) if "Input/output error" in value
     )
     write = next(
         index
@@ -412,7 +414,17 @@ def test_authentication_blocks_all_update_endpoints(client, db_session, role):
 
 
 @pytest.mark.parametrize(
-    "failure", ["digest", "space", "download", "incompatible", "old", "same", "missing"]
+    "failure",
+    [
+        "digest",
+        "space",
+        "download",
+        "disconnect",
+        "incompatible",
+        "old",
+        "same",
+        "missing",
+    ],
 )
 def test_preparation_failures_leave_program_and_data_untouched(
     preparation, source, monkeypatch, failure
@@ -435,6 +447,8 @@ def test_preparation_failures_leave_program_and_data_untouched(
             "_download",
             lambda *args: (_ for _ in ()).throw(OSError(28, "disk full")),
         )
+    elif failure == "disconnect":
+        fixture.disconnect = True
     else:
         fixture.fail = True
     if failure in {"incompatible", "old", "same", "missing"}:
@@ -452,6 +466,7 @@ def test_preparation_failures_leave_program_and_data_untouched(
                 "digest": "DIGEST_MISMATCH",
                 "space": "INSUFFICIENT_SPACE",
                 "download": "DOWNLOAD_FAILED",
+                "disconnect": "DOWNLOAD_INTERRUPTED",
             }[failure]
         )
         assert state.failed_phase in {"downloading", "verifying"}

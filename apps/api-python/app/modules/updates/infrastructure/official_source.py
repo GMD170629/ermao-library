@@ -6,7 +6,6 @@ import http.client
 import json
 import re
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
@@ -30,6 +29,7 @@ from ..application.models import (
     parse_target,
     version_parts,
 )
+from .download_stream import download_chunks, download_failure
 from .ghcr_source import blob_url, registry_chunks
 
 FEED_ROOT = f"https://raw.githubusercontent.com/{REPOSITORY}/release-feed/"
@@ -96,20 +96,9 @@ class OfficialHTTP:
         try:
             opener = self.opener or outbound_opener(OfficialRedirects())
             with opener.open(request, timeout=10) as response:
-                total = 0
-                while True:
-                    if time.monotonic() >= deadline:
-                        raise UpdateError("DOWNLOAD_TIMEOUT")
-                    chunk = response.read1(64 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > limit:
-                        raise UpdateError("SIZE_LIMIT")
-                    yield chunk
-        except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
-            capture_exception(error, persist=False)
-            raise UpdateError("DOWNLOAD_FAILED") from error
+                yield from download_chunks(response, limit, deadline)
+        except (OSError, http.client.HTTPException) as error:
+            raise download_failure(error) from error
 
 
 class OfficialReleases:

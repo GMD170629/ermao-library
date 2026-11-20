@@ -7,9 +7,7 @@ from typing import Literal
 
 ProxyProtocol = Literal["http", "socks5"]
 ProxyPreset = Literal["updates", "github", "bangumi"]
-ProxyProbeStatus = Literal[
-    "connected", "timeout", "authentication", "failed", "not_configured"
-]
+ProxyProbeStatus = Literal["connected", "timeout", "authentication", "failed"]
 PROXY_SETTING_KEY = "network.proxy"
 
 PROXY_PRESETS: dict[ProxyPreset, tuple[str, ...]] = {

@@ -6,7 +6,6 @@ import http.client
 import json
 import re
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
@@ -16,6 +15,7 @@ from app.bootstrap.outbound_http import outbound_opener
 from app.core.exception_diagnostics import capture_exception
 
 from ..application.models import UpdateError
+from .download_stream import download_chunks, download_failure
 
 REGISTRY = "https://ghcr.io/v2/gmd170629/ermao-library-updates"
 TOKEN_URL = "https://ghcr.io/token?service=ghcr.io&scope=repository%3Agmd170629%2Fermao-library-updates%3Apull"
@@ -65,9 +65,7 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
     try:
         # Fixed anonymous pull scope; never follow an untrusted auth challenge URL.
         with opener.open(TOKEN_URL, timeout=min(10, seconds)) as response:
-            token_bytes = response.read(16385)
-        if len(token_bytes) > 16384:
-            raise UpdateError("SIZE_LIMIT")
+            token_bytes = b"".join(download_chunks(response, 16384, deadline))
         token = json.loads(token_bytes)["token"]
         if not isinstance(token, str) or not token or "\n" in token or "\r" in token:
             raise UpdateError("INVALID_MANIFEST")
@@ -81,20 +79,9 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
             },
         )
         with opener.open(request, timeout=min(10, seconds)) as response:
-            total = 0
-            while True:
-                if time.monotonic() >= deadline:
-                    raise UpdateError("DOWNLOAD_TIMEOUT")
-                chunk = response.read1(64 * 1024)
-                if not chunk:
-                    return
-                total += len(chunk)
-                if total > limit:
-                    raise UpdateError("SIZE_LIMIT")
-                yield chunk
-    except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
-        capture_exception(error, persist=False)
-        raise UpdateError("DOWNLOAD_FAILED") from error
+            yield from download_chunks(response, limit, deadline)
+    except (OSError, http.client.HTTPException) as error:
+        raise download_failure(error) from error
     except (ValueError, KeyError, TypeError) as error:
         capture_exception(error, persist=False)
         raise UpdateError("INVALID_MANIFEST") from error
