@@ -5,8 +5,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import pytest
+from sqlalchemy.orm import sessionmaker
 
-from app.modules.feedback.infrastructure import Attachment, FeedbackDeliveryError, send_to_official_site
+from app.bootstrap.outbound_http import use_outbound_sessions
+from app.modules.feedback.infrastructure import (
+    Attachment,
+    FeedbackDeliveryError,
+    send_to_official_site,
+)
 
 
 def test_feedback_transport_requires_release_receiver_configuration() -> None:
@@ -14,7 +20,7 @@ def test_feedback_transport_requires_release_receiver_configuration() -> None:
         send_to_official_site({"submissionKey": "abc"}, ())
 
 
-def test_feedback_transport_sends_payload_and_file_as_multipart(monkeypatch) -> None:
+def test_feedback_transport_sends_payload_and_file_as_multipart(monkeypatch, db_session) -> None:
     received: list[tuple[str, bytes]] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -36,10 +42,11 @@ def test_feedback_transport_sends_payload_and_file_as_multipart(monkeypatch) -> 
     thread.start()
     try:
         monkeypatch.setattr("app.modules.feedback.infrastructure.RECEIVER_URL", f"http://127.0.0.1:{server.server_port}/api/feedback")
-        receipt = send_to_official_site(
-            {"submissionKey": "abc", "markdown": "reviewed text"},
-            (Attachment("note.txt", "text/plain", b"attachment bytes"),),
-        )
+        with use_outbound_sessions(sessionmaker(bind=db_session.get_bind())):
+            receipt = send_to_official_site(
+                {"submissionKey": "abc", "markdown": "reviewed text"},
+                (Attachment("note.txt", "text/plain", b"attachment bytes"),),
+            )
     finally:
         server.shutdown()
         server.server_close()

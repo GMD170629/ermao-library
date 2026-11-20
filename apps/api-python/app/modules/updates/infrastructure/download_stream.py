@@ -9,8 +9,6 @@ from urllib.error import URLError
 
 import httpx
 
-from app.core.exception_diagnostics import capture_exception
-
 from ..application.models import UpdateError
 
 
@@ -38,7 +36,6 @@ def download_chunks(
 
 
 def download_failure(error: OSError | http.client.HTTPException) -> UpdateError:
-    capture_exception(error, persist=False)
     reason = error.reason if isinstance(error, URLError) else error
     cause = error.__cause__
     if isinstance(reason, TimeoutError) or isinstance(cause, httpx.TimeoutException):

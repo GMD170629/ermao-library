@@ -81,6 +81,7 @@ def registry_chunks(url: str, limit: int, seconds: int) -> Iterator[bytes]:
         with opener.open(request, timeout=min(10, seconds)) as response:
             yield from download_chunks(response, limit, deadline)
     except (OSError, http.client.HTTPException) as error:
+        capture_exception(error, persist=False)
         raise download_failure(error) from error
     except (ValueError, KeyError, TypeError) as error:
         capture_exception(error, persist=False)

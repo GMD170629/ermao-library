@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.outbound_http import outbound_opener
+from app.bootstrap.network_proxy import (
+    read_network_proxy,
+    save_network_proxy,
+    test_network_proxy,
+)
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import (
     BasicForbiddenError,
@@ -17,6 +21,7 @@ from app.contracts.http_errors import (
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db, release_read_transaction
+from app.modules.system.application.network_proxy import StoredProxy
 from app.modules.system.domain.network_proxy import (
     PROXY_PRESETS,
     NetworkProxy,
@@ -24,13 +29,6 @@ from app.modules.system.domain.network_proxy import (
     ProxyProbeStatus,
     ProxyProtocol,
 )
-from app.modules.system.infrastructure.network_proxy import (
-    StoredProxy,
-    read_network_proxy,
-    resolve_network_proxy,
-    save_network_proxy,
-)
-from app.modules.system.infrastructure.network_proxy_probe import probe_network_proxy
 
 router = APIRouter(
     prefix="/system-settings/network-proxy",
@@ -125,9 +123,7 @@ def test_proxy(
     _, error = require_system_manager(db, request, settings)
     if error is not None:
         return error
-    snapshot = resolve_network_proxy(db, payload)
-    release_read_transaction(db)
-    results = probe_network_proxy(snapshot, lambda: outbound_opener(snapshot=snapshot))
+    results = test_network_proxy(db, payload)
     return SuccessEnvelope(
         data=[
             ProxyProbe(

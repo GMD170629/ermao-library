@@ -23,7 +23,6 @@ from app.modules.system.domain.settings_policy import (
     SENSITIVE_SYSTEM_SETTING_KEYS,
     public_system_settings,
 )
-from app.modules.system.infrastructure.network_proxy import read_network_proxy
 
 __all__ = [
     "DEFAULT_RETENTION_DAYS",
@@ -40,6 +39,5 @@ __all__ = [
     "is_database_busy_error",
     "normalize_health_run_snapshot",
     "public_system_settings",
-    "read_network_proxy",
     "safe_runtime_error",
 ]

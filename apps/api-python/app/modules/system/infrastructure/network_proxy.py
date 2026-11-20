@@ -1,65 +1,12 @@
 """Persist a complete proxy snapshot in the existing system settings store."""
 
-from typing import Literal
-
-from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy.orm import Session
 
 from app.modules.system.application.commands import SystemWriteTransaction
-from app.modules.system.domain.network_proxy import (
-    PROXY_SETTING_KEY,
-    NetworkProxy,
-    ProxyConnection,
-    ProxyPreset,
-    normalize_host,
-)
+from app.modules.system.application.network_proxy import StoredProxy
+from app.modules.system.domain.network_proxy import PROXY_SETTING_KEY, NetworkProxy
 
 from .settings import get_setting, upsert_setting
-
-
-class StoredConnection(BaseModel):
-    protocol: Literal["http", "socks5"]
-    host: str
-    port: int = Field(ge=1, le=65535)
-    username: str = ""
-    password: SecretStr | None = None
-
-    @field_validator("host")
-    @classmethod
-    def normalize(cls, value: str) -> str:
-        return normalize_host(value)
-
-
-class StoredProxy(BaseModel):
-    connection: StoredConnection | None = None
-    presets: list[ProxyPreset] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-
-    @field_validator("domains")
-    @classmethod
-    def normalize_domains(cls, values: list[str]) -> list[str]:
-        return list(
-            dict.fromkeys(normalize_host(domain) for domain in values if domain.strip())
-        )
-
-    def snapshot(self, previous_password: str = "") -> NetworkProxy:
-        connection = self.connection
-        proxy = (
-            None
-            if connection is None
-            else ProxyConnection(
-                connection.protocol,
-                connection.host,
-                connection.port,
-                connection.username,
-                connection.password.get_secret_value()
-                if connection.password is not None
-                else previous_password,
-            )
-        )
-        return NetworkProxy(
-            proxy, tuple(dict.fromkeys(self.presets)), tuple(self.domains)
-        )
 
 
 def read_network_proxy(db: Session) -> NetworkProxy:
@@ -91,8 +38,8 @@ def save_network_proxy(db: Session, requested: StoredProxy) -> NetworkProxy:
                     "username": connection.username,
                     "password": connection.password,
                 },
-                "presets": list(saved.presets),
-                "domains": list(saved.domains),
+                "presets": saved.presets,
+                "domains": saved.domains,
             },
         )
     return saved

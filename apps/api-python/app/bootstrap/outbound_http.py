@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.infrastructure.outbound_http import ProxyHTTPHandler, build_outbound_opener
-from app.modules.system.public import NetworkProxy, read_network_proxy
+from app.modules.system.infrastructure.network_proxy import read_network_proxy
+from app.modules.system.public import NetworkProxy
 
 _sessions: ContextVar[Callable[[], Session]] = ContextVar(
     "outbound_http_sessions", default=SessionLocal

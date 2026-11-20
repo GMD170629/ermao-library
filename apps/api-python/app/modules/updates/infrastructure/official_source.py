@@ -98,6 +98,7 @@ class OfficialHTTP:
             with opener.open(request, timeout=10) as response:
                 yield from download_chunks(response, limit, deadline)
         except (OSError, http.client.HTTPException) as error:
+            capture_exception(error, persist=False)
             raise download_failure(error) from error
 
 
