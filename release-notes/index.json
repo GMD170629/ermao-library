@@ -3,6 +3,13 @@
   "repository": "GMD170629/ermao-library",
   "releases": [
     {
+      "version": "1.6.4",
+      "tag": "v1.6.4",
+      "publishedAt": "2026-11-20T07:25:39Z",
+      "notesPath": "v1.6.4.md",
+      "releaseUrl": "https://github.com/GMD170629/ermao-library/releases/tag/v1.6.4"
+    },
+    {
       "version": "1.6.3",
       "tag": "v1.6.3",
       "publishedAt": "2026-11-04T14:28:00Z",

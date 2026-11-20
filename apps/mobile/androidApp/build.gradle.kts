@@ -15,8 +15,8 @@ android {
         applicationId = "com.ermao.library"
         minSdk = libs.versions.android.min.sdk.get().toInt()
         targetSdk = libs.versions.android.target.sdk.get().toInt()
-        versionCode = 17
-        versionName = "1.6.3"
+        versionCode = 18
+        versionName = "1.6.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
